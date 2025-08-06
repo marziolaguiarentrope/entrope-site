@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Entrope - AI-Powered Workflows on WhatsApp for SMBs</title>
+    <title>Entrope - Custom WhatsApp Automations, Built For You</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -20,9 +20,6 @@
         .hero-gradient {
             background: radial-gradient(circle at top, rgba(219, 234, 254, 0.7), transparent 70%); /* light blue-100 to transparent */
         }
-        .whatsapp-icon-gradient {
-            background: linear-gradient(135deg, #25D366, #128C7E);
-        }
         .cta-button {
             transition: all 0.3s ease;
         }
@@ -30,18 +27,12 @@
             transform: translateY(-2px);
             box-shadow: 0 10px 15px -3px rgba(37, 99, 235, 0.2), 0 4px 6px -2px rgba(37, 99, 235, 0.1);
         }
-        .feature-card {
+        .step-card, .testimonial-card, .faq-item {
             transition: all 0.3s ease;
-            border: 1px solid #e2e8f0; /* slate-200 */
         }
-        .feature-card:hover {
+        .step-card:hover, .testimonial-card:hover {
             transform: translateY(-4px);
-            border-color: #2563EB; /* Brand Blue */
             box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
-        }
-        .idea-card {
-            border: 1px solid #e2e8f0;
-            transition: all 0.3s ease;
         }
         .loader {
             border: 4px solid #f3f3f3; /* Light grey */
@@ -55,6 +46,18 @@
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
         }
+        .json-preview {
+            background-color: #1e293b; /* slate-800 */
+            color: #e2e8f0; /* slate-200 */
+            border-radius: 0.5rem;
+            padding: 1rem;
+            font-family: monospace;
+            white-space: pre-wrap;
+            text-align: left;
+        }
+        .whatsapp-icon-gradient {
+            background: linear-gradient(135deg, #25D366, #128C7E);
+        }
     </style>
 </head>
 <body class="text-slate-700">
@@ -62,35 +65,28 @@
     <!-- Header -->
     <header class="bg-white/80 backdrop-blur-lg fixed top-0 left-0 right-0 z-50 border-b border-slate-200">
         <div class="container mx-auto px-6 py-4 flex justify-between items-center">
-            <a href="#" class="flex items-center pl-4 md:pl-6 gap-4">
-              <div class="h-8 w-auto">
-                <img src="logo-empresa.png" alt="Logo da Entrope" class="h-full w-auto object-contain">
-              </div>
+            <a href="#" class="flex items-center gap-3 text-2xl font-bold text-slate-800">
+                <img src="logo empresa (4).png" alt="Entrope Logo" class="h-10 w-auto">
+                <span class="font-extrabold text-2xl tracking-tight brand-blue">Entrope</span>
             </a>
-
 
             <nav class="hidden md:flex items-center space-x-8">
                 <a href="#how-it-works" class="text-slate-600 hover:text-blue-600 transition">How It Works</a>
-                <a href="#use-cases" class="text-slate-600 hover:text-blue-600 transition">Use Cases</a>
-                <a href="#why-whatsapp" class="text-slate-600 hover:text-blue-600 transition">Why WhatsApp?</a>
-                 <a href="#ai-generator" class="text-slate-600 hover:text-blue-600 transition">AI Ideas</a>
+                <a href="#use-cases" class="text-slate-600 hover:text-blue-600 transition">Solutions</a>
+                <a href="#ai-generator" class="text-slate-600 hover:text-blue-600 transition">Get a Preview</a>
+                <a href="#faq" class="text-slate-600 hover:text-blue-600 transition">FAQs</a>
             </nav>
-            <a href="#contact" class="bg-brand-blue text-white font-semibold px-5 py-2.5 rounded-lg cta-button hidden md:inline-block">
-                Get Your Workflow
-            </a>
+            <a href="#contact" class="bg-brand-blue text-white font-semibold px-5 py-2.5 rounded-lg cta-button hidden md:inline-block">Get a Free Proposal</a>
             <button id="mobile-menu-button" class="md:hidden p-2 rounded-md text-slate-600 hover:bg-slate-100">
                 <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="6" y2="6"/><line x1="4" x2="20" y1="18" y2="18"/></svg>
             </button>
         </div>
-        <!-- Mobile Menu -->
         <div id="mobile-menu" class="hidden md:hidden px-6 pb-4 border-t border-slate-200">
              <a href="#how-it-works" class="block py-2 text-slate-600 hover:text-blue-600">How It Works</a>
-             <a href="#use-cases" class="block py-2 text-slate-600 hover:text-blue-600">Use Cases</a>
-             <a href="#why-whatsapp" class="block py-2 text-slate-600 hover:text-blue-600">Why WhatsApp?</a>
-             <a href="#ai-generator" class="block py-2 text-slate-600 hover:text-blue-600">AI Ideas</a>
-             <a href="#contact" class="mt-4 block w-full text-center bg-brand-blue text-white font-semibold px-5 py-2.5 rounded-lg cta-button">
-                Get Your Workflow
-            </a>
+             <a href="#use-cases" class="block py-2 text-slate-600 hover:text-blue-600">Solutions</a>
+             <a href="#ai-generator" class="block py-2 text-slate-600 hover:text-blue-600">Get a Preview</a>
+             <a href="#faq" class="block py-2 text-slate-600 hover:text-blue-600">FAQs</a>
+             <a href="#contact" class="mt-4 block w-full text-center bg-brand-blue text-white font-semibold px-5 py-2.5 rounded-lg cta-button">Get a Free Proposal</a>
         </div>
     </header>
 
@@ -100,129 +96,55 @@
             <div class="hero-gradient absolute inset-0"></div>
             <div class="container mx-auto px-6 text-center relative z-10">
                 <h1 class="text-4xl md:text-6xl font-extrabold text-slate-900 leading-tight mb-4">
-                    Put Your Business on Autopilot with <span class="brand-blue">AI on WhatsApp</span>.
+                    Effortless WhatsApp Automation, <span class="brand-blue">Custom-Built for Your Business.</span>
                 </h1>
                 <p class="max-w-3xl mx-auto text-lg md:text-xl text-slate-600 mb-8">
-                    Entrope delivers pre-built, intelligent workflows that run directly on WhatsApp. Automate tasks, engage customers, and grow your business—no coding required.
+                    You describe the challenge. Our n8n specialists design, build, and deploy a seamless workflow that saves you time and drives revenue. No DIY, no headaches.
                 </p>
                 <a href="#contact" class="bg-brand-blue text-white font-bold px-8 py-4 rounded-lg text-lg cta-button inline-block">
-                    Explore AI Workflows
+                    Get a Free Proposal
                 </a>
             </div>
         </section>
 
-        <!-- How It Works Section -->
-        <section id="how-it-works" class="py-20 bg-white">
-            <div class="container mx-auto px-6">
-                <div class="text-center mb-16">
-                    <h2 class="text-3xl md:text-4xl font-bold text-slate-800">Simple to Set Up, Powerful to Use</h2>
-                    <p class="text-lg text-slate-500 mt-2 max-w-2xl mx-auto">Get your AI workflow running in three simple steps.</p>
-                </div>
-                <div class="grid md:grid-cols-3 gap-8 md:gap-12 text-center">
-                    <!-- Step 1 -->
-                    <div class="flex flex-col items-center">
-                        <div class="bg-blue-100 text-blue-600 w-16 h-16 rounded-full flex items-center justify-center text-2xl font-bold mb-4">1</div>
-                        <h3 class="text-xl font-semibold text-slate-800 mb-2">Choose Your Workflow</h3>
-                        <p class="text-slate-500">Browse our library of pre-built solutions and select the one that fits your business needs, from customer support to sales automation.</p>
-                    </div>
-                    <!-- Step 2 -->
-                    <div class="flex flex-col items-center">
-                        <div class="bg-blue-100 text-blue-600 w-16 h-16 rounded-full flex items-center justify-center text-2xl font-bold mb-4">2</div>
-                        <h3 class="text-xl font-semibold text-slate-800 mb-2">Receive Your Package</h3>
-                        <p class="text-slate-500">We send you everything: all the necessary files and a clear, step-by-step manual for a seamless, do-it-yourself implementation.</p>
-                    </div>
-                    <!-- Step 3 -->
-                    <div class="flex flex-col items-center">
-                        <div class="bg-blue-100 text-blue-600 w-16 h-16 rounded-full flex items-center justify-center text-2xl font-bold mb-4">3</div>
-                        <h3 class="text-xl font-semibold text-slate-800 mb-2">Launch & Automate</h3>
-                        <p class="text-slate-500">Follow the guide to activate your workflow. Instantly start managing tasks and conversations through your business WhatsApp account.</p>
-                    </div>
-                </div>
-                 <div class="text-center mt-12">
-                    <p class="text-slate-500 italic">Need a hand? Optional setup assistance is always available.</p>
-                </div>
-            </div>
-        </section>
-
-        <!-- Use Cases Section -->
-        <section id="use-cases" class="py-20">
-            <div class="container mx-auto px-6">
-                <div class="text-center mb-16">
-                    <h2 class="text-3xl md:text-4xl font-bold text-slate-800">Solve Real Problems, Instantly</h2>
-                    <p class="text-lg text-slate-500 mt-2 max-w-2xl mx-auto">Discover how our AI workflows can transform your daily operations.</p>
-                </div>
-                <div class="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
-                    <!-- Use Case Cards -->
-                    <div class="bg-white p-8 rounded-xl shadow-sm feature-card">
-                        <div class="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center mb-4"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-blue-600"><rect width="18" height="18" x="3" y="4" rx="2" ry="2"/><line x1="16" x2="16" y1="2" y2="6"/><line x1="8" x2="8" y1="2" y2="6"/><line x1="3" x2="21" y1="10" y2="10"/></svg></div>
-                        <h3 class="text-xl font-semibold text-slate-800 mb-2">Automated Appointment Booking</h3>
-                        <p class="text-slate-500">Let an AI agent handle scheduling 24/7. It checks your availability, books appointments, and sends confirmations directly in WhatsApp.</p>
-                    </div>
-                    <div class="bg-white p-8 rounded-xl shadow-sm feature-card">
-                        <div class="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center mb-4"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-blue-600"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"/><path d="M19 10c0 1.5-2.24 5-7 5s-7-3.5-7-5 2.24-5 7-5 7 3.5 7 5Z"/></svg></div>
-                        <h3 class="text-xl font-semibold text-slate-800 mb-2">Instant Customer Support</h3>
-                        <p class="text-slate-500">Provide immediate answers to frequently asked questions. Your AI can handle queries about hours, services, or policies, freeing up your team.</p>
-                    </div>
-                    <div class="bg-white p-8 rounded-xl shadow-sm feature-card">
-                        <div class="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center mb-4"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-blue-600"><path d="M15 10h.01"/><path d="M12 10h.01"/><path d="M9 10h.01"/><path d="M17.92 14.08a9.04 9.04 0 1 0-11.84 0"/><path d="M22 16.5l-1.5-1.5"/><path d="m22 22-5-5"/><path d="M2 7.5l1.5 1.5"/><path d="m2 2 5 5"/></svg></div>
-                        <h3 class="text-xl font-semibold text-slate-800 mb-2">Lead Qualification Bot</h3>
-                        <p class="text-slate-500">Automatically engage potential customers who message you. The AI asks qualifying questions and gathers contact info for your sales team to follow up.</p>
-                    </div>
-                    <div class="bg-white p-8 rounded-xl shadow-sm feature-card">
-                         <div class="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center mb-4"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-blue-600"><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4Z"/><path d="M3 6h18"/><path d="M16 10a4 4 0 0 1-8 0"/></svg></div>
-                        <h3 class="text-xl font-semibold text-slate-800 mb-2">Order Status & Updates</h3>
-                        <p class="text-slate-500">Give customers the power to check their order status on-demand. The AI provides real-time updates without any human intervention needed.</p>
-                    </div>
-                    <div class="bg-white p-8 rounded-xl shadow-sm feature-card">
-                         <div class="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center mb-4"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-blue-600"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></div>
-                        <h3 class="text-xl font-semibold text-slate-800 mb-2">Feedback Collection</h3>
-                        <p class="text-slate-500">Automatically send follow-up messages after a service or purchase to collect valuable customer feedback and reviews through a simple conversation.</p>
-                    </div>
-                    <div class="bg-white p-8 rounded-xl shadow-sm feature-card">
-                         <div class="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center mb-4"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-blue-600"><path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"/><path d="M12 12v9"/><path d="m8 17 4 4 4-4"/></svg></div>
-                        <h3 class="text-xl font-semibold text-slate-800 mb-2">Internal Task Automation</h3>
-                        <p class="text-slate-500">Use WhatsApp for internal teams. Let employees request time off, submit expense reports, or get IT help through a dedicated internal agent.</p>
-                    </div>
-                </div>
-            </div>
-        </section>
-
-        <!-- Why WhatsApp Section -->
+        <!-- Why WhatsApp Section (Replaces Social Proof) -->
         <section id="why-whatsapp" class="py-20 bg-white">
             <div class="container mx-auto px-6">
                 <div class="grid md:grid-cols-2 gap-12 items-center">
                     <div class="pr-0 md:pr-12">
                         <h2 class="text-3xl md:text-4xl font-bold text-slate-800 mb-4">Meet Your Customers Where They Are</h2>
                         <p class="text-lg text-slate-600 mb-6">Email is crowded and apps get deleted. WhatsApp is the world's most popular messaging app, making it the perfect channel for business communication. It's direct, personal, and highly effective.</p>
-                        <div class="space-y-4">
+                        <div class="space-y-6">
                             <div class="flex items-start">
-                                <div class="flex-shrink-0 w-6 h-6 bg-emerald-500 text-white rounded-full flex items-center justify-center mr-3 mt-1"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></div>
+                                <div class="flex-shrink-0 w-6 h-6 bg-emerald-500 text-white rounded-full flex items-center justify-center mr-4 mt-1"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></div>
                                 <div>
-                                    <h4 class="font-semibold text-slate-800">Unmatched Engagement</h4>
-                                    <p class="text-slate-500">Messages on WhatsApp have open rates of over 90%—far surpassing email and other channels.</p>
+                                    <h4 class="font-semibold text-slate-800 text-lg">Unmatched Engagement</h4>
+                                    <p class="text-slate-500">Messages on WhatsApp have open rates of over 90%—far surpassing any other channel and ensuring your communication is seen.</p>
                                 </div>
                             </div>
                             <div class="flex items-start">
-                                <div class="flex-shrink-0 w-6 h-6 bg-emerald-500 text-white rounded-full flex items-center justify-center mr-3 mt-1"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></div>
+                                <div class="flex-shrink-0 w-6 h-6 bg-emerald-500 text-white rounded-full flex items-center justify-center mr-4 mt-1"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></div>
                                 <div>
-                                    <h4 class="font-semibold text-slate-800">Global Reach, Local Feel</h4>
-                                    <p class="text-slate-500">Essential in markets across Europe, Latin America, and Asia, and growing rapidly in the U.S. for business.</p>
+                                    <h4 class="font-semibold text-slate-800 text-lg">Global Reach, Local Feel</h4>
+                                    <p class="text-slate-500">Communicate with customers in a familiar, trusted environment, whether they're local or across the globe.</p>
                                 </div>
                             </div>
                              <div class="flex items-start">
-                                <div class="flex-shrink-0 w-6 h-6 bg-emerald-500 text-white rounded-full flex items-center justify-center mr-3 mt-1"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></div>
+                                <div class="flex-shrink-0 w-6 h-6 bg-emerald-500 text-white rounded-full flex items-center justify-center mr-4 mt-1"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></div>
                                 <div>
-                                    <h4 class="font-semibold text-slate-800">No New App to Learn</h4>
-                                    <p class="text-slate-500">Your customers and employees already use it. This eliminates friction and makes adoption effortless.</p>
+                                    <h4 class="font-semibold text-slate-800 text-lg">No New App to Learn</h4>
+                                    <p class="text-slate-500">Your customers and employees already use it. This eliminates friction and makes adoption effortless for everyone.</p>
                                 </div>
                             </div>
                         </div>
                     </div>
-                    <div class="bg-slate-100 p-8 rounded-xl flex items-center justify-center">
+                    <div class="bg-slate-100 p-8 rounded-xl flex items-center justify-center mt-12 md:mt-0">
                         <div class="w-full max-w-sm">
                             <div class="bg-white rounded-2xl shadow-lg p-4">
                                 <div class="flex items-center mb-3">
-                                    <div class="w-12 h-12 rounded-full whatsapp-icon-gradient flex items-center justify-center text-white mr-3"><svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="currentColor"><path d="M19.004 4.998a9.855 9.855 0 0 0-13.932 0 9.855 9.855 0 0 0 0 13.932l-.002.002 2.115 2.115 2.483-.73.013-.004.126-.037a9.852 9.852 0 0 0 13.932-13.932l.002-.002-2.115-2.115-2.483.73-.013.004-.126.037Zm-5.468 11.123c-.267.733-1.072 1.253-1.954 1.32-.91.07-1.78-.2-2.464-.884-.684-.684-1.122-1.57-1.192-2.48-.07-.908.2-1.78.885-2.464.684-.684 1.57-1.122 2.48-1.192.908-.07 1.78.2 2.464.885.684.684 1.122 1.57 1.192 2.48.07.908-.2 1.78-.885 2.464l.002.002Zm-3.131-1.448c.363.363.85.564 1.36.564.51 0 .997-.201 1.36-.564.363-.363.564-.85.564-1.36s-.201-.997-.564-1.36c-.363-.363-.85-.564-1.36-.564-.51 0-.997.201-1.36.564-.363.363-.564.85-.564 1.36s.201.997.564 1.36Z"/></svg></div>
+                                    <div class="w-12 h-12 rounded-full whatsapp-icon-gradient flex items-center justify-center text-white mr-3 flex-shrink-0">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.486 2 2 6.486 2 12c0 1.962.571 3.801 1.583 5.336L2.057 22l4.806-1.524A9.923 9.923 0 0 0 12 22c5.514 0 10-4.486 10-10S17.514 2 12 2zm4.335 12.213c-.179.289-.666.573-1.088.683-.41.106-.82.158-1.228-.053-.407-.211-1.073-.505-1.996-1.228-.923-.723-1.525-1.616-1.791-2.034-.266-.418-.018-.64.195-.853.212-.212.41-.318.56-.53.15-.212.075-.424-.027-.636-.101-.212-.875-2.106-1.201-2.817-.327-.71-.654-.604-.875-.604-.221 0-.41.053-.602.053-.193 0-.487.079-.73.373-.242.294-.973.944-.973 2.309s.997 2.684 1.125 2.864c.128.181 1.965 3.008 4.768 4.223 2.803 1.215 2.803.81 3.308.757.505-.053.973-.212 1.125-.424.152-.212.152-.424.101-.636-.051-.212-.178-.318-.357-.604z"/></svg>
+                                    </div>
                                     <div>
                                         <p class="font-bold text-slate-800">Entrope Bot</p>
                                         <p class="text-sm text-emerald-600">online</p>
@@ -240,50 +162,185 @@
             </div>
         </section>
 
-        <!-- AI Idea Generator Section -->
-        <section id="ai-generator" class="py-20">
+        <!-- How It Works Section -->
+        <section id="how-it-works" class="py-20 bg-slate-50">
             <div class="container mx-auto px-6">
-                <div class="bg-white rounded-2xl shadow-lg p-8 md:p-16 text-center">
-                    <h2 class="text-3xl md:text-4xl font-bold text-slate-800">Don't Know Where to Start?</h2>
-                    <p class="text-lg text-slate-500 mt-3 mb-8 max-w-2xl mx-auto">Describe your business or a problem you're facing, and let our AI generate workflow ideas tailored for you.</p>
-                    
-                    <form id="idea-generator-form" class="max-w-xl mx-auto">
-                        <div class="flex flex-col sm:flex-row gap-4">
-                            <input id="business-description" type="text" placeholder="e.g., a busy hair salon, managing online orders" class="w-full p-4 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-400" required>
-                            <button type="submit" class="bg-brand-blue text-white font-bold px-6 py-4 rounded-lg cta-button flex-shrink-0">
-                                ✨ Generate Ideas
-                            </button>
-                        </div>
-                    </form>
-
-                    <div id="loader" class="hidden mx-auto mt-8"></div>
-                    <div id="error-message" class="hidden mt-6 text-lg text-red-600 font-semibold"></div>
-                    <div id="idea-results" class="mt-12 grid md:grid-cols-3 gap-8 text-left">
-                        <!-- AI Generated Ideas will be injected here -->
+                <div class="text-center mb-16">
+                    <h2 class="text-3xl md:text-4xl font-bold text-slate-800">Your Idea, Built by Experts</h2>
+                    <p class="text-lg text-slate-500 mt-2 max-w-2xl mx-auto">We handle the entire process from concept to a fully functional workflow. It’s automation, done for you.</p>
+                </div>
+                <div class="grid md:grid-cols-3 gap-8 md:gap-12 text-center">
+                    <div class="flex flex-col items-center bg-white p-8 rounded-xl step-card border">
+                        <div class="bg-blue-100 text-blue-600 w-16 h-16 rounded-full flex items-center justify-center text-2xl font-bold mb-4">1</div>
+                        <h3 class="text-xl font-semibold text-slate-800 mb-2">You Share Your Goal</h3>
+                        <p class="text-slate-500">Tell us what you want to achieve. We'll consult with you to understand the requirements, tools, and desired outcomes.</p>
+                    </div>
+                    <div class="flex flex-col items-center bg-white p-8 rounded-xl step-card border">
+                        <div class="bg-blue-100 text-blue-600 w-16 h-16 rounded-full flex items-center justify-center text-2xl font-bold mb-4">2</div>
+                        <h3 class="text-xl font-semibold text-slate-800 mb-2">We Design & Build</h3>
+                        <p class="text-slate-500">Our certified n8n specialists architect and build a robust, scalable workflow tailored to your exact specifications.</p>
+                    </div>
+                    <div class="flex flex-col items-center bg-white p-8 rounded-xl step-card border">
+                        <div class="bg-blue-100 text-blue-600 w-16 h-16 rounded-full flex items-center justify-center text-2xl font-bold mb-4">3</div>
+                        <h3 class="text-xl font-semibold text-slate-800 mb-2">We Deliver & Support</h3>
+                        <p class="text-slate-500">We deliver your production-ready automation, provide comprehensive documentation, and offer ongoing support.</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+        
+        <!-- Use Cases Section -->
+        <section id="use-cases" class="py-20 bg-white">
+            <div class="container mx-auto px-6">
+                <div class="text-center mb-16">
+                    <h2 class="text-3xl md:text-4xl font-bold text-slate-800">Unlock Your Business Potential</h2>
+                    <p class="text-lg text-slate-500 mt-2 max-w-2xl mx-auto">From sales to support, we build automations that solve your most critical business challenges.</p>
+                </div>
+                <div class="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
+                    <div class="bg-slate-50 p-8 rounded-xl">
+                        <h3 class="text-xl font-semibold text-slate-800 mb-2">Automated Lead Funnels</h3>
+                        <p class="text-slate-500 mb-4">Instantly engage, qualify, and route new leads from WhatsApp to your CRM, notifying your sales team in real-time.</p>
+                        <span class="text-sm font-semibold text-blue-600">Popular Integrations: HubSpot, Salesforce, Slack</span>
+                    </div>
+                    <div class="bg-slate-50 p-8 rounded-xl">
+                        <h3 class="text-xl font-semibold text-slate-800 mb-2">Proactive Customer Support</h3>
+                        <p class="text-slate-500 mb-4">Provide 24/7 support by answering FAQs, creating help desk tickets, and escalating complex issues to human agents.</p>
+                         <span class="text-sm font-semibold text-blue-600">Popular Integrations: Zendesk, Intercom, Gmail</span>
+                    </div>
+                    <div class="bg-slate-50 p-8 rounded-xl">
+                        <h3 class="text-xl font-semibold text-slate-800 mb-2">Seamless Order Management</h3>
+                        <p class="text-slate-500 mb-4">Allow customers to check order status, receive shipping updates, and process returns directly within WhatsApp.</p>
+                         <span class="text-sm font-semibold text-blue-600">Popular Integrations: Shopify, WooCommerce, Google Sheets</span>
                     </div>
                 </div>
             </div>
         </section>
 
-        <!-- CTA / Contact Section -->
+        <!-- Testimonials Section -->
+        <section id="testimonials" class="py-20 bg-slate-50">
+            <div class="container mx-auto px-6">
+                <div class="text-center mb-16">
+                    <h2 class="text-3xl md:text-4xl font-bold text-slate-800">Don't Just Take Our Word For It</h2>
+                </div>
+                <div class="grid md:grid-cols-2 gap-8">
+                    <div class="bg-white p-8 rounded-xl shadow-sm testimonial-card border">
+                        <p class="text-slate-600 text-lg mb-6">"Entrope delivered a workflow that saves our sales team over 10 hours a week. Their process was clear, fast, and the result was flawless. It's the best investment we've made this year."</p>
+                        <div class="flex items-center">
+                            <img src="https://placehold.co/48x48/E0E7FF/4338CA?text=JS" alt="John Smith" class="w-12 h-12 rounded-full mr-4">
+                            <div>
+                                <p class="font-semibold text-slate-800">John Smith</p>
+                                <p class="text-slate-500">Head of Sales, InnovateCorp</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="bg-white p-8 rounded-xl shadow-sm testimonial-card border">
+                        <p class="text-slate-600 text-lg mb-6">"We needed a complex, multi-step support automation. The Entrope team understood our needs perfectly and built a solution that exceeded our expectations. Highly recommended for any business serious about automation."</p>
+                        <div class="flex items-center">
+                            <img src="https://placehold.co/48x48/E0E7FF/4338CA?text=AD" alt="Alisha D." class="w-12 h-12 rounded-full mr-4">
+                            <div>
+                                <p class="font-semibold text-slate-800">Alisha D'souza</p>
+                                <p class="text-slate-500">Operations Manager, QuantumLeap</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- AI Idea Generator Section -->
+        <section id="ai-generator" class="py-20 bg-white">
+            <div class="container mx-auto px-6">
+                <div class="bg-slate-50 rounded-2xl p-8 md:p-16 text-center border">
+                    <h2 class="text-3xl md:text-4xl font-bold text-slate-800">Visualize Your Workflow in Seconds</h2>
+                    <p class="text-lg text-slate-500 mt-3 mb-8 max-w-2xl mx-auto">Get a feel for how automation works. Describe a task, and our AI will generate a conceptual workflow. This is just the starting point for your custom-built solution.</p>
+                    
+                    <form id="idea-generator-form" class="max-w-xl mx-auto">
+                        <div class="flex flex-col sm:flex-row gap-4">
+                            <input id="business-description" type="text" placeholder="e.g., 'qualify new leads from my website'" class="w-full p-4 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-400" required>
+                            <button type="submit" class="bg-brand-blue text-white font-bold px-6 py-4 rounded-lg cta-button flex-shrink-0">✨ Generate Conceptual Preview</button>
+                        </div>
+                    </form>
+
+                    <div id="loader" class="hidden mx-auto mt-8"></div>
+                    <div id="error-message" class="hidden mt-6 text-lg text-red-600 font-semibold"></div>
+                    
+                    <div id="idea-results-container" class="hidden mt-12 text-center">
+                        <pre id="json-result" class="json-preview"></pre>
+                        <div class="bg-blue-50 border-l-4 border-blue-500 text-blue-800 p-6 rounded-r-lg mt-8 max-w-3xl mx-auto text-left">
+                            <h3 class="font-bold text-xl mb-2">This is just a blueprint.</h3>
+                            <p class="text-lg">Our experts take this concept and build a robust, multi-step automation with the custom logic and integrations your business truly needs. Ready to build the real thing?</p>
+                        </div>
+                         <a href="#contact" class="bg-emerald-500 text-white font-bold px-8 py-4 rounded-lg text-lg cta-button inline-block mt-8">Get My Full Custom Proposal &rarr;</a>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- FAQ Section -->
+        <section id="faq" class="py-20">
+            <div class="container mx-auto px-6">
+                <div class="text-center mb-16">
+                    <h2 class="text-3xl md:text-4xl font-bold text-slate-800">Frequently Asked Questions</h2>
+                </div>
+                <div class="max-w-3xl mx-auto space-y-6">
+                    <details class="bg-white p-6 rounded-lg shadow-sm faq-item border cursor-pointer">
+                        <summary class="font-semibold text-lg text-slate-800">What is n8n and why do you use it?</summary>
+                        <p class="text-slate-600 mt-4">n8n is a powerful, open-source workflow automation tool. We use it because it's incredibly flexible and allows us to build virtually any automation, connect to thousands of apps, and host it securely, giving you full control and scalability.</p>
+                    </details>
+                    <details class="bg-white p-6 rounded-lg shadow-sm faq-item border cursor-pointer">
+                        <summary class="font-semibold text-lg text-slate-800">How does your pricing work?</summary>
+                        <p class="text-slate-600 mt-4">Our pricing is project-based. After you submit your requirements, we provide a detailed proposal with a fixed price for the entire build. This ensures transparency with no hidden fees. We also offer optional monthly support retainers.</p>
+                    </details>
+                    <details class="bg-white p-6 rounded-lg shadow-sm faq-item border cursor-pointer">
+                        <summary class="font-semibold text-lg text-slate-800">How long does it take to build a custom workflow?</summary>
+                        <p class="text-slate-600 mt-4">Timelines vary based on complexity, but most standard workflows are designed, built, and delivered within 2-4 weeks. We'll provide a precise timeline in your custom proposal.</p>
+                    </details>
+                     <details class="bg-white p-6 rounded-lg shadow-sm faq-item border cursor-pointer">
+                        <summary class="font-semibold text-lg text-slate-800">What if I need changes or updates later?</summary>
+                        <p class="text-slate-600 mt-4">We build our workflows to be maintainable. We can make updates for you on an hourly basis, or you can sign up for one of our support packages for ongoing peace of mind and proactive maintenance.</p>
+                    </details>
+                </div>
+            </div>
+        </section>
+
+        <!-- CTA / Detailed Contact Section -->
         <section id="contact" class="py-20 bg-slate-100">
             <div class="container mx-auto px-6">
                 <div class="bg-white rounded-2xl shadow-lg p-8 md:p-16 text-center">
-                    <h2 class="text-3xl md:text-4xl font-bold text-slate-800">Ready to Automate Your Business?</h2>
-                    <p class="text-lg text-slate-500 mt-3 mb-8 max-w-2xl mx-auto">Tell us about your needs, and we'll help you find the perfect AI workflow. Get started today and see the difference automation can make.</p>
+                    <h2 class="text-3xl md:text-4xl font-bold text-slate-800">Ready to Build Your Automation Engine?</h2>
+                    <p class="text-lg text-slate-500 mt-3 mb-8 max-w-2xl mx-auto">Fill out the form below. Our lead automation specialist will review your needs and contact you within 24 hours with a detailed proposal and transparent pricing.</p>
                     
-                    <form id="contact-form" class="max-w-xl mx-auto">
-                        <div class="grid sm:grid-cols-2 gap-4 mb-4">
-                            <input type="text" placeholder="Your Name" class="w-full p-3 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-400" required>
-                            <input type="email" placeholder="Work Email" class="w-full p-3 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-400" required>
+                    <form id="contact-form" class="max-w-xl mx-auto text-left">
+                        <div class="grid sm:grid-cols-2 gap-6 mb-6">
+                            <div>
+                                <label for="name" class="font-semibold text-slate-700 block mb-2">Your Name</label>
+                                <input id="name" type="text" placeholder="e.g., Jane Doe" class="w-full p-3 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-400" required>
+                            </div>
+                            <div>
+                                <label for="email" class="font-semibold text-slate-700 block mb-2">Work Email</label>
+                                <input id="email" type="email" placeholder="jane.doe@company.com" class="w-full p-3 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-400" required>
+                            </div>
                         </div>
-                        <textarea placeholder="Tell us what you want to automate..." rows="4" class="w-full p-3 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-400 mb-4" required></textarea>
-                        <button type="submit" class="w-full bg-brand-blue text-white font-bold px-8 py-4 rounded-lg text-lg cta-button">
-                            Request My Workflow
-                        </button>
+                         <div class="mb-6">
+                            <label for="goal" class="font-semibold text-slate-700 block mb-2">What is your primary goal?</label>
+                            <select id="goal" class="w-full p-3 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-400 bg-white" required>
+                                <option value="">Select an objective...</option>
+                                <option value="lead-qualification">Lead Qualification & Nurturing</option>
+                                <option value="customer-support">Automated Customer Support (FAQs)</option>
+                                <option value="appointment-booking">Appointment & Demo Booking</option>
+                                <option value="order-management">Order Management & Status Updates</option>
+                                <option value="internal-automation">Internal Team Automation (HR, IT)</option>
+                                <option value="other">Something else (please describe below)</option>
+                            </select>
+                        </div>
+                        <div class="mb-6">
+                             <label for="description" class="font-semibold text-slate-700 block mb-2">Describe your desired workflow</label>
+                            <textarea id="description" placeholder="Please be as detailed as possible. What triggers the workflow? What steps should it take? What information needs to be collected or sent?" rows="6" class="w-full p-3 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-400" required></textarea>
+                        </div>
+                        <button type="submit" class="w-full bg-brand-blue text-white font-bold px-8 py-4 rounded-lg text-lg cta-button">Build My Workflow</button>
                     </form>
                     <div id="form-success-message" class="hidden mt-6 text-lg text-emerald-700 font-semibold">
-                        Thank you! We've received your request and will be in touch shortly.
+                        Thank you! We've received your request and will be in touch with your custom proposal shortly.
                     </div>
                 </div>
             </div>
@@ -291,24 +348,28 @@
     </main>
 
     <!-- Footer -->
-    <footer class="bg-slate-800 text-slate-400 py-8">
+    <footer class="bg-slate-800 text-slate-400 py-12">
         <div class="container mx-auto px-6 text-center">
-            <p>&copy; 2025 Entrope. All rights reserved.</p>
-            <p class="text-sm mt-1">Simplifying Business Automation, One Conversation at a Time.</p>
+             <a href="#" class="flex items-center justify-center gap-2 text-2xl font-bold text-slate-200 mb-4">
+                <div class="w-8 h-8 flex items-center justify-center">
+                    <svg viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg" class="w-full h-full"><path d="M32 5H8C6.34315 5 5 6.34315 5 8V32C5 33.6569 6.34315 35 8 35H32C33.6569 35 35 33.6569 35 32V8C35 6.34315 33.6569 5 32 5Z" fill="#2563EB"/><path d="M30 11.6667H11.6667V17.5H25.8333C27.5471 17.5 29.1895 18.1583 30.3646 19.3335C31.5398 20.5086 32.198 22.151 32.198 23.8648C32.198 25.5786 31.5398 27.221 30.3646 28.3961C29.1895 29.5713 27.5471 30.2295 25.8333 30.2295H15C13.2862 30.2295 11.6439 29.5713 10.4687 28.3961C9.29355 27.221 8.63542 25.5786 8.63542 23.8648" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/><path d="M30 11.6667H11.6667V22.5H30" stroke="#2563EB" stroke-width="3"/></svg>
+                </div>
+                <span class="font-extrabold text-2xl tracking-tight text-white">NTROPE</span>
+            </a>
+            <p class="text-sm mt-1 mb-4">Simplifying Business Automation, One Conversation at a Time.</p>
+            <p class="text-xs text-slate-500">Built by Certified Automation Specialists.</p>
+            <p class="text-xs text-slate-500 mt-2">&copy; 2025 Entrope. All rights reserved.</p>
         </div>
     </footer>
 
     <script>
         // --- Standard Website Interactivity ---
-
-        // Mobile Menu Toggle
         const mobileMenuButton = document.getElementById('mobile-menu-button');
         const mobileMenu = document.getElementById('mobile-menu');
         mobileMenuButton.addEventListener('click', () => {
             mobileMenu.classList.toggle('hidden');
         });
 
-        // Smooth scroll for nav links
         document.querySelectorAll('a[href^="#"]').forEach(anchor => {
             anchor.addEventListener('click', function (e) {
                 e.preventDefault();
@@ -322,7 +383,6 @@
             });
         });
 
-        // Contact Form Submission
         const contactForm = document.getElementById('contact-form');
         const successMessage = document.getElementById('form-success-message');
         contactForm.addEventListener('submit', function(e) {
@@ -332,11 +392,11 @@
         });
 
         // --- Gemini API Idea Generator ---
-
         const ideaForm = document.getElementById('idea-generator-form');
         const businessDescriptionInput = document.getElementById('business-description');
         const loader = document.getElementById('loader');
-        const resultsContainer = document.getElementById('idea-results');
+        const resultsContainer = document.getElementById('idea-results-container');
+        const jsonResultEl = document.getElementById('json-result');
         const errorMessage = document.getElementById('error-message');
 
         ideaForm.addEventListener('submit', async function(e) {
@@ -344,47 +404,23 @@
             const description = businessDescriptionInput.value;
             if (!description.trim()) return;
 
-            // 1. Reset UI
-            resultsContainer.innerHTML = '';
+            resultsContainer.classList.add('hidden');
             errorMessage.classList.add('hidden');
             loader.classList.remove('hidden');
-            resultsContainer.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            loader.scrollIntoView({ behavior: 'smooth', block: 'center' });
 
             try {
-                // 2. Construct the prompt and payload for Gemini API
-                const prompt = `You are an expert business automation consultant specializing in WhatsApp workflows for small and medium-sized businesses. A potential client has described their business as: "${description}".
-
-                Generate three distinct, creative, and practical AI-powered workflow ideas that they could implement using WhatsApp. For each idea, provide a clear title, a brief description of how it works, and its key benefit.`;
+                const prompt = `Based on the user's request to automate "${description}", generate a simple, conceptual n8n workflow in JSON format. The JSON should have a "trigger" and an array of "steps". Each step should have a "node" (e.g., "WhatsApp", "AI Model", "Google Sheets") and an "action" (a simple description of what it does). Keep it to 3-5 steps. This is a basic preview to spark interest.`;
                 
                 let chatHistory = [{ role: "user", parts: [{ text: prompt }] }];
                 const payload = {
                     contents: chatHistory,
-                    generationConfig: {
-                        responseMimeType: "application/json",
-                        responseSchema: {
-                            type: "OBJECT",
-                            properties: {
-                                "workflows": {
-                                    "type": "ARRAY",
-                                    "items": {
-                                        "type": "OBJECT",
-                                        "properties": {
-                                            "workflowTitle": { "type": "STRING" },
-                                            "description": { "type": "STRING" },
-                                            "keyBenefit": { "type": "STRING" }
-                                        },
-                                        required: ["workflowTitle", "description", "keyBenefit"]
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    generationConfig: { responseMimeType: "application/json" }
                 };
 
-                const apiKey = ""; // API key is handled by the environment
+                const apiKey = ""; // Handled by environment
                 const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
 
-                // 3. Make the API call
                 const response = await fetch(apiUrl, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -396,48 +432,36 @@
                 }
                 
                 const result = await response.json();
-
-                // 4. Process and display the results
-                if (result.candidates && result.candidates.length > 0 &&
-                    result.candidates[0].content && result.candidates[0].content.parts &&
-                    result.candidates[0].content.parts.length > 0) {
-                    
+                
+                if (result.candidates && result.candidates[0]?.content?.parts?.[0]) {
                     const jsonText = result.candidates[0].content.parts[0].text;
-                    const data = JSON.parse(jsonText);
-
-                    if (data.workflows && data.workflows.length > 0) {
-                        displayIdeas(data.workflows);
-                    } else {
-                        throw new Error("No workflow ideas were generated.");
-                    }
+                    displayJsonPreview(jsonText);
                 } else {
                     throw new Error("The AI returned an unexpected response format.");
                 }
 
             } catch (error) {
                 console.error("Error generating ideas:", error);
-                errorMessage.textContent = `Sorry, we couldn't generate ideas at this moment. Please try again. Error: ${error.message}`;
+                errorMessage.textContent = `Sorry, we couldn't generate a preview at this moment. Please try a different description or contact us directly.`;
                 errorMessage.classList.remove('hidden');
             } finally {
                 loader.classList.add('hidden');
             }
         });
 
-        function displayIdeas(ideas) {
-            resultsContainer.innerHTML = ''; // Clear previous results
-            ideas.forEach(idea => {
-                const card = document.createElement('div');
-                card.className = 'bg-slate-50 p-6 rounded-xl idea-card';
-                card.innerHTML = `
-                    <h3 class="text-xl font-semibold text-blue-700 mb-2">${idea.workflowTitle}</h3>
-                    <p class="text-slate-600 mb-3">${idea.description}</p>
-                    <p class="text-sm font-semibold text-slate-800"><strong>Key Benefit:</strong> ${idea.keyBenefit}</p>
-                `;
-                resultsContainer.appendChild(card);
-            });
+        function displayJsonPreview(jsonString) {
+            try {
+                const parsedJson = JSON.parse(jsonString);
+                jsonResultEl.textContent = JSON.stringify(parsedJson, null, 2);
+                resultsContainer.classList.remove('hidden');
+                resultsContainer.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            } catch (e) {
+                jsonResultEl.textContent = jsonString;
+                console.error("Failed to parse JSON from AI, displaying raw text.", e);
+                resultsContainer.classList.remove('hidden');
+                resultsContainer.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }
         }
-
     </script>
-
 </body>
 </html>
