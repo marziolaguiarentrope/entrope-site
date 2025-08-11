@@ -452,6 +452,9 @@
                     <div id="form-success-message" class="hidden mt-6 text-center text-emerald-400 font-semibold">
                         We've received your information. One of our specialists will be in touch shortly. Thank you!
                     </div>
+                    <div id="form-error-message" class="hidden mt-6 text-center text-red-400 font-semibold">
+                        Sorry, something went wrong while sending your message. Please try again in a moment.
+                    </div>
                 </div>
             </div>
         </section>
@@ -468,6 +471,9 @@
             <p class="text-xs text-slate-500 mt-2">&copy; 2025 Entrope. All rights reserved.</p>
         </div>
     </footer>
+
+    <!-- EmailJS SDK -->
+    <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
 
     <script>
         // --- Standard Website Interactivity ---
@@ -492,10 +498,47 @@
 
         const contactForm = document.getElementById('contact-form');
         const successMessage = document.getElementById('form-success-message');
-        contactForm.addEventListener('submit', function(e) {
+        const errorMessageBox = document.getElementById('form-error-message');
+
+        // ===== EmailJS CONFIG – PREENCHA AQUI =====
+        const EMAILJS_PUBLIC_KEY = 'YOUR_PUBLIC_KEY';
+        const EMAILJS_SERVICE_ID = 'YOUR_SERVICE_ID';
+        const EMAILJS_TEMPLATE_ID = 'YOUR_TEMPLATE_ID';
+        emailjs.init(EMAILJS_PUBLIC_KEY);
+
+        // Substitui o comportamento anterior para enviar via EmailJS e então mostrar a mensagem de sucesso
+        contactForm.addEventListener('submit', async function(e) {
             e.preventDefault();
-            contactForm.style.display = 'none';
-            successMessage.classList.remove('hidden');
+
+            // UI: estado carregando
+            const submitBtn = contactForm.querySelector('button[type="submit"]');
+            const defaultBtnText = submitBtn.textContent;
+            submitBtn.disabled = true;
+            submitBtn.textContent = 'Sending...';
+
+            // Monta os parâmetros conforme seu template do EmailJS
+            const templateParams = {
+                user_name: document.getElementById('name').value.trim(),
+                user_email: document.getElementById('email').value.trim(),
+                engagement_model: document.getElementById('interest-type').value,
+                message: document.getElementById('description').value.trim()
+            };
+
+            try {
+                await emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID, templateParams);
+
+                // Sucesso: esconde formulário e mostra confirmação (mantendo sua UX)
+                contactForm.style.display = 'none';
+                successMessage.classList.remove('hidden');
+                errorMessageBox.classList.add('hidden');
+            } catch (err) {
+                console.error('EmailJS error:', err);
+                errorMessageBox.classList.remove('hidden');
+            } finally {
+                // Restaura botão
+                submitBtn.disabled = false;
+                submitBtn.textContent = defaultBtnText;
+            }
         });
         
         // --- FAQ Accordion ---
@@ -529,7 +572,7 @@
         const jsonResultEl = document.getElementById('json-result');
         const errorMessage = document.getElementById('error-message');
 
-        ideaForm.addEventListener('submit', async function(e) {
+        ideaForm?.addEventListener('submit', async function(e) {
             e.preventDefault();
             const description = businessDescriptionInput.value;
             if (!description.trim()) return;
@@ -595,9 +638,3 @@
     </script>
 </body>
 </html>
-
-
-
-
-
-
