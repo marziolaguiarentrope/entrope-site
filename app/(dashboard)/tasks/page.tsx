@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { cn } from '@/lib/utils';
-import { api, Task, Escalation } from '@/lib/api';
+import { api, Task, Escalation, HotelOpportunity } from '@/lib/api';
 import { TaskDetail } from '@/components/task-detail';
 
 function timeAgo(dateString: string): string {
@@ -20,14 +20,12 @@ function timeAgo(dateString: string): string {
   return date.toLocaleDateString();
 }
 
-// TODO: Add tabs for hotel operations once backend endpoints exist:
-// - "Pending Payment" - hotel opportunities with payment_status in ('pending', 'awaiting_card')
-// - "Pending Cancel" - hotel opportunities with old_booking_status='active' + cancellation_capability='we_cancel'
-// Backend needs: GET /opportunities/hotels?payment_status=pending and GET /opportunities/hotels?pending_cancellation=true
 const tabs = [
-  { id: 'flight_reprice', label: 'Flight Reprice', capability: 'flight_reprice' },
-  { id: 'complete_booking', label: 'Complete Booking', capability: 'complete_booking_data' },
-  { id: 'escalations', label: 'Escalations', capability: null },
+  { id: 'flight_reprice', label: 'Flight Reprice', type: 'task', capability: 'flight_reprice' },
+  { id: 'complete_booking', label: 'Complete Booking', type: 'task', capability: 'complete_booking_data' },
+  { id: 'pending_payment', label: 'Pending Payment', type: 'hotel_opportunity' },
+  { id: 'pending_cancel', label: 'Pending Cancel', type: 'hotel_opportunity' },
+  { id: 'escalations', label: 'Escalations', type: 'escalation' },
 ] as const;
 
 type TabId = typeof tabs[number]['id'];
@@ -112,10 +110,68 @@ function EscalationRow({ escalation }: { escalation: Escalation }) {
   );
 }
 
+function HotelOpportunityRow({ opportunity, variant }: { opportunity: HotelOpportunity; variant: 'payment' | 'cancel' }) {
+  const formatDate = (dateStr: string | null) => {
+    if (!dateStr) return 'N/A';
+    return new Date(dateStr).toLocaleDateString();
+  };
+
+  const formatMoney = (amount: number | null, currency: string | null) => {
+    if (amount === null) return 'N/A';
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: currency || 'USD',
+    }).format(amount / 100); // Assuming amount is in cents
+  };
+
+  return (
+    <div className="flex items-center justify-between py-3 px-4 border-b border-border last:border-0 hover:bg-accent/50 transition-colors">
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-3">
+          <span className="text-sm font-medium truncate">
+            {opportunity.hotel_name || 'Unknown Hotel'}
+          </span>
+          {variant === 'payment' && opportunity.payment_status && (
+            <span className={cn(
+              'px-2 py-0.5 text-xs rounded',
+              opportunity.payment_status === 'pending' ? 'bg-yellow-500/20 text-yellow-400' : 'bg-orange-500/20 text-orange-400'
+            )}>
+              {opportunity.payment_status}
+            </span>
+          )}
+          {variant === 'cancel' && (
+            <span className="px-2 py-0.5 text-xs bg-red-500/20 text-red-400 rounded">
+              Pending Cancel
+            </span>
+          )}
+        </div>
+        <div className="text-xs text-muted-foreground mt-1">
+          {formatDate(opportunity.check_in)} - {formatDate(opportunity.check_out)}
+        </div>
+        {variant === 'payment' && (
+          <div className="text-xs text-muted-foreground mt-1">
+            {formatMoney(opportunity.payment_amount, opportunity.payment_currency)}
+            {opportunity.payment_due_at && ` · Due ${formatDate(opportunity.payment_due_at)}`}
+          </div>
+        )}
+      </div>
+      <div className="text-right">
+        <div className="text-xs text-muted-foreground">
+          {opportunity.status}
+        </div>
+        <div className="text-xs text-muted-foreground mt-1">
+          {timeAgo(opportunity.created_at)}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function TasksPage() {
   const [activeTab, setActiveTab] = useState<TabId>('flight_reprice');
   const [tasks, setTasks] = useState<Task[]>([]);
   const [escalations, setEscalations] = useState<Escalation[]>([]);
+  const [hotelOpportunities, setHotelOpportunities] = useState<HotelOpportunity[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
@@ -128,11 +184,22 @@ export default function TasksPage() {
       try {
         const tab = tabs.find(t => t.id === activeTab);
 
-        if (activeTab === 'escalations') {
+        if (tab?.type === 'escalation') {
           const response = await api.listEscalations({ limit: 50 });
           setEscalations(response.escalations);
           setTasks([]);
-        } else if (tab?.capability) {
+          setHotelOpportunities([]);
+        } else if (tab?.type === 'hotel_opportunity') {
+          if (activeTab === 'pending_payment') {
+            const response = await api.listHotelOpportunitiesPendingPayment({ limit: 50 });
+            setHotelOpportunities(response.opportunities);
+          } else if (activeTab === 'pending_cancel') {
+            const response = await api.listHotelOpportunitiesPendingCancel({ limit: 50 });
+            setHotelOpportunities(response.opportunities);
+          }
+          setTasks([]);
+          setEscalations([]);
+        } else if (tab?.type === 'task' && tab.capability) {
           const response = await api.listTasks({
             capability: tab.capability,
             status: 'pending',
@@ -140,6 +207,7 @@ export default function TasksPage() {
           });
           setTasks(response.tasks);
           setEscalations([]);
+          setHotelOpportunities([]);
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to fetch data');
@@ -197,6 +265,22 @@ export default function TasksPage() {
             <div>
               {escalations.map((escalation) => (
                 <EscalationRow key={escalation.id} escalation={escalation} />
+              ))}
+            </div>
+          )
+        ) : activeTab === 'pending_payment' || activeTab === 'pending_cancel' ? (
+          hotelOpportunities.length === 0 ? (
+            <div className="p-6 text-center text-muted-foreground">
+              No {activeTab === 'pending_payment' ? 'pending payments' : 'pending cancellations'} found
+            </div>
+          ) : (
+            <div>
+              {hotelOpportunities.map((opp) => (
+                <HotelOpportunityRow
+                  key={opp.id}
+                  opportunity={opp}
+                  variant={activeTab === 'pending_payment' ? 'payment' : 'cancel'}
+                />
               ))}
             </div>
           )

@@ -152,6 +152,54 @@ class ApiClient {
   async getMember(userId: string): Promise<MemberContext> {
     return this.fetch<MemberContext>(`/members/${userId}`);
   }
+
+  // Hotel Opportunities
+  async listHotelOpportunitiesPendingPayment(params?: {
+    limit?: number;
+    offset?: number;
+  }): Promise<HotelOpportunityListResponse> {
+    const searchParams = new URLSearchParams();
+    if (params?.limit) searchParams.set('limit', params.limit.toString());
+    if (params?.offset) searchParams.set('offset', params.offset.toString());
+
+    const query = searchParams.toString();
+    return this.fetch<HotelOpportunityListResponse>(`/hotel-opportunities/pending-payment${query ? `?${query}` : ''}`);
+  }
+
+  async listHotelOpportunitiesPendingCancel(params?: {
+    limit?: number;
+    offset?: number;
+  }): Promise<HotelOpportunityListResponse> {
+    const searchParams = new URLSearchParams();
+    if (params?.limit) searchParams.set('limit', params.limit.toString());
+    if (params?.offset) searchParams.set('offset', params.offset.toString());
+
+    const query = searchParams.toString();
+    return this.fetch<HotelOpportunityListResponse>(`/hotel-opportunities/pending-cancel${query ? `?${query}` : ''}`);
+  }
+}
+
+export interface HotelOpportunity {
+  id: string;
+  user_id: string;
+  status: string;
+  hotel_name: string | null;
+  check_in: string | null;
+  check_out: string | null;
+  payment_status: string | null;
+  payment_amount: number | null;
+  payment_currency: string | null;
+  payment_due_at: string | null;
+  old_booking_status: string | null;
+  cancellation_capability: string | null;
+  created_at: string;
+}
+
+export interface HotelOpportunityListResponse {
+  opportunities: HotelOpportunity[];
+  total: number;
+  limit: number;
+  offset: number;
 }
 
 export interface MemberSummary {
