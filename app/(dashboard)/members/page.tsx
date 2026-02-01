@@ -258,11 +258,9 @@ function MemberDetail({ member, context, onClose, loading, error }: {
   );
 }
 
-// TODO: Backend /members/ endpoint returns 500 - users service connection issue on staging
-// Once fixed, this page should work. May also need backend search param support.
 export default function MembersPage() {
   const [search, setSearch] = useState('');
-  const [members, setMembers] = useState<MemberSummary[]>([]);
+  const [member, setMember] = useState<MemberSummary | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hasSearched, setHasSearched] = useState(false);
@@ -279,21 +277,13 @@ export default function MembersPage() {
     setLoading(true);
     setError(null);
     setHasSearched(true);
+    setMember(null);
 
     try {
-      // Fetch all members and filter client-side
-      // TODO: Backend should support search param
-      const response = await api.listMembers({ limit: 100 });
-      const q = search.toLowerCase();
-      const filtered = response.members.filter(m =>
-        m.name?.toLowerCase().includes(q) ||
-        m.email?.toLowerCase().includes(q) ||
-        m.phone_number?.includes(q) ||
-        m.id.toLowerCase().includes(q)
-      );
-      setMembers(filtered);
+      const result = await api.searchMember(search.trim());
+      setMember(result);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to search members');
+      setError(err instanceof Error ? err.message : 'Failed to search member');
     } finally {
       setLoading(false);
     }
@@ -329,7 +319,7 @@ export default function MembersPage() {
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search by name, email, phone, or ID..."
+            placeholder="Search by email address..."
             className="flex-1 max-w-md px-4 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
           />
           <button
@@ -346,7 +336,7 @@ export default function MembersPage() {
       <div className="bg-card border border-border rounded-lg overflow-hidden">
         {!hasSearched ? (
           <div className="p-6 text-center text-muted-foreground">
-            Enter a search term to find members
+            Enter an email address to find a member
           </div>
         ) : loading ? (
           <div className="p-6 text-center text-muted-foreground">
@@ -356,20 +346,15 @@ export default function MembersPage() {
           <div className="p-6 text-center text-red-400">
             {error}
           </div>
-        ) : members.length === 0 ? (
+        ) : !member ? (
           <div className="p-6 text-center text-muted-foreground">
-            No members found for "{search}"
+            No member found for "{search}"
           </div>
         ) : (
-          <div>
-            {members.map((member) => (
-              <MemberRow
-                key={member.id}
-                member={member}
-                onClick={() => handleSelectMember(member)}
-              />
-            ))}
-          </div>
+          <MemberRow
+            member={member}
+            onClick={() => handleSelectMember(member)}
+          />
         )}
       </div>
 

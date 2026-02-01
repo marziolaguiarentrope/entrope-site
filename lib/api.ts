@@ -145,17 +145,8 @@ class ApiClient {
   }
 
   // Members
-  // Note: Backend doesn't support search param - filtering is done client-side
-  async listMembers(params?: {
-    skip?: number;
-    limit?: number;
-  }): Promise<MemberListResponse> {
-    const searchParams = new URLSearchParams();
-    if (params?.skip) searchParams.set('skip', params.skip.toString());
-    if (params?.limit) searchParams.set('limit', params.limit.toString());
-
-    const query = searchParams.toString();
-    return this.fetch<MemberListResponse>(`/members/${query ? `?${query}` : ''}`);
+  async searchMember(email: string): Promise<MemberSummary | null> {
+    return this.fetch<MemberSummary | null>(`/members/search?email=${encodeURIComponent(email)}`);
   }
 
   async getMember(userId: string): Promise<MemberContext> {
@@ -176,12 +167,6 @@ export interface MemberSummary {
   pending_opportunities: number;
 }
 
-export interface MemberListResponse {
-  members: MemberSummary[];
-  total: number;
-  skip: number;
-  limit: number;
-}
 
 // Full member context - structure from operator_context endpoint
 export interface MemberContext {
