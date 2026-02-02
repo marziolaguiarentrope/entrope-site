@@ -217,29 +217,245 @@ export interface MemberSummary {
 
 
 // Full member context - structure from operator_context endpoint
+
+export interface UserView {
+  primary_traveller_id: string;
+  first_name: string | null;
+  subscription_status: string; // PAYING, FREE, etc.
+  is_member: boolean;
+  credit_balance: number;
+  credit_currency: string;
+  total_savings: number;
+  auto_reprice_flights: boolean;
+  auto_reprice_hotels: boolean;
+  action_threshold_usd: number;
+  channels: string[]; // WHATSAPP, EMAIL, PUSH, SMS
+  timezone: string | null;
+  forwarding_email: string | null;
+  referral_code: string | null;
+}
+
+export interface UserContextView {
+  messages_sent_today: number;
+  messages_sent_this_week: number;
+  days_since_last_interaction: number;
+  last_message_sent_at: string | null;
+  last_message_received_at: string | null;
+  narrative: string | null;
+}
+
+export interface UserExtras {
+  id: string;
+  email: string | null;
+  phone: string | null;
+  created_at: string;
+  stripe_customer_id: string | null;
+  membership_expires_at: string | null;
+}
+
+export interface TravelerProfile {
+  id: string;
+  first_name: string | null;
+  last_name: string | null;
+  email: string | null;
+  phone: string | null;
+  date_of_birth: string | null;
+  gender: string | null;
+  known_traveler_number: string | null;
+  redress_number: string | null;
+  passport_number: string | null;
+  passport_expiry: string | null;
+  passport_country: string | null;
+  loyalty_programs: Record<string, string>;
+}
+
+export interface FlightLeg {
+  departure_airport: string;
+  arrival_airport: string;
+  departure_time: string;
+  arrival_time: string;
+  airline: string;
+  flight_number: string;
+  cabin_class: string | null;
+}
+
+export interface FlightBookingView {
+  confirmation_number: string | null;
+  booking_provider: string | null;
+  legs: FlightLeg[];
+  passengers: string[];
+  customer_price: number | null;
+  currency: string | null;
+  reprice_eligibility: string; // ELIGIBLE, INELIGIBLE
+  reprice_ineligible_reason: string | null;
+}
+
+export interface HotelBookingView {
+  confirmation_number: string | null;
+  booking_provider: string | null;
+  hotel_name: string | null;
+  hotel_id: string | null;
+  check_in_date: string | null;
+  check_out_date: string | null;
+  room_type: string | null;
+  guests: number | null;
+  customer_price: number | null;
+  currency: string | null;
+  refundability: string | null;
+  cancellation_deadline: string | null;
+  cancellation_capability: string | null;
+}
+
+export interface BookingView {
+  id: string;
+  type: string; // FLIGHT or HOTEL
+  status: string; // CONFIRMED, CANCELLED, etc.
+  agent: string; // AXEL or MEMBER
+  flight: FlightBookingView | null;
+  hotel: HotelBookingView | null;
+  created_at: string;
+}
+
+export interface TripView {
+  id: string;
+  status: string; // FUTURE, IN_PROGRESS, PAST
+  name: string | null;
+  destination: string | null;
+  purpose: string | null;
+  start_date: string | null;
+  end_date: string | null;
+  bookings: BookingView[];
+}
+
+export interface AirlineCreditView {
+  id: string;
+  airline: string;
+  amount: number;
+  currency: string;
+  expiry_date: string | null;
+  confirmation_number: string | null;
+  status: string;
+}
+
+export interface WatchView {
+  id: string;
+  watch_type: string;
+  status: string;
+  booking_id: string | null;
+  trip_id: string | null;
+  quote_request_id: string | null;
+  goal: string | null;
+  source: string | null;
+  priority: string | null;
+  created_at: string;
+  ended_at: string | null;
+  threshold_amount: number | null;
+  threshold_currency: string | null;
+}
+
+export interface FlightOpportunityView {
+  id: string;
+  status: string;
+  booking_id: string | null;
+  savings_amount: number | null;
+  savings_currency: string | null;
+  new_price: number | null;
+  old_price: number | null;
+  created_at: string;
+}
+
+export interface HotelOpportunityView {
+  id: string;
+  status: string;
+  booking_id: string | null;
+  hotel_name: string | null;
+  check_in: string | null;
+  check_out: string | null;
+  savings_amount: number | null;
+  savings_currency: string | null;
+  new_price: number | null;
+  old_price: number | null;
+  payment_status: string | null;
+  payment_amount: number | null;
+  payment_currency: string | null;
+  cancellation_capability: string | null;
+  created_at: string;
+}
+
+export interface CommunicationView {
+  id: string;
+  channel: string;
+  direction: string; // INBOUND, OUTBOUND
+  content: string;
+  created_at: string;
+}
+
+export interface PendingPaymentView {
+  id: string;
+  type: string;
+  amount: number;
+  currency: string;
+  status: string;
+  due_at: string | null;
+  booking_id: string | null;
+}
+
+export interface PendingTaskView {
+  id: string;
+  capability: string;
+  status: string;
+  priority: string;
+  created_at: string;
+}
+
+export interface EscalationSummary {
+  id: string;
+  type: string;
+  status: string;
+  reason: string;
+  created_at: string;
+  resolved_at: string | null;
+  resolved_by: string | null;
+}
+
+export interface PaymentRecord {
+  id: string;
+  type: string; // membership, booking
+  amount: number;
+  currency: string;
+  status: string;
+  created_at: string;
+  completed_at: string | null;
+  booking_id: string | null;
+  stripe_payment_intent_id: string | null;
+  failure_reason: string | null;
+}
+
+export interface ReferralStats {
+  referral_code: string;
+  total_referrals: number;
+  successful_referrals: number;
+  pending_referrals: number;
+  total_earnings: number;
+  earnings_currency: string;
+}
+
 export interface MemberContext {
-  user: unknown;
-  user_context: unknown;
-  user_extras: {
-    id: string;
-    email: string | null;
-    phone: string | null;
-    created_at: string;
-    stripe_customer_id: string | null;
-    membership_expires_at: string | null;
-  };
-  travellers: unknown[];
-  trips: unknown[];
-  airline_credits: unknown[];
-  watches: unknown[];
-  flight_opportunities: unknown[];
-  hotel_opportunities: unknown[];
-  communications: unknown[];
-  pending_payments: unknown[];
-  pending_tasks: unknown[];
-  escalations: unknown[];
-  payment_records: unknown[];
-  referral_stats: unknown;
+  user: UserView | null;
+  user_context: UserContextView | null;
+  user_extras: UserExtras;
+  travellers: TravelerProfile[];
+  trips: TripView[];
+  airline_credits: AirlineCreditView[];
+  watches: WatchView[];
+  flight_opportunities: FlightOpportunityView[];
+  hotel_opportunities: HotelOpportunityView[];
+  communications: CommunicationView[];
+  pending_payments: PendingPaymentView[];
+  pending_tasks: PendingTaskView[];
+  escalations: EscalationSummary[];
+  payment_records: PaymentRecord[];
+  referral_stats: ReferralStats | null;
 }
 
 export const api = new ApiClient(API_BASE);
