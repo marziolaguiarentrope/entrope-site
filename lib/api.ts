@@ -61,8 +61,6 @@ class ApiClient {
       ...options,
       headers: {
         'Content-Type': 'application/json',
-        // TODO: Add real auth token when OAuth is implemented
-        'Authorization': 'Bearer mock-token',
         ...options?.headers,
       },
     });

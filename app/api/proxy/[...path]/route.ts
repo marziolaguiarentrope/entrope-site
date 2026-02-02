@@ -1,11 +1,23 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { getServerSession } from 'next-auth';
 
 const API_BASE = 'https://staging-admin-gateway.onrender.com';
+
+async function getIdToken(): Promise<string | null> {
+  const session = await getServerSession();
+  // @ts-expect-error - idToken is added in our jwt callback
+  return session?.idToken ?? null;
+}
 
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ path: string[] }> }
 ) {
+  const idToken = await getIdToken();
+  if (!idToken) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
   const { path } = await params;
   const targetPath = '/' + path.join('/');
   const url = new URL(request.url);
@@ -13,7 +25,7 @@ export async function GET(
 
   const response = await fetch(`${API_BASE}${targetPath}${queryString}`, {
     headers: {
-      'Authorization': 'Bearer mock-token',
+      'Authorization': `Bearer ${idToken}`,
       'Content-Type': 'application/json',
     },
   });
@@ -26,6 +38,11 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ path: string[] }> }
 ) {
+  const idToken = await getIdToken();
+  if (!idToken) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
   const { path } = await params;
   const targetPath = '/' + path.join('/');
   const body = await request.text();
@@ -33,7 +50,7 @@ export async function POST(
   const response = await fetch(`${API_BASE}${targetPath}`, {
     method: 'POST',
     headers: {
-      'Authorization': 'Bearer mock-token',
+      'Authorization': `Bearer ${idToken}`,
       'Content-Type': 'application/json',
     },
     body,

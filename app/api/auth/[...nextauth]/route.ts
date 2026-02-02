@@ -17,7 +17,17 @@ const handler = NextAuth({
       }
       return true;
     },
-    async session({ session }) {
+    async jwt({ token, account }) {
+      // Store the Google ID token when the user first signs in
+      if (account?.id_token) {
+        token.idToken = account.id_token;
+      }
+      return token;
+    },
+    async session({ session, token }) {
+      // Expose the ID token to the session
+      // @ts-expect-error - extending session type
+      session.idToken = token.idToken;
       return session;
     },
   },
