@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { cn } from '@/lib/utils';
 import { api, Task, Escalation, HotelOpportunity } from '@/lib/api';
 import { TaskDetail } from '@/components/task-detail';
+import { EscalationDetail } from '@/components/escalation-detail';
 
 function timeAgo(dateString: string): string {
   const now = new Date();
@@ -27,6 +28,21 @@ const tabs = [
   { id: 'pending_cancel', label: 'Pending Cancel', type: 'hotel_opportunity' },
   { id: 'escalations', label: 'Escalations', type: 'escalation' },
 ] as const;
+
+const priorityOrder: Record<string, number> = {
+  urgent: 0,
+  high: 1,
+  normal: 2,
+  low: 3,
+};
+
+function sortByPriority<T extends { priority: string }>(items: T[]): T[] {
+  return [...items].sort((a, b) => {
+    const aPriority = priorityOrder[a.priority] ?? 99;
+    const bPriority = priorityOrder[b.priority] ?? 99;
+    return aPriority - bPriority;
+  });
+}
 
 type TabId = typeof tabs[number]['id'];
 
@@ -77,7 +93,7 @@ function TaskRow({ task, onClick }: { task: Task; onClick: () => void }) {
   );
 }
 
-function EscalationRow({ escalation }: { escalation: Escalation }) {
+function EscalationRow({ escalation, onClick }: { escalation: Escalation; onClick: () => void }) {
   const priorityColors: Record<string, string> = {
     urgent: 'text-red-400',
     high: 'text-orange-400',
@@ -86,7 +102,10 @@ function EscalationRow({ escalation }: { escalation: Escalation }) {
   };
 
   return (
-    <div className="flex items-center justify-between py-3 px-4 border-b border-border last:border-0 hover:bg-accent/50 transition-colors">
+    <div
+      onClick={onClick}
+      className="flex items-center justify-between py-3 px-4 border-b border-border last:border-0 hover:bg-accent/50 transition-colors cursor-pointer"
+    >
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-3">
           <span className={cn('text-xs font-medium uppercase', priorityColors[escalation.priority] || 'text-foreground')}>
@@ -175,6 +194,7 @@ export default function TasksPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
+  const [selectedEscalation, setSelectedEscalation] = useState<Escalation | null>(null);
 
   useEffect(() => {
     async function fetchData() {
@@ -186,7 +206,7 @@ export default function TasksPage() {
 
         if (tab?.type === 'escalation') {
           const response = await api.listEscalations({ limit: 50 });
-          setEscalations(response.escalations);
+          setEscalations(sortByPriority(response.escalations));
           setTasks([]);
           setHotelOpportunities([]);
         } else if (tab?.type === 'hotel_opportunity') {
@@ -205,7 +225,7 @@ export default function TasksPage() {
             status: 'pending',
             limit: 50
           });
-          setTasks(response.tasks);
+          setTasks(sortByPriority(response.tasks));
           setEscalations([]);
           setHotelOpportunities([]);
         }
@@ -264,7 +284,11 @@ export default function TasksPage() {
           ) : (
             <div>
               {escalations.map((escalation) => (
-                <EscalationRow key={escalation.id} escalation={escalation} />
+                <EscalationRow
+                  key={escalation.id}
+                  escalation={escalation}
+                  onClick={() => setSelectedEscalation(escalation)}
+                />
               ))}
             </div>
           )
@@ -305,6 +329,18 @@ export default function TasksPage() {
           onUpdate={(updated) => {
             setTasks(tasks.map(t => t.id === updated.id ? updated : t));
             setSelectedTask(updated);
+          }}
+        />
+      )}
+
+      {/* Escalation Detail Panel */}
+      {selectedEscalation && (
+        <EscalationDetail
+          escalation={selectedEscalation}
+          onClose={() => setSelectedEscalation(null)}
+          onUpdate={(updated) => {
+            setEscalations(escalations.map(e => e.id === updated.id ? updated : e));
+            setSelectedEscalation(updated);
           }}
         />
       )}

@@ -2,13 +2,16 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { ClipboardList, Users, LogOut } from 'lucide-react';
+import { FileText, Plane, Hotel, Users, AlertTriangle, LogOut } from 'lucide-react';
 import { useAuth } from '@/contexts/auth-context';
 import { cn } from '@/lib/utils';
 
 const navItems = [
-  { href: '/tasks', icon: ClipboardList, label: 'Tasks' },
-  { href: '/members', icon: Users, label: 'Members' },
+  { href: '/manual-import', icon: FileText, label: 'Manual Import' },
+  { href: '/complete-repricings', icon: Plane, label: 'Complete Repricings' },
+  { href: '/hotel-repricing-tracking', icon: Hotel, label: 'Hotel Repricing Tracking' },
+  { href: '/member-overview', icon: Users, label: 'Member Overview' },
+  { href: '/escalations', icon: AlertTriangle, label: 'Escalations' },
 ];
 
 export function Sidebar() {

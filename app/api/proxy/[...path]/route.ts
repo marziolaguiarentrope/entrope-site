@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
+import { authOptions } from '@/lib/auth';
 
 const API_BASE = 'https://staging-admin-gateway.onrender.com';
 
 async function getIdToken(): Promise<string | null> {
-  const session = await getServerSession();
+  const session = await getServerSession(authOptions);
+  console.log('Proxy session:', JSON.stringify(session, null, 2));
   // @ts-expect-error - idToken is added in our jwt callback
   return session?.idToken ?? null;
 }
