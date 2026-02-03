@@ -1,8 +1,92 @@
 'use client';
 
 import { useState } from 'react';
-import { Task, api } from '@/lib/api';
+import { Task, api, RawEmail } from '@/lib/api';
 import { cn } from '@/lib/utils';
+
+interface EmailViewerProps {
+  email: RawEmail | null;
+  loading: boolean;
+  error: string | null;
+  onClose: () => void;
+}
+
+function EmailViewer({ email, loading, error, onClose }: EmailViewerProps) {
+  if (loading) {
+    return (
+      <div className="bg-accent/50 rounded-lg p-4">
+        <p className="text-sm text-muted-foreground">Loading email...</p>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="bg-red-500/10 rounded-lg p-4">
+        <div className="flex justify-between items-start">
+          <p className="text-sm text-red-400">{error}</p>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (!email) return null;
+
+  return (
+    <div className="bg-accent/50 rounded-lg p-4 space-y-3">
+      <div className="flex justify-between items-start">
+        <h4 className="text-sm font-medium">Original Email</h4>
+        <button onClick={onClose} className="text-muted-foreground hover:text-foreground">
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+
+      <div className="space-y-2 text-sm">
+        <div>
+          <span className="text-muted-foreground">From: </span>
+          <span>{email.from_address || 'N/A'}</span>
+        </div>
+        <div>
+          <span className="text-muted-foreground">Subject: </span>
+          <span className="font-medium">{email.subject || 'N/A'}</span>
+        </div>
+        {email.received_at && (
+          <div>
+            <span className="text-muted-foreground">Received: </span>
+            <span>{new Date(email.received_at).toLocaleString()}</span>
+          </div>
+        )}
+      </div>
+
+      <div className="border-t border-border pt-3">
+        <div
+          className="text-sm bg-background rounded p-3 max-h-64 overflow-y-auto whitespace-pre-wrap"
+          dangerouslySetInnerHTML={{ __html: email.body || 'No content' }}
+        />
+      </div>
+
+      {email.attachments && email.attachments.length > 0 && (
+        <div className="border-t border-border pt-3">
+          <p className="text-xs text-muted-foreground mb-1">Attachments:</p>
+          <div className="flex flex-wrap gap-2">
+            {email.attachments.map((att, i) => (
+              <span key={i} className="px-2 py-1 bg-background text-xs rounded">
+                {att.filename}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 interface TaskDetailProps {
   task: Task;
@@ -22,28 +106,57 @@ function FlightRepriceDetail({ task, onClose, onUpdate }: TaskDetailProps) {
   const [error, setError] = useState<string | null>(null);
 
   const data = task.request_data as {
-    pnr: string;
-    airline_code: string;
-    passenger_name: string;
-    passenger_dob: string;
-    original_price: { amount: number; currency: string };
-    target_price: { amount: number; currency: string };
-    expected_credit: { amount: number; currency: string };
+    pnr?: string;
+    airline_code?: string;
+    airline_name?: string;
+    passenger_name?: string;
+    passenger_dob?: string;
+    original_price?: { amount: number; currency: string };
+    target_price?: { amount: number; currency: string };
+    expected_credit?: { amount: number; currency: string };
     loyalty_number?: string;
-  };
+    booking_id?: string;
+  } | null;
 
   // Form state for completion - default to expected values
   const [refundAmount, setRefundAmount] = useState(() =>
-    (data.expected_credit.amount / 100).toFixed(2)
+    data?.expected_credit?.amount ? (data.expected_credit.amount / 100).toFixed(2) : '0.00'
   );
   const [refundCurrency, setRefundCurrency] = useState(() =>
-    data.expected_credit.currency
+    data?.expected_credit?.currency || 'USD'
   );
   const [blockReason, setBlockReason] = useState('');
   const [showBlockForm, setShowBlockForm] = useState(false);
 
+  // Email viewer state
+  const [showEmail, setShowEmail] = useState(false);
+  const [email, setEmail] = useState<RawEmail | null>(null);
+  const [emailLoading, setEmailLoading] = useState(false);
+  const [emailError, setEmailError] = useState<string | null>(null);
+
   const isClaimed = task.status === 'claimed';
   const isPending = task.status === 'pending';
+
+  async function handleViewEmail() {
+    if (!data?.booking_id) {
+      setEmailError('No booking ID available');
+      setShowEmail(true);
+      return;
+    }
+
+    setShowEmail(true);
+    setEmailLoading(true);
+    setEmailError(null);
+
+    try {
+      const result = await api.getEmailForBooking('flight', data.booking_id);
+      setEmail(result);
+    } catch (err) {
+      setEmailError(err instanceof Error ? err.message : 'Failed to load email');
+    } finally {
+      setEmailLoading(false);
+    }
+  }
 
   async function handleClaim() {
     setLoading(true);
@@ -107,7 +220,7 @@ function FlightRepriceDetail({ task, onClose, onUpdate }: TaskDetailProps) {
         <div className="sticky top-0 bg-card border-b border-border p-4 flex items-center justify-between">
           <div>
             <h2 className="text-lg font-semibold">Flight Reprice</h2>
-            <p className="text-sm text-muted-foreground">{data.airline_code} · {data.pnr}</p>
+            <p className="text-sm text-muted-foreground">{data?.airline_code || 'N/A'} · {data?.pnr || 'N/A'}</p>
           </div>
           <button
             onClick={onClose}
@@ -142,9 +255,11 @@ function FlightRepriceDetail({ task, onClose, onUpdate }: TaskDetailProps) {
           <section>
             <h3 className="text-sm font-medium text-muted-foreground mb-2">Passenger</h3>
             <div className="bg-accent/50 rounded-lg p-3 space-y-1">
-              <p className="font-medium">{data.passenger_name}</p>
-              <p className="text-sm text-muted-foreground">DOB: {data.passenger_dob}</p>
-              {data.loyalty_number && (
+              <p className="font-medium">{data?.passenger_name || 'N/A'}</p>
+              {data?.passenger_dob && (
+                <p className="text-sm text-muted-foreground">DOB: {data.passenger_dob}</p>
+              )}
+              {data?.loyalty_number && (
                 <p className="text-sm text-muted-foreground">Loyalty: {data.loyalty_number}</p>
               )}
             </div>
@@ -156,35 +271,71 @@ function FlightRepriceDetail({ task, onClose, onUpdate }: TaskDetailProps) {
             <div className="bg-accent/50 rounded-lg p-3 space-y-1">
               <div className="flex justify-between">
                 <span className="text-muted-foreground">PNR</span>
-                <span className="font-mono font-medium">{data.pnr}</span>
+                <span className="font-mono font-medium">{data?.pnr || 'N/A'}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Airline</span>
-                <span className="font-medium">{data.airline_code}</span>
+                <span className="font-medium">{data?.airline_name || data?.airline_code || 'N/A'}</span>
               </div>
             </div>
           </section>
 
+          {/* View Original Email */}
+          {data?.booking_id && (
+            <section>
+              {!showEmail ? (
+                <button
+                  onClick={handleViewEmail}
+                  className="w-full py-2 px-4 bg-accent text-foreground rounded-lg font-medium hover:bg-accent/80 transition-colors flex items-center justify-center gap-2"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                  </svg>
+                  View Original Email
+                </button>
+              ) : (
+                <EmailViewer
+                  email={email}
+                  loading={emailLoading}
+                  error={emailError}
+                  onClose={() => {
+                    setShowEmail(false);
+                    setEmail(null);
+                    setEmailError(null);
+                  }}
+                />
+              )}
+            </section>
+          )}
+
           {/* Pricing */}
-          <section>
-            <h3 className="text-sm font-medium text-muted-foreground mb-2">Pricing</h3>
-            <div className="bg-accent/50 rounded-lg p-3 space-y-2">
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Original Price</span>
-                <span>{formatMoney(data.original_price.amount, data.original_price.currency)}</span>
+          {(data?.original_price || data?.target_price || data?.expected_credit) && (
+            <section>
+              <h3 className="text-sm font-medium text-muted-foreground mb-2">Pricing</h3>
+              <div className="bg-accent/50 rounded-lg p-3 space-y-2">
+                {data?.original_price && (
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Original Price</span>
+                    <span>{formatMoney(data.original_price.amount, data.original_price.currency)}</span>
+                  </div>
+                )}
+                {data?.target_price && (
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Target Price</span>
+                    <span>{formatMoney(data.target_price.amount, data.target_price.currency)}</span>
+                  </div>
+                )}
+                {data?.expected_credit && (
+                  <div className="flex justify-between pt-2 border-t border-border">
+                    <span className="font-medium">Expected Credit</span>
+                    <span className="font-medium text-green-400">
+                      {formatMoney(data.expected_credit.amount, data.expected_credit.currency)}
+                    </span>
+                  </div>
+                )}
               </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Target Price</span>
-                <span>{formatMoney(data.target_price.amount, data.target_price.currency)}</span>
-              </div>
-              <div className="flex justify-between pt-2 border-t border-border">
-                <span className="font-medium">Expected Credit</span>
-                <span className="font-medium text-green-400">
-                  {formatMoney(data.expected_credit.amount, data.expected_credit.currency)}
-                </span>
-              </div>
-            </div>
-          </section>
+            </section>
+          )}
 
           {/* Error */}
           {error && (
@@ -228,9 +379,11 @@ function FlightRepriceDetail({ task, onClose, onUpdate }: TaskDetailProps) {
                     className="flex-1 px-3 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary font-mono"
                   />
                 </div>
-                <p className="text-xs text-muted-foreground mt-1">
-                  Expected: {formatMoney(data.expected_credit.amount, data.expected_credit.currency)}
-                </p>
+                {data?.expected_credit && (
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Expected: {formatMoney(data.expected_credit.amount, data.expected_credit.currency)}
+                  </p>
+                )}
               </div>
               <div className="flex gap-2">
                 <button
@@ -312,13 +465,44 @@ function CompleteBookingDetail({ task, onClose, onUpdate }: TaskDetailProps) {
   const [blockReason, setBlockReason] = useState('');
   const [showBlockForm, setShowBlockForm] = useState(false);
 
+  // Email viewer state
+  const [showEmail, setShowEmail] = useState(false);
+  const [email, setEmail] = useState<RawEmail | null>(null);
+  const [emailLoading, setEmailLoading] = useState(false);
+  const [emailError, setEmailError] = useState<string | null>(null);
+
   const data = task.request_data as {
     booking_id: string;
     booking_type: 'hotel' | 'flight';
     instructions: string;
     missing_fields: string[];
     email_storage_path: string | null;
+    email_id?: string;
   };
+
+  async function handleViewEmail() {
+    // Try to get email via task first (uses email_id from request_data)
+    // Fall back to booking lookup
+    setShowEmail(true);
+    setEmailLoading(true);
+    setEmailError(null);
+
+    try {
+      // First try via task (operator must have claimed)
+      const result = await api.getEmailForTask(task.id);
+      setEmail(result);
+    } catch {
+      // Fall back to booking lookup
+      try {
+        const result = await api.getEmailForBooking(data.booking_type, data.booking_id);
+        setEmail(result);
+      } catch (err) {
+        setEmailError(err instanceof Error ? err.message : 'Failed to load email');
+      }
+    } finally {
+      setEmailLoading(false);
+    }
+  }
 
   // Form state for each missing field
   const [fieldValues, setFieldValues] = useState<Record<string, string>>(() => {
@@ -465,6 +649,32 @@ function CompleteBookingDetail({ task, onClose, onUpdate }: TaskDetailProps) {
             <div className="bg-accent/50 rounded-lg p-3">
               <p className="text-sm">{data.instructions}</p>
             </div>
+          </section>
+
+          {/* View Original Email */}
+          <section>
+            {!showEmail ? (
+              <button
+                onClick={handleViewEmail}
+                className="w-full py-2 px-4 bg-accent text-foreground rounded-lg font-medium hover:bg-accent/80 transition-colors flex items-center justify-center gap-2"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                </svg>
+                View Original Email
+              </button>
+            ) : (
+              <EmailViewer
+                email={email}
+                loading={emailLoading}
+                error={emailError}
+                onClose={() => {
+                  setShowEmail(false);
+                  setEmail(null);
+                  setEmailError(null);
+                }}
+              />
+            )}
           </section>
 
           {/* Missing Fields */}

@@ -175,6 +175,15 @@ class ApiClient {
     const query = searchParams.toString();
     return this.fetch<HotelOpportunityListResponse>(`/hotel-opportunities/pending-cancel${query ? `?${query}` : ''}`);
   }
+
+  // Emails
+  async getEmailForBooking(bookingType: 'flight' | 'hotel', bookingId: string): Promise<RawEmail> {
+    return this.fetch<RawEmail>(`/emails/for-booking/${bookingType}/${bookingId}`);
+  }
+
+  async getEmailForTask(taskId: string): Promise<RawEmail> {
+    return this.fetch<RawEmail>(`/emails/for-task/${taskId}`);
+  }
 }
 
 export interface HotelOpportunity {
@@ -454,6 +463,16 @@ export interface MemberContext {
   escalations: EscalationSummary[];
   payment_records: PaymentRecord[];
   referral_stats: ReferralStats | null;
+}
+
+export interface RawEmail {
+  id: string;
+  subject: string | null;
+  body: string | null;
+  from_address: string | null;
+  to_address: string | null;
+  received_at: string | null;
+  attachments: Array<{ filename: string; content_type: string }> | null;
 }
 
 export const api = new ApiClient(API_BASE);
