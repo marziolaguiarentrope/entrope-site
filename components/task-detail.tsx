@@ -213,8 +213,8 @@ function FlightRepriceDetail({ task, onClose, onUpdate }: TaskDetailProps) {
         credit_amount: amount,  // major units (e.g., 50.00)
         credit_currency: refundCurrency,
       });
+      // onUpdate handles closing for completed/failed tasks
       onUpdate(updated);
-      onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to complete');
       setShowSuccessConfirm(false);
@@ -252,8 +252,8 @@ function FlightRepriceDetail({ task, onClose, onUpdate }: TaskDetailProps) {
       const updated = await api.completeTask(task.id, 'denied', {
         failure_reason: getFailReasonText(),
       });
+      // onUpdate handles closing for completed/failed tasks
       onUpdate(updated);
-      onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to mark as failed');
       setShowFailConfirm(false);
@@ -713,8 +713,8 @@ function CompleteBookingDetail({ task, onClose, onUpdate }: TaskDetailProps) {
       });
 
       const updated = await api.completeTask(task.id, 'success', responseData);
+      // onUpdate handles closing for completed/failed tasks
       onUpdate(updated);
-      onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to complete');
     } finally {
@@ -731,8 +731,8 @@ function CompleteBookingDetail({ task, onClose, onUpdate }: TaskDetailProps) {
     setError(null);
     try {
       const updated = await api.blockTask(task.id, blockReason.trim());
+      // onUpdate handles closing for blocked tasks
       onUpdate(updated);
-      onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to block');
     } finally {

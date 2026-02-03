@@ -327,8 +327,8 @@ export default function TasksPage() {
           task={selectedTask}
           onClose={() => setSelectedTask(null)}
           onUpdate={(updated) => {
-            // Remove completed/failed tasks from list, update others
-            if (updated.status === 'completed' || updated.status === 'failed') {
+            // Remove completed/failed/blocked tasks from list, update others
+            if (updated.status === 'completed' || updated.status === 'failed' || updated.status === 'blocked') {
               setTasks(prev => prev.filter(t => t.id !== updated.id));
               setSelectedTask(null);
             } else {
