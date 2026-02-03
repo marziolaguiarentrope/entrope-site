@@ -96,6 +96,10 @@ class ApiClient {
     return this.fetch<Task>(`/tasks/${taskId}/claim`, { method: 'POST' });
   }
 
+  async unclaimTask(taskId: string): Promise<Task> {
+    return this.fetch<Task>(`/tasks/${taskId}/unclaim`, { method: 'POST' });
+  }
+
   async blockTask(taskId: string, reason: string): Promise<Task> {
     return this.fetch<Task>(`/tasks/${taskId}/block`, {
       method: 'POST',

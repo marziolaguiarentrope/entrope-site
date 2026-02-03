@@ -125,8 +125,22 @@ function FlightRepriceDetail({ task, onClose, onUpdate }: TaskDetailProps) {
   const [refundCurrency, setRefundCurrency] = useState(() =>
     data?.expected_credit?.currency || 'USD'
   );
-  const [blockReason, setBlockReason] = useState('');
-  const [showBlockForm, setShowBlockForm] = useState(false);
+  const [failReason, setFailReason] = useState('');
+  const [failReasonOther, setFailReasonOther] = useState('');
+  const [showFailForm, setShowFailForm] = useState(false);
+  const [showSuccessConfirm, setShowSuccessConfirm] = useState(false);
+  const [showFailConfirm, setShowFailConfirm] = useState(false);
+
+  // Predefined failure reasons
+  const failureReasons = [
+    { value: 'airline_refused', label: 'Airline refused to reprice' },
+    { value: 'fare_unavailable', label: 'New fare no longer available' },
+    { value: 'pnr_cancelled', label: 'PNR was cancelled' },
+    { value: 'pnr_already_changed', label: 'PNR was already changed' },
+    { value: 'customer_no_longer_wants', label: 'Customer no longer wants reprice' },
+    { value: 'booking_in_past', label: 'Booking date has passed' },
+    { value: 'other', label: 'Other (specify)' },
+  ];
 
   // Email viewer state
   const [showEmail, setShowEmail] = useState(false);
@@ -173,43 +187,83 @@ function FlightRepriceDetail({ task, onClose, onUpdate }: TaskDetailProps) {
     }
   }
 
-  async function handleComplete() {
-    const amount = parseFloat(refundAmount);
-    if (isNaN(amount) || amount <= 0) {
-      setError('Valid refund amount required');
-      return;
-    }
+  async function handleUnclaim() {
     setLoading(true);
     setError(null);
     try {
-      const updated = await api.completeTask(task.id, 'success', {
-        refund_amount: {
-          amount: Math.round(amount * 100),
-          currency: refundCurrency,
-        },
-      });
+      const updated = await api.unclaimTask(task.id);
       onUpdate(updated);
-      onClose();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to complete');
+      setError(err instanceof Error ? err.message : 'Failed to unclaim');
     } finally {
       setLoading(false);
     }
   }
 
-  async function handleBlock() {
-    if (!blockReason.trim()) {
-      setError('Block reason required');
+  function handleCompleteClick() {
+    const amount = parseFloat(refundAmount);
+    if (isNaN(amount) || amount <= 0) {
+      setError('Valid refund amount required');
       return;
     }
+    setError(null);
+    setShowSuccessConfirm(true);
+  }
+
+  async function handleCompleteConfirmed() {
+    const amount = parseFloat(refundAmount);
     setLoading(true);
     setError(null);
     try {
-      const updated = await api.blockTask(task.id, blockReason.trim());
+      const updated = await api.completeTask(task.id, 'success', {
+        // Use credit_amount/credit_currency to match TaskResponseData schema
+        credit_amount: amount,  // major units (e.g., 50.00)
+        credit_currency: refundCurrency,
+      });
       onUpdate(updated);
       onClose();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to block');
+      setError(err instanceof Error ? err.message : 'Failed to complete');
+      setShowSuccessConfirm(false);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function handleFailClick() {
+    if (!failReason) {
+      setError('Please select a failure reason');
+      return;
+    }
+    if (failReason === 'other' && !failReasonOther.trim()) {
+      setError('Please specify the failure reason');
+      return;
+    }
+    setError(null);
+    setShowFailConfirm(true);
+  }
+
+  function getFailReasonText(): string {
+    if (failReason === 'other') {
+      return failReasonOther.trim();
+    }
+    const selected = failureReasons.find(r => r.value === failReason);
+    return selected?.label || failReason;
+  }
+
+  async function handleFailConfirmed() {
+    setLoading(true);
+    setError(null);
+    try {
+      // Complete with denied outcome (valid outcomes: success, denied, partial, not_found)
+      const updated = await api.completeTask(task.id, 'denied', {
+        failure_reason: getFailReasonText(),
+      });
+      onUpdate(updated);
+      onClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to mark as failed');
+      setShowFailConfirm(false);
     } finally {
       setLoading(false);
     }
@@ -236,20 +290,32 @@ function FlightRepriceDetail({ task, onClose, onUpdate }: TaskDetailProps) {
 
         <div className="p-4 space-y-6">
           {/* Status */}
-          <div className="flex items-center gap-2">
-            <span className={cn(
-              'px-2 py-1 text-xs font-medium rounded',
-              task.status === 'pending' && 'bg-yellow-500/20 text-yellow-400',
-              task.status === 'claimed' && 'bg-blue-500/20 text-blue-400',
-              task.status === 'completed' && 'bg-green-500/20 text-green-400',
-              task.status === 'blocked' && 'bg-red-500/20 text-red-400',
-            )}>
-              {task.status.toUpperCase()}
-            </span>
-            {task.claimed_by && (
-              <span className="text-sm text-muted-foreground">
-                by {task.claimed_by}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className={cn(
+                'px-2 py-1 text-xs font-medium rounded',
+                task.status === 'pending' && 'bg-yellow-500/20 text-yellow-400',
+                task.status === 'claimed' && 'bg-blue-500/20 text-blue-400',
+                task.status === 'completed' && 'bg-green-500/20 text-green-400',
+                task.status === 'blocked' && 'bg-red-500/20 text-red-400',
+                task.status === 'failed' && 'bg-red-500/20 text-red-400',
+              )}>
+                {task.status.toUpperCase()}
               </span>
+              {task.claimed_by && (
+                <span className="text-sm text-muted-foreground">
+                  by {task.claimed_by}
+                </span>
+              )}
+            </div>
+            {isClaimed && (
+              <button
+                onClick={handleUnclaim}
+                disabled={loading}
+                className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+              >
+                Release claim
+              </button>
             )}
           </div>
 
@@ -357,7 +423,7 @@ function FlightRepriceDetail({ task, onClose, onUpdate }: TaskDetailProps) {
             </button>
           )}
 
-          {isClaimed && !showBlockForm && (
+          {isClaimed && !showFailForm && !showSuccessConfirm && !showFailConfirm && (
             <div className="space-y-4">
               <div>
                 <label className="block text-sm font-medium mb-2">Actual Refund Amount</label>
@@ -389,44 +455,133 @@ function FlightRepriceDetail({ task, onClose, onUpdate }: TaskDetailProps) {
               </div>
               <div className="flex gap-2">
                 <button
-                  onClick={handleComplete}
+                  onClick={handleCompleteClick}
                   disabled={loading}
                   className="flex-1 py-2 px-4 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 disabled:opacity-50 transition-colors"
                 >
-                  {loading ? 'Completing...' : 'Complete'}
+                  Complete
                 </button>
                 <button
-                  onClick={() => setShowBlockForm(true)}
+                  onClick={() => setShowFailForm(true)}
                   className="py-2 px-4 bg-red-600/20 text-red-400 rounded-lg font-medium hover:bg-red-600/30 transition-colors"
                 >
-                  Block
+                  Fail
                 </button>
               </div>
             </div>
           )}
 
-          {isClaimed && showBlockForm && (
+          {/* Success Confirmation */}
+          {isClaimed && showSuccessConfirm && (
             <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium mb-1">Block Reason *</label>
-                <textarea
-                  value={blockReason}
-                  onChange={(e) => setBlockReason(e.target.value)}
-                  placeholder="Why can't this task be completed?"
-                  rows={3}
-                  className="w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary resize-none"
-                />
+              <div className="bg-green-500/10 rounded-lg p-4">
+                <h4 className="font-medium text-green-400 mb-2">Confirm Completion</h4>
+                <p className="text-sm text-muted-foreground mb-3">
+                  You are marking this reprice as successful with a refund of:
+                </p>
+                <p className="text-lg font-medium">
+                  {refundCurrency} {parseFloat(refundAmount).toFixed(2)}
+                </p>
+                {data?.expected_credit && parseFloat(refundAmount) !== data.expected_credit.amount / 100 && (
+                  <p className="text-xs text-yellow-400 mt-2">
+                    Note: This differs from the expected {formatMoney(data.expected_credit.amount, data.expected_credit.currency)}
+                  </p>
+                )}
               </div>
               <div className="flex gap-2">
                 <button
-                  onClick={handleBlock}
+                  onClick={handleCompleteConfirmed}
+                  disabled={loading}
+                  className="flex-1 py-2 px-4 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 disabled:opacity-50 transition-colors"
+                >
+                  {loading ? 'Completing...' : 'Yes, Complete'}
+                </button>
+                <button
+                  onClick={() => setShowSuccessConfirm(false)}
+                  disabled={loading}
+                  className="py-2 px-4 bg-accent text-foreground rounded-lg font-medium hover:bg-accent/80 transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+
+          {isClaimed && showFailForm && !showFailConfirm && (
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium mb-1">Failure Reason *</label>
+                <select
+                  value={failReason}
+                  onChange={(e) => setFailReason(e.target.value)}
+                  className="w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
+                >
+                  <option value="">Select a reason...</option>
+                  {failureReasons.map((reason) => (
+                    <option key={reason.value} value={reason.value}>
+                      {reason.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              {failReason === 'other' && (
+                <div>
+                  <label className="block text-sm font-medium mb-1">Specify Reason *</label>
+                  <textarea
+                    value={failReasonOther}
+                    onChange={(e) => setFailReasonOther(e.target.value)}
+                    placeholder="Describe why the reprice couldn't be completed"
+                    rows={2}
+                    className="w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary resize-none"
+                  />
+                </div>
+              )}
+              <div className="flex gap-2">
+                <button
+                  onClick={handleFailClick}
                   disabled={loading}
                   className="flex-1 py-2 px-4 bg-red-600 text-white rounded-lg font-medium hover:bg-red-700 disabled:opacity-50 transition-colors"
                 >
-                  {loading ? 'Blocking...' : 'Block Task'}
+                  Mark as Failed
                 </button>
                 <button
-                  onClick={() => setShowBlockForm(false)}
+                  onClick={() => {
+                    setShowFailForm(false);
+                    setFailReason('');
+                    setFailReasonOther('');
+                  }}
+                  className="py-2 px-4 bg-accent text-foreground rounded-lg font-medium hover:bg-accent/80 transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Fail Confirmation */}
+          {isClaimed && showFailConfirm && (
+            <div className="space-y-4">
+              <div className="bg-red-500/10 rounded-lg p-4">
+                <h4 className="font-medium text-red-400 mb-2">Confirm Failure</h4>
+                <p className="text-sm text-muted-foreground mb-3">
+                  You are marking this reprice as failed. This will close the task without a refund.
+                </p>
+                <p className="text-sm">
+                  <span className="text-muted-foreground">Reason: </span>
+                  {getFailReasonText()}
+                </p>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={handleFailConfirmed}
+                  disabled={loading}
+                  className="flex-1 py-2 px-4 bg-red-600 text-white rounded-lg font-medium hover:bg-red-700 disabled:opacity-50 transition-colors"
+                >
+                  {loading ? 'Failing...' : 'Yes, Mark Failed'}
+                </button>
+                <button
+                  onClick={() => setShowFailConfirm(false)}
+                  disabled={loading}
                   className="py-2 px-4 bg-accent text-foreground rounded-lg font-medium hover:bg-accent/80 transition-colors"
                 >
                   Cancel
@@ -534,6 +689,19 @@ function CompleteBookingDetail({ task, onClose, onUpdate }: TaskDetailProps) {
     }
   }
 
+  async function handleUnclaim() {
+    setLoading(true);
+    setError(null);
+    try {
+      const updated = await api.unclaimTask(task.id);
+      onUpdate(updated);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to unclaim');
+    } finally {
+      setLoading(false);
+    }
+  }
+
   async function handleComplete() {
     // Validate all fields are filled
     const emptyFields = data.missing_fields.filter(f => !fieldValues[f]?.trim());
@@ -628,20 +796,31 @@ function CompleteBookingDetail({ task, onClose, onUpdate }: TaskDetailProps) {
 
         <div className="p-4 space-y-6">
           {/* Status */}
-          <div className="flex items-center gap-2">
-            <span className={cn(
-              'px-2 py-1 text-xs font-medium rounded',
-              task.status === 'pending' && 'bg-yellow-500/20 text-yellow-400',
-              task.status === 'claimed' && 'bg-blue-500/20 text-blue-400',
-              task.status === 'completed' && 'bg-green-500/20 text-green-400',
-              task.status === 'blocked' && 'bg-red-500/20 text-red-400',
-            )}>
-              {task.status.toUpperCase()}
-            </span>
-            {task.claimed_by && (
-              <span className="text-sm text-muted-foreground">
-                by {task.claimed_by}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className={cn(
+                'px-2 py-1 text-xs font-medium rounded',
+                task.status === 'pending' && 'bg-yellow-500/20 text-yellow-400',
+                task.status === 'claimed' && 'bg-blue-500/20 text-blue-400',
+                task.status === 'completed' && 'bg-green-500/20 text-green-400',
+                task.status === 'blocked' && 'bg-red-500/20 text-red-400',
+              )}>
+                {task.status.toUpperCase()}
               </span>
+              {task.claimed_by && (
+                <span className="text-sm text-muted-foreground">
+                  by {task.claimed_by}
+                </span>
+              )}
+            </div>
+            {isClaimed && (
+              <button
+                onClick={handleUnclaim}
+                disabled={loading}
+                className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+              >
+                Release claim
+              </button>
             )}
           </div>
 
