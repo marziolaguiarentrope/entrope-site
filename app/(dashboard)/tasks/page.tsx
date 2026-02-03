@@ -220,9 +220,9 @@ export default function TasksPage() {
           setTasks([]);
           setEscalations([]);
         } else if (tab?.type === 'task' && tab.capability) {
+          // Don't filter by status - show pending and claimed tasks
           const response = await api.listTasks({
             capability: tab.capability,
-            status: 'pending',
             limit: 50
           });
           setTasks(sortByPriority(response.tasks));
