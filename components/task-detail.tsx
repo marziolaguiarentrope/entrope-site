@@ -152,20 +152,13 @@ function FlightRepriceDetail({ task, onClose, onUpdate }: TaskDetailProps) {
   const isPending = task.status === 'pending';
 
   async function handleViewEmail() {
-    // Use task.booking_id (top-level field), not request_data.booking_id
-    const bookingId = task.booking_id;
-    if (!bookingId) {
-      setEmailError('No booking ID available');
-      setShowEmail(true);
-      return;
-    }
-
     setShowEmail(true);
     setEmailLoading(true);
     setEmailError(null);
 
     try {
-      const result = await api.getEmailForBooking('flight', bookingId);
+      // Use getEmailForTask - requires operator to have claimed the task
+      const result = await api.getEmailForTask(task.id);
       setEmail(result);
     } catch (err) {
       setEmailError(err instanceof Error ? err.message : 'Failed to load email');
@@ -348,8 +341,8 @@ function FlightRepriceDetail({ task, onClose, onUpdate }: TaskDetailProps) {
             </div>
           </section>
 
-          {/* View Original Email */}
-          {task.booking_id && (
+          {/* View Original Email - only show when claimed (backend enforces via 403) */}
+          {isClaimed && (
             <section>
               {!showEmail ? (
                 <button
