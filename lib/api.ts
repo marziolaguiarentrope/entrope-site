@@ -245,6 +245,19 @@ class ApiClient {
     return this.fetch<HotelOpportunityListResponse>(`/hotel-opportunities/pending-cancel${query ? `?${query}` : ''}`);
   }
 
+  // Bookings
+  async markBookingCancelled(
+    bookingType: 'hotel' | 'flight',
+    bookingId: string,
+    notes: string,
+    confirmationCode?: string
+  ): Promise<{ booking_id: string; booking_type: string; status: string; cancelled_at: string; operator: string }> {
+    return this.fetch(`/bookings/${bookingType}/${bookingId}/mark-cancelled`, {
+      method: 'POST',
+      body: JSON.stringify({ notes, confirmation_code: confirmationCode }),
+    });
+  }
+
   // Emails
   async getEmailForBooking(bookingType: 'flight' | 'hotel', bookingId: string): Promise<RawEmail> {
     return this.fetch<RawEmail>(`/emails/for-booking/${bookingType}/${bookingId}`);
@@ -269,6 +282,7 @@ export interface HotelOpportunity {
   old_booking_status: string | null;
   old_booking_provider: string | null;
   old_booking_confirmation_code: string | null;
+  old_booking_id: string | null;
   cancellation_capability: string | null;
   cancellation_scheduled_at: string | null;
   created_at: string;

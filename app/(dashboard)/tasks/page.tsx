@@ -5,6 +5,7 @@ import { cn } from '@/lib/utils';
 import { api, Task, Escalation, HotelOpportunity } from '@/lib/api';
 import { TaskDetail } from '@/components/task-detail';
 import { EscalationDetail } from '@/components/escalation-detail';
+import { HotelOpportunityDetail } from '@/components/hotel-opportunity-detail';
 
 function timeAgo(dateString: string): string {
   const now = new Date();
@@ -129,7 +130,7 @@ function EscalationRow({ escalation, onClick }: { escalation: Escalation; onClic
   );
 }
 
-function HotelOpportunityRow({ opportunity, variant }: { opportunity: HotelOpportunity; variant: 'payment' | 'cancel' }) {
+function HotelOpportunityRow({ opportunity, variant, onClick }: { opportunity: HotelOpportunity; variant: 'payment' | 'cancel'; onClick: () => void }) {
   const formatDate = (dateStr: string | null) => {
     if (!dateStr) return 'N/A';
     return new Date(dateStr).toLocaleDateString();
@@ -144,7 +145,10 @@ function HotelOpportunityRow({ opportunity, variant }: { opportunity: HotelOppor
   };
 
   return (
-    <div className="flex items-center justify-between py-3 px-4 border-b border-border last:border-0 hover:bg-accent/50 transition-colors">
+    <div
+      onClick={onClick}
+      className="flex items-center justify-between py-3 px-4 border-b border-border last:border-0 hover:bg-accent/50 transition-colors cursor-pointer"
+    >
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-3">
           <span className="text-sm font-medium truncate">
@@ -212,6 +216,7 @@ export default function TasksPage() {
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [selectedEscalation, setSelectedEscalation] = useState<Escalation | null>(null);
   const [taskDetailLoading, setTaskDetailLoading] = useState(false);
+  const [selectedHotelOpportunity, setSelectedHotelOpportunity] = useState<HotelOpportunity | null>(null);
 
   // Fetch full task details (with hydrated booking) when selecting a task
   async function handleSelectTask(task: Task) {
@@ -336,6 +341,7 @@ export default function TasksPage() {
                   key={opp.id}
                   opportunity={opp}
                   variant={activeTab === 'pending_payment' ? 'payment' : 'cancel'}
+                  onClick={() => setSelectedHotelOpportunity(opp)}
                 />
               ))}
             </div>
@@ -379,6 +385,25 @@ export default function TasksPage() {
           onUpdate={(updated) => {
             setEscalations(escalations.map(e => e.id === updated.id ? updated : e));
             setSelectedEscalation(updated);
+          }}
+        />
+      )}
+
+      {/* Hotel Opportunity Detail Panel */}
+      {selectedHotelOpportunity && (
+        <HotelOpportunityDetail
+          opportunity={selectedHotelOpportunity}
+          variant={activeTab === 'pending_payment' ? 'payment' : 'cancel'}
+          onClose={() => setSelectedHotelOpportunity(null)}
+          onUpdate={(updated) => {
+            // Remove from list if cancelled
+            if (updated.old_booking_status === 'cancelled') {
+              setHotelOpportunities(prev => prev.filter(o => o.id !== updated.id));
+              setSelectedHotelOpportunity(null);
+            } else {
+              setHotelOpportunities(prev => prev.map(o => o.id === updated.id ? updated : o));
+              setSelectedHotelOpportunity(updated);
+            }
           }}
         />
       )}
