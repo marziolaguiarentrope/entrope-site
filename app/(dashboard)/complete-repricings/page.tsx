@@ -79,6 +79,18 @@ export default function CompleteRepricingsPage() {
   const [error, setError] = useState<string | null>(null);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
 
+  // Fetch full task details (with hydrated booking) when selecting a task
+  async function handleSelectTask(task: Task) {
+    try {
+      const fullTask = await api.getTask(task.id);
+      setSelectedTask(fullTask);
+    } catch (err) {
+      // Fall back to the list task if fetch fails
+      console.error('Failed to fetch task details:', err);
+      setSelectedTask(task);
+    }
+  }
+
   useEffect(() => {
     async function fetchData() {
       setLoading(true);
@@ -126,7 +138,7 @@ export default function CompleteRepricingsPage() {
         ) : (
           <div>
             {tasks.map((task) => (
-              <TaskRow key={task.id} task={task} onClick={() => setSelectedTask(task)} />
+              <TaskRow key={task.id} task={task} onClick={() => handleSelectTask(task)} />
             ))}
           </div>
         )}
