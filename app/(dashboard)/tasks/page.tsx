@@ -211,6 +211,22 @@ export default function TasksPage() {
   const [error, setError] = useState<string | null>(null);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [selectedEscalation, setSelectedEscalation] = useState<Escalation | null>(null);
+  const [taskDetailLoading, setTaskDetailLoading] = useState(false);
+
+  // Fetch full task details (with hydrated booking) when selecting a task
+  async function handleSelectTask(task: Task) {
+    setTaskDetailLoading(true);
+    try {
+      const fullTask = await api.getTask(task.id);
+      setSelectedTask(fullTask);
+    } catch (err) {
+      // Fall back to the list task if fetch fails
+      console.error('Failed to fetch task details:', err);
+      setSelectedTask(task);
+    } finally {
+      setTaskDetailLoading(false);
+    }
+  }
 
   useEffect(() => {
     async function fetchData() {
@@ -331,7 +347,7 @@ export default function TasksPage() {
         ) : (
           <div>
             {tasks.map((task) => (
-              <TaskRow key={task.id} task={task} onClick={() => setSelectedTask(task)} />
+              <TaskRow key={task.id} task={task} onClick={() => handleSelectTask(task)} />
             ))}
           </div>
         )}
