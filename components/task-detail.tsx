@@ -12,6 +12,8 @@ interface EmailViewerProps {
 }
 
 function EmailViewer({ email, loading, error, onClose }: EmailViewerProps) {
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
   if (loading) {
     return (
       <div className="bg-accent/50 rounded-lg p-4">
@@ -37,17 +39,8 @@ function EmailViewer({ email, loading, error, onClose }: EmailViewerProps) {
 
   if (!email) return null;
 
-  return (
-    <div className="bg-accent/50 rounded-lg p-4 space-y-3">
-      <div className="flex justify-between items-start">
-        <h4 className="text-sm font-medium">Original Email</h4>
-        <button onClick={onClose} className="text-muted-foreground hover:text-foreground">
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-          </svg>
-        </button>
-      </div>
-
+  const emailContent = (
+    <>
       <div className="space-y-2 text-sm">
         <div>
           <span className="text-muted-foreground">From: </span>
@@ -67,7 +60,10 @@ function EmailViewer({ email, loading, error, onClose }: EmailViewerProps) {
 
       <div className="border-t border-border pt-3">
         <div
-          className="text-sm bg-background rounded p-3 max-h-64 overflow-y-auto whitespace-pre-wrap"
+          className={cn(
+            "text-sm bg-background rounded p-3 overflow-y-auto whitespace-pre-wrap",
+            isFullscreen ? "flex-1" : "max-h-64"
+          )}
           dangerouslySetInnerHTML={{ __html: email.body || 'No content' }}
         />
       </div>
@@ -84,6 +80,66 @@ function EmailViewer({ email, loading, error, onClose }: EmailViewerProps) {
           </div>
         </div>
       )}
+    </>
+  );
+
+  // Fullscreen modal
+  if (isFullscreen) {
+    return (
+      <div className="fixed inset-0 z-50 bg-background/95 backdrop-blur-sm flex flex-col">
+        <div className="flex justify-between items-center p-4 border-b border-border">
+          <h4 className="text-lg font-medium">Original Email</h4>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setIsFullscreen(false)}
+              className="p-2 text-muted-foreground hover:text-foreground hover:bg-accent rounded-lg transition-colors"
+              title="Exit fullscreen"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 9V4.5M9 9H4.5M9 9L3.75 3.75M9 15v4.5M9 15H4.5M9 15l-5.25 5.25M15 9h4.5M15 9V4.5M15 9l5.25-5.25M15 15h4.5M15 15v4.5m0-4.5l5.25 5.25" />
+              </svg>
+            </button>
+            <button
+              onClick={onClose}
+              className="p-2 text-muted-foreground hover:text-foreground hover:bg-accent rounded-lg transition-colors"
+              title="Close"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        </div>
+        <div className="flex-1 overflow-y-auto p-6 space-y-3">
+          {emailContent}
+        </div>
+      </div>
+    );
+  }
+
+  // Inline view
+  return (
+    <div className="bg-accent/50 rounded-lg p-4 space-y-3">
+      <div className="flex justify-between items-start">
+        <h4 className="text-sm font-medium">Original Email</h4>
+        <div className="flex gap-1">
+          <button
+            onClick={() => setIsFullscreen(true)}
+            className="p-1 text-muted-foreground hover:text-foreground transition-colors"
+            title="Expand to fullscreen"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15" />
+            </svg>
+          </button>
+          <button onClick={onClose} className="p-1 text-muted-foreground hover:text-foreground transition-colors">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+      </div>
+      {emailContent}
     </div>
   );
 }
@@ -131,14 +187,12 @@ function FlightRepriceDetail({ task, onClose, onUpdate }: TaskDetailProps) {
   const [showSuccessConfirm, setShowSuccessConfirm] = useState(false);
   const [showFailConfirm, setShowFailConfirm] = useState(false);
 
-  // Predefined failure reasons
+  // Failure reasons from backend, plus "other" option
   const failureReasons = [
-    { value: 'airline_refused', label: 'Airline refused to reprice' },
-    { value: 'fare_unavailable', label: 'New fare no longer available' },
-    { value: 'pnr_cancelled', label: 'PNR was cancelled' },
-    { value: 'pnr_already_changed', label: 'PNR was already changed' },
-    { value: 'customer_no_longer_wants', label: 'Customer no longer wants reprice' },
-    { value: 'booking_in_past', label: 'Booking date has passed' },
+    ...(task.valid_failure_reasons || []).map(reason => ({
+      value: reason.toLowerCase().replace(/\s+/g, '_'),
+      label: reason,
+    })),
     { value: 'other', label: 'Other (specify)' },
   ];
 
@@ -332,14 +386,61 @@ function FlightRepriceDetail({ task, onClose, onUpdate }: TaskDetailProps) {
             <div className="bg-accent/50 rounded-lg p-3 space-y-1">
               <div className="flex justify-between">
                 <span className="text-muted-foreground">PNR</span>
-                <span className="font-mono font-medium">{data?.pnr || 'N/A'}</span>
+                <span className="font-mono font-medium">{data?.pnr || task.flight_booking?.record_locator || 'N/A'}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Airline</span>
-                <span className="font-medium">{data?.airline_name || data?.airline_code || 'N/A'}</span>
+                <span className="font-medium">{data?.airline_name || task.flight_booking?.airline || data?.airline_code || 'N/A'}</span>
               </div>
+              {task.flight_booking?.booking_provider && (
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Booked via</span>
+                  <span>{task.flight_booking.booking_provider}</span>
+                </div>
+              )}
             </div>
           </section>
+
+          {/* Flight Itinerary - from hydrated booking */}
+          {task.flight_booking && (
+            <section>
+              <h3 className="text-sm font-medium text-muted-foreground mb-2">Flight Details</h3>
+              <div className="bg-accent/50 rounded-lg p-3 space-y-2">
+                {task.flight_booking.origin_airport && task.flight_booking.destination_airport && (
+                  <div className="flex justify-between items-center">
+                    <span className="font-medium">
+                      {task.flight_booking.origin_airport} → {task.flight_booking.destination_airport}
+                    </span>
+                    {task.flight_booking.cabin_class && (
+                      <span className="text-xs px-2 py-0.5 bg-background rounded capitalize">
+                        {task.flight_booking.cabin_class.replace('_', ' ')}
+                      </span>
+                    )}
+                  </div>
+                )}
+                {task.flight_booking.departure_time && (
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">Departure</span>
+                    <span>{new Date(task.flight_booking.departure_time).toLocaleString()}</span>
+                  </div>
+                )}
+                {task.flight_booking.arrival_time && (
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">Arrival</span>
+                    <span>{new Date(task.flight_booking.arrival_time).toLocaleString()}</span>
+                  </div>
+                )}
+                {task.flight_booking.passengers && task.flight_booking.passengers.length > 0 && (
+                  <div className="pt-2 border-t border-border">
+                    <span className="text-sm text-muted-foreground">Passengers: </span>
+                    <span className="text-sm">
+                      {task.flight_booking.passengers.map(p => p.name).join(', ')}
+                    </span>
+                  </div>
+                )}
+              </div>
+            </section>
+          )}
 
           {/* View Original Email - only show when claimed (backend enforces via 403) */}
           {isClaimed && (
@@ -612,8 +713,8 @@ function FlightRepriceDetail({ task, onClose, onUpdate }: TaskDetailProps) {
 function CompleteBookingDetail({ task, onClose, onUpdate }: TaskDetailProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [blockReason, setBlockReason] = useState('');
-  const [showBlockForm, setShowBlockForm] = useState(false);
+  const [failReason, setFailReason] = useState('');
+  const [showFailForm, setShowFailForm] = useState(false);
 
   // Email viewer state
   const [showEmail, setShowEmail] = useState(false);
@@ -722,19 +823,22 @@ function CompleteBookingDetail({ task, onClose, onUpdate }: TaskDetailProps) {
     }
   }
 
-  async function handleBlock() {
-    if (!blockReason.trim()) {
-      setError('Block reason required');
+  async function handleFail() {
+    if (!failReason.trim()) {
+      setError('Failure reason required');
       return;
     }
     setLoading(true);
     setError(null);
     try {
-      const updated = await api.blockTask(task.id, blockReason.trim());
-      // onUpdate handles closing for blocked tasks
+      // Complete with denied outcome
+      const updated = await api.completeTask(task.id, 'denied', {
+        failure_reason: failReason.trim(),
+      });
+      // onUpdate handles closing for failed tasks
       onUpdate(updated);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to block');
+      setError(err instanceof Error ? err.message : 'Failed to mark as failed');
     } finally {
       setLoading(false);
     }
@@ -875,7 +979,7 @@ function CompleteBookingDetail({ task, onClose, onUpdate }: TaskDetailProps) {
             </button>
           )}
 
-          {isClaimed && !showBlockForm && (
+          {isClaimed && !showFailForm && (
             <div className="space-y-4">
               {data.missing_fields.map(field => {
                 const config = fieldConfig[field] || { label: field, type: 'text', placeholder: '' };
@@ -932,37 +1036,37 @@ function CompleteBookingDetail({ task, onClose, onUpdate }: TaskDetailProps) {
                   {loading ? 'Completing...' : 'Complete'}
                 </button>
                 <button
-                  onClick={() => setShowBlockForm(true)}
+                  onClick={() => setShowFailForm(true)}
                   className="py-2 px-4 bg-red-600/20 text-red-400 rounded-lg font-medium hover:bg-red-600/30 transition-colors"
                 >
-                  Block
+                  Fail
                 </button>
               </div>
             </div>
           )}
 
-          {isClaimed && showBlockForm && (
+          {isClaimed && showFailForm && (
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium mb-1">Block Reason *</label>
+                <label className="block text-sm font-medium mb-1">Failure Reason *</label>
                 <textarea
-                  value={blockReason}
-                  onChange={(e) => setBlockReason(e.target.value)}
-                  placeholder="Why can't this task be completed?"
+                  value={failReason}
+                  onChange={(e) => setFailReason(e.target.value)}
+                  placeholder="Why can't this booking data be completed?"
                   rows={3}
                   className="w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary resize-none"
                 />
               </div>
               <div className="flex gap-2">
                 <button
-                  onClick={handleBlock}
+                  onClick={handleFail}
                   disabled={loading}
                   className="flex-1 py-2 px-4 bg-red-600 text-white rounded-lg font-medium hover:bg-red-700 disabled:opacity-50 transition-colors"
                 >
-                  {loading ? 'Blocking...' : 'Block Task'}
+                  {loading ? 'Failing...' : 'Mark as Failed'}
                 </button>
                 <button
-                  onClick={() => setShowBlockForm(false)}
+                  onClick={() => setShowFailForm(false)}
                   className="py-2 px-4 bg-accent text-foreground rounded-lg font-medium hover:bg-accent/80 transition-colors"
                 >
                   Cancel

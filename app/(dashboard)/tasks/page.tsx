@@ -173,6 +173,22 @@ function HotelOpportunityRow({ opportunity, variant }: { opportunity: HotelOppor
             {opportunity.payment_due_at && ` · Due ${formatDate(opportunity.payment_due_at)}`}
           </div>
         )}
+        {variant === 'cancel' && (
+          <div className="text-xs text-muted-foreground mt-1">
+            {opportunity.old_booking_provider && (
+              <span>Booked via {opportunity.old_booking_provider}</span>
+            )}
+            {opportunity.old_booking_confirmation_code && (
+              <span>{opportunity.old_booking_provider ? ' · ' : ''}Conf: {opportunity.old_booking_confirmation_code}</span>
+            )}
+            {opportunity.cancellation_scheduled_at && (
+              <span className="text-orange-400">
+                {(opportunity.old_booking_provider || opportunity.old_booking_confirmation_code) ? ' · ' : ''}
+                Cancel by {formatDate(opportunity.cancellation_scheduled_at)}
+              </span>
+            )}
+          </div>
+        )}
       </div>
       <div className="text-right">
         <div className="text-xs text-muted-foreground">

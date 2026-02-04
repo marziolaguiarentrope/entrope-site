@@ -2,6 +2,67 @@
 const API_BASE = '/api/proxy';
 
 // Types matching the gateway schemas
+
+// Passenger info from FlightBookingResponse
+export interface PassengerSummary {
+  id: string | null;
+  name: string;
+  is_primary: boolean;
+  date_of_birth: string | null;
+  citizenship: string | null;
+}
+
+// Hydrated flight booking details from admin gateway
+export interface FlightBookingDetail {
+  id: string;
+  user_id: string;
+  status: string;
+  source: string;
+  booking_channel: string | null;
+  booking_provider: string | null;
+  airline: string | null;
+  airline_code: string | null;
+  origin_airport: string | null;
+  destination_airport: string | null;
+  departure_time: string | null;
+  arrival_time: string | null;
+  cabin_class: string | null;
+  cash_paid: { amount: number; currency: string } | null;
+  record_locator: string | null;
+  passengers: PassengerSummary[];
+  created_at: string;
+  updated_at: string;
+}
+
+// Guest info from HotelBookingResponse
+export interface GuestSummary {
+  id: string | null;
+  name: string;
+  is_primary: boolean;
+  date_of_birth: string | null;
+  citizenship: string | null;
+}
+
+// Hydrated hotel booking details from admin gateway
+export interface HotelBookingDetail {
+  id: string;
+  user_id: string;
+  status: string;
+  source: string;
+  hotel_name: string | null;
+  hotel_chain: string | null;
+  city: string | null;
+  check_in_date: string | null;
+  check_out_date: string | null;
+  room_type: string | null;
+  cash_paid: { amount: number; currency: string } | null;
+  confirmation_number: string | null;
+  booking_provider: string | null;
+  guests: GuestSummary[];
+  created_at: string;
+  updated_at: string;
+}
+
 export interface Task {
   id: string;
   user_id: string;
@@ -16,8 +77,12 @@ export interface Task {
   claimed_by: string | null;
   claimed_at: string | null;
   blocked_reason: string | null;
+  scheduled_for: string | null;
   completed_at: string | null;
   created_at: string;
+  valid_failure_reasons: string[];
+  flight_booking: FlightBookingDetail | null;
+  hotel_booking: HotelBookingDetail | null;
 }
 
 export interface TaskListResponse {
@@ -202,7 +267,10 @@ export interface HotelOpportunity {
   payment_currency: string | null;
   payment_due_at: string | null;
   old_booking_status: string | null;
+  old_booking_provider: string | null;
+  old_booking_confirmation_code: string | null;
   cancellation_capability: string | null;
+  cancellation_scheduled_at: string | null;
   created_at: string;
 }
 
