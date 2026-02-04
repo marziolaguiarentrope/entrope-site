@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 
-const API_BASE = 'https://staging-admin-gateway.onrender.com';
+const API_BASE = process.env.ADMIN_GATEWAY_URL || 'https://staging-admin-gateway.onrender.com';
 
 async function getIdToken(): Promise<string | null> {
   const session = await getServerSession(authOptions);
