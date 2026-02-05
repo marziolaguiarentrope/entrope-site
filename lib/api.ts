@@ -606,12 +606,37 @@ export interface FlightBookingPatchRequest {
   confirmation_code?: string;
   booking_provider?: string;
   verification_status?: 'unverified' | 'functional' | 'complete';
+  itinerary?: {
+    legs?: Array<{
+      departure_airport?: string;
+      arrival_airport?: string;
+      departure_time?: string;
+      arrival_time?: string;
+      airline?: string;
+      flight_number?: string;
+      cabin_class?: string;
+    }>;
+  };
+  customer_price?: {
+    amount: number;
+    currency: string;
+  };
 }
 
 export interface HotelBookingPatchRequest {
   confirmation_code?: string;
   booking_provider?: string;
   verification_status?: 'unverified' | 'functional' | 'complete';
+  stay?: {
+    check_in_date?: string;
+    check_out_date?: string;
+    hotel_name?: string;
+    room_type?: string;
+  };
+  customer_price?: {
+    amount: number;
+    currency: string;
+  };
 }
 
 export interface BookingPatchResponse {

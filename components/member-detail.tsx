@@ -75,8 +75,8 @@ function Section({
 }
 
 // Format helpers
-function formatMoney(amount: number | null, currency: string | null): string {
-  if (amount === null) return 'N/A';
+function formatMoney(amount: number | null | undefined, currency: string | null | undefined): string {
+  if (amount === null || amount === undefined) return 'N/A';
   return new Intl.NumberFormat('en-US', {
     style: 'currency',
     currency: currency || 'USD',
@@ -219,10 +219,36 @@ function EditBookingModal({
   onSave: () => void;
 }) {
   const isHotel = booking.type === 'HOTEL';
-  const data = isHotel ? booking.hotel : booking.flight;
+  const flightData = booking.flight;
+  const hotelData = booking.hotel;
 
-  const [confirmationCode, setConfirmationCode] = useState(data?.confirmation_number || '');
-  const [bookingProvider, setBookingProvider] = useState(data?.booking_provider || '');
+  const [confirmationCode, setConfirmationCode] = useState(
+    (isHotel ? hotelData?.confirmation_number : flightData?.confirmation_number) || ''
+  );
+  const [bookingProvider, setBookingProvider] = useState(
+    (isHotel ? hotelData?.booking_provider : flightData?.booking_provider) || ''
+  );
+
+  // Price fields (stored in cents)
+  const currentPrice = isHotel ? hotelData?.customer_price : flightData?.customer_price;
+  const currentCurrency = isHotel ? hotelData?.currency : flightData?.currency;
+  const [priceAmount, setPriceAmount] = useState(
+    currentPrice !== null && currentPrice !== undefined ? (currentPrice / 100).toFixed(2) : ''
+  );
+  const [priceCurrency, setPriceCurrency] = useState(currentCurrency || 'USD');
+
+  // Hotel-specific fields
+  const [hotelName, setHotelName] = useState(hotelData?.hotel_name || '');
+  const [checkInDate, setCheckInDate] = useState(hotelData?.check_in_date || '');
+  const [checkOutDate, setCheckOutDate] = useState(hotelData?.check_out_date || '');
+  const [roomType, setRoomType] = useState(hotelData?.room_type || '');
+
+  // Flight-specific fields (first leg only for simplicity)
+  const firstLeg = flightData?.legs?.[0];
+  const [departureAirport, setDepartureAirport] = useState(firstLeg?.departure_airport || '');
+  const [arrivalAirport, setArrivalAirport] = useState(firstLeg?.arrival_airport || '');
+  const [departureTime, setDepartureTime] = useState(firstLeg?.departure_time?.slice(0, 16) || '');
+
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -231,22 +257,72 @@ function EditBookingModal({
     setError(null);
 
     try {
-      const patchData: FlightBookingPatchRequest | HotelBookingPatchRequest = {};
-      if (confirmationCode !== (data?.confirmation_number || '')) {
-        patchData.confirmation_code = confirmationCode;
-      }
-      if (bookingProvider !== (data?.booking_provider || '')) {
-        patchData.booking_provider = bookingProvider;
-      }
-
-      if (Object.keys(patchData).length === 0) {
-        onClose();
-        return;
-      }
-
       if (isHotel) {
+        const patchData: HotelBookingPatchRequest = {};
+
+        if (confirmationCode !== (hotelData?.confirmation_number || '')) {
+          patchData.confirmation_code = confirmationCode;
+        }
+        if (bookingProvider !== (hotelData?.booking_provider || '')) {
+          patchData.booking_provider = bookingProvider;
+        }
+
+        // Price change
+        const newPriceAmount = priceAmount ? Math.round(parseFloat(priceAmount) * 100) : null;
+        if (newPriceAmount !== null && (newPriceAmount !== currentPrice || priceCurrency !== currentCurrency)) {
+          patchData.customer_price = { amount: newPriceAmount, currency: priceCurrency };
+        }
+
+        // Stay changes
+        const stayChanges: HotelBookingPatchRequest['stay'] = {};
+        if (hotelName !== (hotelData?.hotel_name || '')) stayChanges.hotel_name = hotelName;
+        if (checkInDate !== (hotelData?.check_in_date || '')) stayChanges.check_in_date = checkInDate;
+        if (checkOutDate !== (hotelData?.check_out_date || '')) stayChanges.check_out_date = checkOutDate;
+        if (roomType !== (hotelData?.room_type || '')) stayChanges.room_type = roomType;
+        if (Object.keys(stayChanges).length > 0) {
+          patchData.stay = stayChanges;
+        }
+
+        if (Object.keys(patchData).length === 0) {
+          onClose();
+          return;
+        }
+
         await api.patchHotelBooking(booking.id, patchData);
       } else {
+        const patchData: FlightBookingPatchRequest = {};
+
+        if (confirmationCode !== (flightData?.confirmation_number || '')) {
+          patchData.confirmation_code = confirmationCode;
+        }
+        if (bookingProvider !== (flightData?.booking_provider || '')) {
+          patchData.booking_provider = bookingProvider;
+        }
+
+        // Price change
+        const newPriceAmount = priceAmount ? Math.round(parseFloat(priceAmount) * 100) : null;
+        if (newPriceAmount !== null && (newPriceAmount !== currentPrice || priceCurrency !== currentCurrency)) {
+          patchData.customer_price = { amount: newPriceAmount, currency: priceCurrency };
+        }
+
+        // Itinerary changes (first leg only)
+        if (departureAirport !== (firstLeg?.departure_airport || '') ||
+            arrivalAirport !== (firstLeg?.arrival_airport || '') ||
+            departureTime !== (firstLeg?.departure_time?.slice(0, 16) || '')) {
+          patchData.itinerary = {
+            legs: [{
+              departure_airport: departureAirport || undefined,
+              arrival_airport: arrivalAirport || undefined,
+              departure_time: departureTime ? departureTime + ':00' : undefined,
+            }],
+          };
+        }
+
+        if (Object.keys(patchData).length === 0) {
+          onClose();
+          return;
+        }
+
         await api.patchFlightBooking(booking.id, patchData);
       }
 
@@ -261,29 +337,148 @@ function EditBookingModal({
 
   return (
     <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-[60]">
-      <div className="bg-card border border-border rounded-lg p-4 w-full max-w-md">
+      <div className="bg-card border border-border rounded-lg p-4 w-full max-w-lg max-h-[90vh] overflow-y-auto">
         <h3 className="text-lg font-semibold mb-4">Edit {isHotel ? 'Hotel' : 'Flight'} Booking</h3>
 
         <div className="space-y-4">
-          <div>
-            <label className="block text-sm text-muted-foreground mb-1">Confirmation Code</label>
-            <input
-              type="text"
-              value={confirmationCode}
-              onChange={(e) => setConfirmationCode(e.target.value)}
-              className="w-full px-3 py-2 bg-background border border-border rounded focus:outline-none focus:ring-2 focus:ring-primary"
-            />
+          {/* Common fields */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-sm text-muted-foreground mb-1">Confirmation Code</label>
+              <input
+                type="text"
+                value={confirmationCode}
+                onChange={(e) => setConfirmationCode(e.target.value)}
+                className="w-full px-3 py-2 bg-background border border-border rounded focus:outline-none focus:ring-2 focus:ring-primary text-sm"
+              />
+            </div>
+            <div>
+              <label className="block text-sm text-muted-foreground mb-1">Booking Provider</label>
+              <input
+                type="text"
+                value={bookingProvider}
+                onChange={(e) => setBookingProvider(e.target.value)}
+                className="w-full px-3 py-2 bg-background border border-border rounded focus:outline-none focus:ring-2 focus:ring-primary text-sm"
+              />
+            </div>
           </div>
 
-          <div>
-            <label className="block text-sm text-muted-foreground mb-1">Booking Provider</label>
-            <input
-              type="text"
-              value={bookingProvider}
-              onChange={(e) => setBookingProvider(e.target.value)}
-              className="w-full px-3 py-2 bg-background border border-border rounded focus:outline-none focus:ring-2 focus:ring-primary"
-            />
+          {/* Price */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-sm text-muted-foreground mb-1">Price</label>
+              <input
+                type="number"
+                step="0.01"
+                value={priceAmount}
+                onChange={(e) => setPriceAmount(e.target.value)}
+                placeholder="0.00"
+                className="w-full px-3 py-2 bg-background border border-border rounded focus:outline-none focus:ring-2 focus:ring-primary text-sm"
+              />
+            </div>
+            <div>
+              <label className="block text-sm text-muted-foreground mb-1">Currency</label>
+              <select
+                value={priceCurrency}
+                onChange={(e) => setPriceCurrency(e.target.value)}
+                className="w-full px-3 py-2 bg-background border border-border rounded focus:outline-none focus:ring-2 focus:ring-primary text-sm"
+              >
+                <option value="USD">USD</option>
+                <option value="EUR">EUR</option>
+                <option value="GBP">GBP</option>
+                <option value="CAD">CAD</option>
+                <option value="AUD">AUD</option>
+              </select>
+            </div>
           </div>
+
+          {/* Hotel-specific fields */}
+          {isHotel && (
+            <>
+              <div>
+                <label className="block text-sm text-muted-foreground mb-1">Hotel Name</label>
+                <input
+                  type="text"
+                  value={hotelName}
+                  onChange={(e) => setHotelName(e.target.value)}
+                  className="w-full px-3 py-2 bg-background border border-border rounded focus:outline-none focus:ring-2 focus:ring-primary text-sm"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm text-muted-foreground mb-1">Check-in Date</label>
+                  <input
+                    type="date"
+                    value={checkInDate}
+                    onChange={(e) => setCheckInDate(e.target.value)}
+                    className="w-full px-3 py-2 bg-background border border-border rounded focus:outline-none focus:ring-2 focus:ring-primary text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm text-muted-foreground mb-1">Check-out Date</label>
+                  <input
+                    type="date"
+                    value={checkOutDate}
+                    onChange={(e) => setCheckOutDate(e.target.value)}
+                    className="w-full px-3 py-2 bg-background border border-border rounded focus:outline-none focus:ring-2 focus:ring-primary text-sm"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm text-muted-foreground mb-1">Room Type</label>
+                <input
+                  type="text"
+                  value={roomType}
+                  onChange={(e) => setRoomType(e.target.value)}
+                  className="w-full px-3 py-2 bg-background border border-border rounded focus:outline-none focus:ring-2 focus:ring-primary text-sm"
+                />
+              </div>
+            </>
+          )}
+
+          {/* Flight-specific fields */}
+          {!isHotel && (
+            <>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm text-muted-foreground mb-1">Departure Airport</label>
+                  <input
+                    type="text"
+                    value={departureAirport}
+                    onChange={(e) => setDepartureAirport(e.target.value.toUpperCase())}
+                    maxLength={3}
+                    placeholder="JFK"
+                    className="w-full px-3 py-2 bg-background border border-border rounded focus:outline-none focus:ring-2 focus:ring-primary text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm text-muted-foreground mb-1">Arrival Airport</label>
+                  <input
+                    type="text"
+                    value={arrivalAirport}
+                    onChange={(e) => setArrivalAirport(e.target.value.toUpperCase())}
+                    maxLength={3}
+                    placeholder="LAX"
+                    className="w-full px-3 py-2 bg-background border border-border rounded focus:outline-none focus:ring-2 focus:ring-primary text-sm"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm text-muted-foreground mb-1">Departure Time</label>
+                <input
+                  type="datetime-local"
+                  value={departureTime}
+                  onChange={(e) => setDepartureTime(e.target.value)}
+                  className="w-full px-3 py-2 bg-background border border-border rounded focus:outline-none focus:ring-2 focus:ring-primary text-sm"
+                />
+              </div>
+              {flightData?.legs && flightData.legs.length > 1 && (
+                <p className="text-xs text-muted-foreground">
+                  Note: This booking has {flightData.legs.length} legs. Only the first leg can be edited here.
+                </p>
+              )}
+            </>
+          )}
 
           {error && (
             <div className="text-red-400 text-sm">{error}</div>
