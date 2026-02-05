@@ -402,6 +402,24 @@ export interface TravelerProfile {
   loyalty_programs: Record<string, string>;
 }
 
+export interface FlightSegmentView {
+  flight_number: string;
+  airline: string;
+  airline_name: string;
+  origin: string;
+  destination: string;
+  departure: string;
+  arrival: string;
+  cabin: string;
+  seat: string | null;
+}
+
+export interface FlightLegView {
+  direction: string; // OUTBOUND, RETURN
+  segments: FlightSegmentView[];
+}
+
+// Legacy format (some endpoints may still use this)
 export interface FlightLeg {
   departure_airport: string;
   arrival_airport: string;
@@ -412,31 +430,51 @@ export interface FlightLeg {
   cabin_class: string | null;
 }
 
+export interface MoneyView {
+  amount: number;
+  currency: string;
+}
+
 export interface FlightBookingView {
-  confirmation_number: string | null;
-  booking_provider: string | null;
-  legs: FlightLeg[];
+  confirmation_code: string | null;
+  booked_with: string | null;
+  legs: FlightLegView[];
   passengers: string[];
-  customer_price: number | null;
-  currency: string | null;
-  reprice_eligibility: string; // ELIGIBLE, INELIGIBLE
+  total_price: MoneyView;
+  is_repriceable: boolean;
   reprice_ineligible_reason: string | null;
+  // Legacy fields (for backwards compat)
+  confirmation_number?: string | null;
+  booking_provider?: string | null;
+  customer_price?: number | null;
+  currency?: string | null;
+  reprice_eligibility?: string;
 }
 
 export interface HotelBookingView {
-  confirmation_number: string | null;
-  booking_provider: string | null;
-  hotel_name: string | null;
+  confirmation_code: string | null;
+  booked_with: string | null;
+  hotel_name: string;
+  hotel_city: string;
   hotel_id: string | null;
-  check_in_date: string | null;
-  check_out_date: string | null;
-  room_type: string | null;
-  guests: number | null;
-  customer_price: number | null;
-  currency: string | null;
-  refundability: string | null;
-  cancellation_deadline: string | null;
-  cancellation_capability: string | null;
+  check_in: string;
+  check_out: string;
+  nights: number;
+  room_type: string;
+  guests: string[];
+  total_price: MoneyView;
+  is_repriceable: boolean;
+  reprice_ineligible_reason: string | null;
+  // Legacy fields (for backwards compat)
+  confirmation_number?: string | null;
+  booking_provider?: string | null;
+  check_in_date?: string | null;
+  check_out_date?: string | null;
+  customer_price?: number | null;
+  currency?: string | null;
+  refundability?: string | null;
+  cancellation_deadline?: string | null;
+  cancellation_capability?: string | null;
 }
 
 export interface BookingView {

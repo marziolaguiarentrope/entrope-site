@@ -15,10 +15,49 @@ import {
   CommunicationView,
   PendingTaskView,
   TravelerProfile,
+  FlightBookingView,
+  HotelBookingView,
   api,
   FlightBookingPatchRequest,
   HotelBookingPatchRequest,
 } from '@/lib/api';
+
+// Helper to get price from booking (handles both old and new schema)
+function getBookingPrice(flight: FlightBookingView | null, hotel: HotelBookingView | null): { amount: number | null; currency: string } {
+  if (flight) {
+    // New schema: total_price is Money object
+    if (flight.total_price?.amount !== undefined) {
+      return { amount: flight.total_price.amount, currency: flight.total_price.currency };
+    }
+    // Legacy: customer_price is cents
+    if (flight.customer_price !== undefined) {
+      return { amount: flight.customer_price, currency: flight.currency || 'USD' };
+    }
+  }
+  if (hotel) {
+    if (hotel.total_price?.amount !== undefined) {
+      return { amount: hotel.total_price.amount, currency: hotel.total_price.currency };
+    }
+    if (hotel.customer_price !== undefined) {
+      return { amount: hotel.customer_price, currency: hotel.currency || 'USD' };
+    }
+  }
+  return { amount: null, currency: 'USD' };
+}
+
+// Helper to get confirmation code (handles both old and new schema)
+function getConfirmationCode(flight: FlightBookingView | null, hotel: HotelBookingView | null): string | null {
+  if (flight) return flight.confirmation_code ?? flight.confirmation_number ?? null;
+  if (hotel) return hotel.confirmation_code ?? hotel.confirmation_number ?? null;
+  return null;
+}
+
+// Helper to get booking provider (handles both old and new schema)
+function getBookingProvider(flight: FlightBookingView | null, hotel: HotelBookingView | null): string | null {
+  if (flight) return flight.booked_with ?? flight.booking_provider ?? null;
+  if (hotel) return hotel.booked_with ?? hotel.booking_provider ?? null;
+  return null;
+}
 
 // Collapsible section component
 function Section({
@@ -239,15 +278,53 @@ function EditBookingModal({
 
   // Hotel-specific fields
   const [hotelName, setHotelName] = useState(hotelData?.hotel_name || '');
-  const [checkInDate, setCheckInDate] = useState(hotelData?.check_in_date || '');
-  const [checkOutDate, setCheckOutDate] = useState(hotelData?.check_out_date || '');
+  const [checkInDate, setCheckInDate] = useState(hotelData?.check_in || hotelData?.check_in_date || '');
+  const [checkOutDate, setCheckOutDate] = useState(hotelData?.check_out || hotelData?.check_out_date || '');
   const [roomType, setRoomType] = useState(hotelData?.room_type || '');
 
-  // Flight-specific fields (first leg only for simplicity)
-  const firstLeg = flightData?.legs?.[0];
-  const [departureAirport, setDepartureAirport] = useState(firstLeg?.departure_airport || '');
-  const [arrivalAirport, setArrivalAirport] = useState(firstLeg?.arrival_airport || '');
-  const [departureTime, setDepartureTime] = useState(firstLeg?.departure_time?.slice(0, 16) || '');
+  // Flight-specific fields - handle both old and new schema
+  // New schema: legs[].segments[].origin/destination/departure
+  // Old schema: legs[].departure_airport/arrival_airport/departure_time
+  const getFlightFields = () => {
+    const legs = flightData?.legs || [];
+    const outboundLeg = legs.find((l: { direction?: string }) => l.direction === 'OUTBOUND') || legs[0];
+    const returnLeg = legs.find((l: { direction?: string }) => l.direction === 'RETURN') || legs[1];
+
+    // Helper to extract from new schema
+    const getFromLeg = (leg: typeof legs[0] | undefined) => {
+      if (!leg) return { dep: '', arr: '', time: '' };
+      // New schema
+      if ('segments' in leg && leg.segments?.length > 0) {
+        const firstSeg = leg.segments[0];
+        const lastSeg = leg.segments[leg.segments.length - 1];
+        return {
+          dep: firstSeg.origin || '',
+          arr: lastSeg.destination || '',
+          time: firstSeg.departure?.slice(0, 16) || '',
+        };
+      }
+      // Old schema
+      return {
+        dep: (leg as { departure_airport?: string }).departure_airport || '',
+        arr: (leg as { arrival_airport?: string }).arrival_airport || '',
+        time: ((leg as { departure_time?: string }).departure_time || '').slice(0, 16),
+      };
+    };
+
+    return {
+      outbound: getFromLeg(outboundLeg),
+      return: getFromLeg(returnLeg),
+      hasReturn: !!returnLeg && legs.length > 1,
+    };
+  };
+
+  const flightFields = getFlightFields();
+  const [outboundDep, setOutboundDep] = useState(flightFields.outbound.dep);
+  const [outboundArr, setOutboundArr] = useState(flightFields.outbound.arr);
+  const [outboundTime, setOutboundTime] = useState(flightFields.outbound.time);
+  const [returnDep, setReturnDep] = useState(flightFields.return.dep);
+  const [returnArr, setReturnArr] = useState(flightFields.return.arr);
+  const [returnTime, setReturnTime] = useState(flightFields.return.time);
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -260,10 +337,13 @@ function EditBookingModal({
       if (isHotel) {
         const patchData: HotelBookingPatchRequest = {};
 
-        if (confirmationCode !== (hotelData?.confirmation_number || '')) {
+        const origConfCode = hotelData?.confirmation_code ?? hotelData?.confirmation_number ?? '';
+        const origProvider = hotelData?.booked_with ?? hotelData?.booking_provider ?? '';
+
+        if (confirmationCode !== origConfCode) {
           patchData.confirmation_code = confirmationCode;
         }
-        if (bookingProvider !== (hotelData?.booking_provider || '')) {
+        if (bookingProvider !== origProvider) {
           patchData.booking_provider = bookingProvider;
         }
 
@@ -275,9 +355,11 @@ function EditBookingModal({
 
         // Stay changes
         const stayChanges: HotelBookingPatchRequest['stay'] = {};
+        const origCheckIn = hotelData?.check_in || hotelData?.check_in_date || '';
+        const origCheckOut = hotelData?.check_out || hotelData?.check_out_date || '';
         if (hotelName !== (hotelData?.hotel_name || '')) stayChanges.hotel_name = hotelName;
-        if (checkInDate !== (hotelData?.check_in_date || '')) stayChanges.check_in_date = checkInDate;
-        if (checkOutDate !== (hotelData?.check_out_date || '')) stayChanges.check_out_date = checkOutDate;
+        if (checkInDate !== origCheckIn) stayChanges.check_in_date = checkInDate;
+        if (checkOutDate !== origCheckOut) stayChanges.check_out_date = checkOutDate;
         if (roomType !== (hotelData?.room_type || '')) stayChanges.room_type = roomType;
         if (Object.keys(stayChanges).length > 0) {
           patchData.stay = stayChanges;
@@ -292,10 +374,13 @@ function EditBookingModal({
       } else {
         const patchData: FlightBookingPatchRequest = {};
 
-        if (confirmationCode !== (flightData?.confirmation_number || '')) {
+        const origConfCode = flightData?.confirmation_code ?? flightData?.confirmation_number ?? '';
+        const origProvider = flightData?.booked_with ?? flightData?.booking_provider ?? '';
+
+        if (confirmationCode !== origConfCode) {
           patchData.confirmation_code = confirmationCode;
         }
-        if (bookingProvider !== (flightData?.booking_provider || '')) {
+        if (bookingProvider !== origProvider) {
           patchData.booking_provider = bookingProvider;
         }
 
@@ -305,17 +390,39 @@ function EditBookingModal({
           patchData.customer_price = { amount: newPriceAmount, currency: priceCurrency };
         }
 
-        // Itinerary changes (first leg only)
-        if (departureAirport !== (firstLeg?.departure_airport || '') ||
-            arrivalAirport !== (firstLeg?.arrival_airport || '') ||
-            departureTime !== (firstLeg?.departure_time?.slice(0, 16) || '')) {
-          patchData.itinerary = {
-            legs: [{
-              departure_airport: departureAirport || undefined,
-              arrival_airport: arrivalAirport || undefined,
-              departure_time: departureTime ? departureTime + ':00' : undefined,
-            }],
-          };
+        // Itinerary changes - outbound and return legs
+        const outboundChanged = outboundDep !== flightFields.outbound.dep ||
+                                outboundArr !== flightFields.outbound.arr ||
+                                outboundTime !== flightFields.outbound.time;
+        const returnChanged = flightFields.hasReturn && (
+                              returnDep !== flightFields.return.dep ||
+                              returnArr !== flightFields.return.arr ||
+                              returnTime !== flightFields.return.time);
+
+        if (outboundChanged || returnChanged) {
+          const legs: FlightBookingPatchRequest['itinerary'] = { legs: [] };
+
+          // Outbound leg
+          if (outboundDep || outboundArr || outboundTime) {
+            legs.legs?.push({
+              departure_airport: outboundDep || undefined,
+              arrival_airport: outboundArr || undefined,
+              departure_time: outboundTime ? outboundTime + ':00' : undefined,
+            });
+          }
+
+          // Return leg
+          if (flightFields.hasReturn && (returnDep || returnArr || returnTime)) {
+            legs.legs?.push({
+              departure_airport: returnDep || undefined,
+              arrival_airport: returnArr || undefined,
+              departure_time: returnTime ? returnTime + ':00' : undefined,
+            });
+          }
+
+          if (legs.legs && legs.legs.length > 0) {
+            patchData.itinerary = legs;
+          }
         }
 
         if (Object.keys(patchData).length === 0) {
@@ -439,24 +546,26 @@ function EditBookingModal({
           {/* Flight-specific fields */}
           {!isHotel && (
             <>
+              {/* Outbound leg */}
+              <div className="text-sm font-medium text-muted-foreground">Outbound</div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-sm text-muted-foreground mb-1">Departure Airport</label>
+                  <label className="block text-sm text-muted-foreground mb-1">From</label>
                   <input
                     type="text"
-                    value={departureAirport}
-                    onChange={(e) => setDepartureAirport(e.target.value.toUpperCase())}
+                    value={outboundDep}
+                    onChange={(e) => setOutboundDep(e.target.value.toUpperCase())}
                     maxLength={3}
                     placeholder="JFK"
                     className="w-full px-3 py-2 bg-background border border-border rounded focus:outline-none focus:ring-2 focus:ring-primary text-sm"
                   />
                 </div>
                 <div>
-                  <label className="block text-sm text-muted-foreground mb-1">Arrival Airport</label>
+                  <label className="block text-sm text-muted-foreground mb-1">To</label>
                   <input
                     type="text"
-                    value={arrivalAirport}
-                    onChange={(e) => setArrivalAirport(e.target.value.toUpperCase())}
+                    value={outboundArr}
+                    onChange={(e) => setOutboundArr(e.target.value.toUpperCase())}
                     maxLength={3}
                     placeholder="LAX"
                     className="w-full px-3 py-2 bg-background border border-border rounded focus:outline-none focus:ring-2 focus:ring-primary text-sm"
@@ -467,15 +576,50 @@ function EditBookingModal({
                 <label className="block text-sm text-muted-foreground mb-1">Departure Time</label>
                 <input
                   type="datetime-local"
-                  value={departureTime}
-                  onChange={(e) => setDepartureTime(e.target.value)}
+                  value={outboundTime}
+                  onChange={(e) => setOutboundTime(e.target.value)}
                   className="w-full px-3 py-2 bg-background border border-border rounded focus:outline-none focus:ring-2 focus:ring-primary text-sm"
                 />
               </div>
-              {flightData?.legs && flightData.legs.length > 1 && (
-                <p className="text-xs text-muted-foreground">
-                  Note: This booking has {flightData.legs.length} legs. Only the first leg can be edited here.
-                </p>
+
+              {/* Return leg */}
+              {flightFields.hasReturn && (
+                <>
+                  <div className="text-sm font-medium text-muted-foreground mt-2">Return</div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-sm text-muted-foreground mb-1">From</label>
+                      <input
+                        type="text"
+                        value={returnDep}
+                        onChange={(e) => setReturnDep(e.target.value.toUpperCase())}
+                        maxLength={3}
+                        placeholder="LAX"
+                        className="w-full px-3 py-2 bg-background border border-border rounded focus:outline-none focus:ring-2 focus:ring-primary text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm text-muted-foreground mb-1">To</label>
+                      <input
+                        type="text"
+                        value={returnArr}
+                        onChange={(e) => setReturnArr(e.target.value.toUpperCase())}
+                        maxLength={3}
+                        placeholder="JFK"
+                        className="w-full px-3 py-2 bg-background border border-border rounded focus:outline-none focus:ring-2 focus:ring-primary text-sm"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm text-muted-foreground mb-1">Departure Time</label>
+                    <input
+                      type="datetime-local"
+                      value={returnTime}
+                      onChange={(e) => setReturnTime(e.target.value)}
+                      className="w-full px-3 py-2 bg-background border border-border rounded focus:outline-none focus:ring-2 focus:ring-primary text-sm"
+                    />
+                  </div>
+                </>
               )}
             </>
           )}
@@ -586,67 +730,118 @@ function BookingCard({ booking, onRefresh }: { booking: BookingView; onRefresh?:
           <span className="text-xs text-muted-foreground">{booking.agent}</span>
         </div>
 
-        {isHotel && booking.hotel && (
-          <>
-            <div className="font-medium">{booking.hotel.hotel_name || 'Unknown Hotel'}</div>
-            <div className="text-xs text-muted-foreground">
-              {formatDate(booking.hotel.check_in_date)} - {formatDate(booking.hotel.check_out_date)}
-              {booking.hotel.room_type && ` · ${booking.hotel.room_type}`}
-            </div>
-            <div className="text-xs mt-1">
-              <span className="text-muted-foreground">Price: </span>
-              {formatMoney(booking.hotel.customer_price, booking.hotel.currency)}
-              {booking.hotel.refundability && (
-                <span className={cn('ml-2', booking.hotel.refundability === 'REFUNDABLE' ? 'text-green-400' : 'text-yellow-400')}>
-                  {booking.hotel.refundability}
-                </span>
-              )}
-            </div>
-            {booking.hotel.cancellation_deadline && (
+        {isHotel && booking.hotel && (() => {
+          const price = getBookingPrice(null, booking.hotel);
+          const checkIn = booking.hotel.check_in || booking.hotel.check_in_date;
+          const checkOut = booking.hotel.check_out || booking.hotel.check_out_date;
+          return (
+            <>
+              <div className="font-medium">{booking.hotel.hotel_name || 'Unknown Hotel'}</div>
               <div className="text-xs text-muted-foreground">
-                Cancel by: {formatDateTime(booking.hotel.cancellation_deadline)}
+                {formatDate(checkIn)} - {formatDate(checkOut)}
+                {booking.hotel.room_type && ` · ${booking.hotel.room_type}`}
               </div>
-            )}
-          </>
-        )}
+              <div className="text-xs mt-1">
+                <span className="text-muted-foreground">Price: </span>
+                {formatMoney(price.amount, price.currency)}
+                {booking.hotel.refundability && (
+                  <span className={cn('ml-2', booking.hotel.refundability === 'REFUNDABLE' ? 'text-green-400' : 'text-yellow-400')}>
+                    {booking.hotel.refundability}
+                  </span>
+                )}
+              </div>
+              {booking.hotel.cancellation_deadline && (
+                <div className="text-xs text-muted-foreground">
+                  Cancel by: {formatDateTime(booking.hotel.cancellation_deadline)}
+                </div>
+              )}
+            </>
+          );
+        })()}
 
-        {!isHotel && booking.flight && (
-          <>
-            <div className="font-medium">
-              {booking.flight.legs?.map((leg, i) => (
-                <span key={i}>
-                  {i > 0 && ' → '}
-                  {leg.departure_airport}-{leg.arrival_airport}
-                </span>
-              ))}
-            </div>
-            <div className="text-xs text-muted-foreground">
-              {booking.flight.legs?.[0] && formatDateTime(booking.flight.legs[0].departure_time)}
-              {booking.flight.passengers?.length > 0 && ` · ${booking.flight.passengers.length} pax`}
-            </div>
-            <div className="text-xs mt-1">
-              <span className="text-muted-foreground">Price: </span>
-              {formatMoney(booking.flight.customer_price, booking.flight.currency)}
-            </div>
-            <div className="text-xs mt-1">
-              <span className={cn(
-                booking.flight.reprice_eligibility === 'ELIGIBLE' ? 'text-green-400' : 'text-yellow-400'
-              )}>
-                Reprice: {booking.flight.reprice_eligibility}
+        {!isHotel && booking.flight && (() => {
+          const price = getBookingPrice(booking.flight, null);
+          const legs = booking.flight.legs || [];
+
+          // Handle new schema (legs with segments) vs old schema (legs with departure_airport)
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const formatLegRoute = (leg: any) => {
+            // New schema: leg has direction and segments
+            if (leg.segments?.length > 0) {
+              const firstSeg = leg.segments[0];
+              const lastSeg = leg.segments[leg.segments.length - 1];
+              return `${firstSeg.origin}-${lastSeg.destination}`;
+            }
+            // Old schema: leg has departure_airport/arrival_airport directly
+            if (leg.departure_airport) {
+              return `${leg.departure_airport}-${leg.arrival_airport}`;
+            }
+            return '';
+          };
+
+          const getFirstDeparture = () => {
+            if (legs.length === 0) return null;
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const firstLeg = legs[0] as any;
+            if (firstLeg.segments?.length > 0) {
+              return firstLeg.segments[0].departure;
+            }
+            if (firstLeg.departure_time) {
+              return firstLeg.departure_time;
+            }
+            return null;
+          };
+
+          const isRepriceable = booking.flight.is_repriceable ?? (booking.flight.reprice_eligibility === 'ELIGIBLE');
+
+          return (
+            <>
+              <div className="font-medium">
+                {legs.map((leg, i) => {
+                  const direction = 'direction' in leg ? leg.direction : null;
+                  return (
+                    <span key={i}>
+                      {i > 0 && ' → '}
+                      {direction && <span className="text-muted-foreground text-xs mr-1">({direction})</span>}
+                      {formatLegRoute(leg)}
+                    </span>
+                  );
+                })}
+                {legs.length === 0 && '-'}
+              </div>
+              <div className="text-xs text-muted-foreground">
+                {getFirstDeparture() && formatDateTime(getFirstDeparture())}
+                {booking.flight.passengers?.length > 0 && ` · ${booking.flight.passengers.length} pax`}
+              </div>
+              <div className="text-xs mt-1">
+                <span className="text-muted-foreground">Price: </span>
+                {formatMoney(price.amount, price.currency)}
+              </div>
+              <div className="text-xs mt-1">
+                <span className={cn(
+                  isRepriceable ? 'text-green-400' : 'text-yellow-400'
+                )}>
+                  Reprice: {isRepriceable ? 'ELIGIBLE' : 'INELIGIBLE'}
               </span>
               {booking.flight.reprice_ineligible_reason && (
                 <span className="text-muted-foreground ml-1">({booking.flight.reprice_ineligible_reason})</span>
               )}
             </div>
           </>
-        )}
+          );
+        })()}
 
-        {data.confirmation_number && (
-          <div className="text-xs text-muted-foreground mt-1">
-            Conf: {data.confirmation_number}
-            {data.booking_provider && ` via ${data.booking_provider}`}
-          </div>
-        )}
+        {(() => {
+          const confCode = getConfirmationCode(booking.flight, booking.hotel);
+          const provider = getBookingProvider(booking.flight, booking.hotel);
+          if (!confCode) return null;
+          return (
+            <div className="text-xs text-muted-foreground mt-1">
+              Conf: {confCode}
+              {provider && ` via ${provider}`}
+            </div>
+          );
+        })()}
       </div>
 
       {showEditModal && (
