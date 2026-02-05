@@ -258,6 +258,33 @@ class ApiClient {
     });
   }
 
+  async patchFlightBooking(
+    bookingId: string,
+    data: FlightBookingPatchRequest
+  ): Promise<BookingPatchResponse> {
+    return this.fetch<BookingPatchResponse>(`/bookings/flight/${bookingId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async patchHotelBooking(
+    bookingId: string,
+    data: HotelBookingPatchRequest
+  ): Promise<BookingPatchResponse> {
+    return this.fetch<BookingPatchResponse>(`/bookings/hotel/${bookingId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  }
+
+  // Watches
+  async regenerateWatch(bookingId: string): Promise<WatchRegenerateResponse> {
+    return this.fetch<WatchRegenerateResponse>(`/watches/regenerate/${bookingId}`, {
+      method: 'POST',
+    });
+  }
+
   // Emails
   async getEmailForBooking(bookingType: 'flight' | 'hotel', bookingId: string): Promise<RawEmail> {
     return this.fetch<RawEmail>(`/emails/for-booking/${bookingType}/${bookingId}`);
@@ -559,6 +586,31 @@ export interface RawEmail {
   to_address: string | null;
   received_at: string | null;
   attachments: Array<{ filename: string; content_type: string }> | null;
+}
+
+// Booking edit types
+export interface FlightBookingPatchRequest {
+  confirmation_code?: string;
+  booking_provider?: string;
+  verification_status?: 'unverified' | 'functional' | 'complete';
+}
+
+export interface HotelBookingPatchRequest {
+  confirmation_code?: string;
+  booking_provider?: string;
+  verification_status?: 'unverified' | 'functional' | 'complete';
+}
+
+export interface BookingPatchResponse {
+  booking_id: string;
+  updated_fields: string[];
+  trip_dates_recalculated: boolean;
+}
+
+export interface WatchRegenerateResponse {
+  old_watch_id: string | null;
+  new_watch_id: string;
+  booking_id: string;
 }
 
 export const api = new ApiClient(API_BASE);

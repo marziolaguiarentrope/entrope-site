@@ -104,6 +104,22 @@ export default function MembersPage() {
     }
   }
 
+  async function handleRefreshContext() {
+    if (!selectedMember) return;
+
+    setContextLoading(true);
+    setContextError(null);
+
+    try {
+      const context = await api.getMember(selectedMember.id);
+      setMemberContext(context);
+    } catch (err) {
+      setContextError(err instanceof Error ? err.message : 'Failed to refresh member context');
+    } finally {
+      setContextLoading(false);
+    }
+  }
+
   return (
     <div>
       {/* Header */}
@@ -166,6 +182,7 @@ export default function MembersPage() {
             setSelectedMember(null);
             setMemberContext(null);
           }}
+          onRefresh={handleRefreshContext}
           loading={contextLoading}
           error={contextError}
         />

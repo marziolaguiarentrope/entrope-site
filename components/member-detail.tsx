@@ -15,6 +15,9 @@ import {
   CommunicationView,
   PendingTaskView,
   TravelerProfile,
+  api,
+  FlightBookingPatchRequest,
+  HotelBookingPatchRequest,
 } from '@/lib/api';
 
 // Collapsible section component
@@ -205,9 +208,116 @@ function TravelerCard({ traveler }: { traveler: TravelerProfile }) {
   );
 }
 
-function BookingCard({ booking }: { booking: BookingView }) {
+// Edit Booking Modal
+function EditBookingModal({
+  booking,
+  onClose,
+  onSave,
+}: {
+  booking: BookingView;
+  onClose: () => void;
+  onSave: () => void;
+}) {
   const isHotel = booking.type === 'HOTEL';
   const data = isHotel ? booking.hotel : booking.flight;
+
+  const [confirmationCode, setConfirmationCode] = useState(data?.confirmation_number || '');
+  const [bookingProvider, setBookingProvider] = useState(data?.booking_provider || '');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleSave() {
+    setSaving(true);
+    setError(null);
+
+    try {
+      const patchData: FlightBookingPatchRequest | HotelBookingPatchRequest = {};
+      if (confirmationCode !== (data?.confirmation_number || '')) {
+        patchData.confirmation_code = confirmationCode;
+      }
+      if (bookingProvider !== (data?.booking_provider || '')) {
+        patchData.booking_provider = bookingProvider;
+      }
+
+      if (Object.keys(patchData).length === 0) {
+        onClose();
+        return;
+      }
+
+      if (isHotel) {
+        await api.patchHotelBooking(booking.id, patchData);
+      } else {
+        await api.patchFlightBooking(booking.id, patchData);
+      }
+
+      onSave();
+      onClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-[60]">
+      <div className="bg-card border border-border rounded-lg p-4 w-full max-w-md">
+        <h3 className="text-lg font-semibold mb-4">Edit {isHotel ? 'Hotel' : 'Flight'} Booking</h3>
+
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm text-muted-foreground mb-1">Confirmation Code</label>
+            <input
+              type="text"
+              value={confirmationCode}
+              onChange={(e) => setConfirmationCode(e.target.value)}
+              className="w-full px-3 py-2 bg-background border border-border rounded focus:outline-none focus:ring-2 focus:ring-primary"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm text-muted-foreground mb-1">Booking Provider</label>
+            <input
+              type="text"
+              value={bookingProvider}
+              onChange={(e) => setBookingProvider(e.target.value)}
+              className="w-full px-3 py-2 bg-background border border-border rounded focus:outline-none focus:ring-2 focus:ring-primary"
+            />
+          </div>
+
+          {error && (
+            <div className="text-red-400 text-sm">{error}</div>
+          )}
+        </div>
+
+        <div className="flex justify-end gap-2 mt-6">
+          <button
+            onClick={onClose}
+            className="px-4 py-2 text-sm border border-border rounded hover:bg-accent transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className="px-4 py-2 text-sm bg-primary text-primary-foreground rounded hover:bg-primary/90 disabled:opacity-50 transition-colors"
+          >
+            {saving ? 'Saving...' : 'Save'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function BookingCard({ booking, onRefresh }: { booking: BookingView; onRefresh?: () => void }) {
+  const isHotel = booking.type === 'HOTEL';
+  const data = isHotel ? booking.hotel : booking.flight;
+
+  const [showActions, setShowActions] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [actionLoading, setActionLoading] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const statusColors: Record<string, string> = {
     CONFIRMED: 'bg-green-500/20 text-green-400',
@@ -216,86 +326,146 @@ function BookingCard({ booking }: { booking: BookingView }) {
     IN_PROGRESS: 'bg-blue-500/20 text-blue-400',
   };
 
+  async function handleRegenerateWatch() {
+    setActionLoading(true);
+    setActionError(null);
+    try {
+      await api.regenerateWatch(booking.id);
+      setShowActions(false);
+      onRefresh?.();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Failed to regenerate watch');
+    } finally {
+      setActionLoading(false);
+    }
+  }
+
   if (!data) return null;
 
   return (
-    <div className="bg-accent/30 rounded p-2 text-sm">
-      <div className="flex items-center gap-2 mb-1">
-        <span className={cn('px-1.5 py-0.5 text-xs rounded', isHotel ? 'bg-purple-500/20 text-purple-400' : 'bg-blue-500/20 text-blue-400')}>
-          {booking.type}
-        </span>
-        <span className={cn('px-1.5 py-0.5 text-xs rounded', statusColors[booking.status] || 'bg-gray-500/20')}>
-          {booking.status}
-        </span>
-        <span className="text-xs text-muted-foreground">{booking.agent}</span>
+    <>
+      <div className="bg-accent/30 rounded p-2 text-sm relative">
+        {/* Actions menu button */}
+        <button
+          onClick={() => setShowActions(!showActions)}
+          className="absolute top-2 right-2 p-1 hover:bg-accent rounded transition-colors"
+        >
+          <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+            <path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z" />
+          </svg>
+        </button>
+
+        {/* Actions dropdown */}
+        {showActions && (
+          <div className="absolute top-8 right-2 bg-card border border-border rounded shadow-lg z-10 min-w-[160px]">
+            <button
+              onClick={() => {
+                setShowEditModal(true);
+                setShowActions(false);
+              }}
+              className="w-full px-3 py-2 text-left text-sm hover:bg-accent transition-colors"
+            >
+              Edit Booking
+            </button>
+            <button
+              onClick={handleRegenerateWatch}
+              disabled={actionLoading}
+              className="w-full px-3 py-2 text-left text-sm hover:bg-accent transition-colors disabled:opacity-50"
+            >
+              {actionLoading ? 'Regenerating...' : 'Regenerate Watch'}
+            </button>
+          </div>
+        )}
+
+        {actionError && (
+          <div className="text-red-400 text-xs mb-1">{actionError}</div>
+        )}
+
+        <div className="flex items-center gap-2 mb-1 pr-6">
+          <span className={cn('px-1.5 py-0.5 text-xs rounded', isHotel ? 'bg-purple-500/20 text-purple-400' : 'bg-blue-500/20 text-blue-400')}>
+            {booking.type}
+          </span>
+          <span className={cn('px-1.5 py-0.5 text-xs rounded', statusColors[booking.status] || 'bg-gray-500/20')}>
+            {booking.status}
+          </span>
+          <span className="text-xs text-muted-foreground">{booking.agent}</span>
+        </div>
+
+        {isHotel && booking.hotel && (
+          <>
+            <div className="font-medium">{booking.hotel.hotel_name || 'Unknown Hotel'}</div>
+            <div className="text-xs text-muted-foreground">
+              {formatDate(booking.hotel.check_in_date)} - {formatDate(booking.hotel.check_out_date)}
+              {booking.hotel.room_type && ` · ${booking.hotel.room_type}`}
+            </div>
+            <div className="text-xs mt-1">
+              <span className="text-muted-foreground">Price: </span>
+              {formatMoney(booking.hotel.customer_price, booking.hotel.currency)}
+              {booking.hotel.refundability && (
+                <span className={cn('ml-2', booking.hotel.refundability === 'REFUNDABLE' ? 'text-green-400' : 'text-yellow-400')}>
+                  {booking.hotel.refundability}
+                </span>
+              )}
+            </div>
+            {booking.hotel.cancellation_deadline && (
+              <div className="text-xs text-muted-foreground">
+                Cancel by: {formatDateTime(booking.hotel.cancellation_deadline)}
+              </div>
+            )}
+          </>
+        )}
+
+        {!isHotel && booking.flight && (
+          <>
+            <div className="font-medium">
+              {booking.flight.legs?.map((leg, i) => (
+                <span key={i}>
+                  {i > 0 && ' → '}
+                  {leg.departure_airport}-{leg.arrival_airport}
+                </span>
+              ))}
+            </div>
+            <div className="text-xs text-muted-foreground">
+              {booking.flight.legs?.[0] && formatDateTime(booking.flight.legs[0].departure_time)}
+              {booking.flight.passengers?.length > 0 && ` · ${booking.flight.passengers.length} pax`}
+            </div>
+            <div className="text-xs mt-1">
+              <span className="text-muted-foreground">Price: </span>
+              {formatMoney(booking.flight.customer_price, booking.flight.currency)}
+            </div>
+            <div className="text-xs mt-1">
+              <span className={cn(
+                booking.flight.reprice_eligibility === 'ELIGIBLE' ? 'text-green-400' : 'text-yellow-400'
+              )}>
+                Reprice: {booking.flight.reprice_eligibility}
+              </span>
+              {booking.flight.reprice_ineligible_reason && (
+                <span className="text-muted-foreground ml-1">({booking.flight.reprice_ineligible_reason})</span>
+              )}
+            </div>
+          </>
+        )}
+
+        {data.confirmation_number && (
+          <div className="text-xs text-muted-foreground mt-1">
+            Conf: {data.confirmation_number}
+            {data.booking_provider && ` via ${data.booking_provider}`}
+          </div>
+        )}
       </div>
 
-      {isHotel && booking.hotel && (
-        <>
-          <div className="font-medium">{booking.hotel.hotel_name || 'Unknown Hotel'}</div>
-          <div className="text-xs text-muted-foreground">
-            {formatDate(booking.hotel.check_in_date)} - {formatDate(booking.hotel.check_out_date)}
-            {booking.hotel.room_type && ` · ${booking.hotel.room_type}`}
-          </div>
-          <div className="text-xs mt-1">
-            <span className="text-muted-foreground">Price: </span>
-            {formatMoney(booking.hotel.customer_price, booking.hotel.currency)}
-            {booking.hotel.refundability && (
-              <span className={cn('ml-2', booking.hotel.refundability === 'REFUNDABLE' ? 'text-green-400' : 'text-yellow-400')}>
-                {booking.hotel.refundability}
-              </span>
-            )}
-          </div>
-          {booking.hotel.cancellation_deadline && (
-            <div className="text-xs text-muted-foreground">
-              Cancel by: {formatDateTime(booking.hotel.cancellation_deadline)}
-            </div>
-          )}
-        </>
+      {showEditModal && (
+        <EditBookingModal
+          booking={booking}
+          onClose={() => setShowEditModal(false)}
+          onSave={() => onRefresh?.()}
+        />
       )}
-
-      {!isHotel && booking.flight && (
-        <>
-          <div className="font-medium">
-            {booking.flight.legs?.map((leg, i) => (
-              <span key={i}>
-                {i > 0 && ' → '}
-                {leg.departure_airport}-{leg.arrival_airport}
-              </span>
-            ))}
-          </div>
-          <div className="text-xs text-muted-foreground">
-            {booking.flight.legs?.[0] && formatDateTime(booking.flight.legs[0].departure_time)}
-            {booking.flight.passengers?.length > 0 && ` · ${booking.flight.passengers.length} pax`}
-          </div>
-          <div className="text-xs mt-1">
-            <span className="text-muted-foreground">Price: </span>
-            {formatMoney(booking.flight.customer_price, booking.flight.currency)}
-          </div>
-          <div className="text-xs mt-1">
-            <span className={cn(
-              booking.flight.reprice_eligibility === 'ELIGIBLE' ? 'text-green-400' : 'text-yellow-400'
-            )}>
-              Reprice: {booking.flight.reprice_eligibility}
-            </span>
-            {booking.flight.reprice_ineligible_reason && (
-              <span className="text-muted-foreground ml-1">({booking.flight.reprice_ineligible_reason})</span>
-            )}
-          </div>
-        </>
-      )}
-
-      {data.confirmation_number && (
-        <div className="text-xs text-muted-foreground mt-1">
-          Conf: {data.confirmation_number}
-          {data.booking_provider && ` via ${data.booking_provider}`}
-        </div>
-      )}
-    </div>
+    </>
   );
 }
 
-function TripCard({ trip }: { trip: TripView }) {
+function TripCard({ trip, onRefresh }: { trip: TripView; onRefresh?: () => void }) {
   const [expanded, setExpanded] = useState(false);
 
   const statusColors: Record<string, string> = {
@@ -327,7 +497,7 @@ function TripCard({ trip }: { trip: TripView }) {
       {expanded && trip.bookings.length > 0 && (
         <div className="p-2 pt-0 space-y-2">
           {trip.bookings.map((booking) => (
-            <BookingCard key={booking.id} booking={booking} />
+            <BookingCard key={booking.id} booking={booking} onRefresh={onRefresh} />
           ))}
         </div>
       )}
@@ -508,12 +678,14 @@ export function MemberDetail({
   member,
   context,
   onClose,
+  onRefresh,
   loading,
   error,
 }: {
   member: MemberSummary;
   context: MemberContext | null;
   onClose: () => void;
+  onRefresh?: () => void;
   loading: boolean;
   error: string | null;
 }) {
@@ -624,7 +796,7 @@ export function MemberDetail({
                 {context.trips.length === 0 ? (
                   <p className="text-sm text-muted-foreground">No trips</p>
                 ) : (
-                  context.trips.map((trip) => <TripCard key={trip.id} trip={trip} />)
+                  context.trips.map((trip) => <TripCard key={trip.id} trip={trip} onRefresh={onRefresh} />)
                 )}
               </Section>
 
