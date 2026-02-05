@@ -263,10 +263,14 @@ function EditBookingModal({
   const hotelData = booking.hotel;
 
   const [confirmationCode, setConfirmationCode] = useState(
-    (isHotel ? hotelData?.confirmation_number : flightData?.confirmation_number) || ''
+    (isHotel
+      ? (hotelData?.confirmation_code ?? hotelData?.confirmation_number)
+      : (flightData?.confirmation_code ?? flightData?.confirmation_number)) || ''
   );
   const [bookingProvider, setBookingProvider] = useState(
-    (isHotel ? hotelData?.booking_provider : flightData?.booking_provider) || ''
+    (isHotel
+      ? (hotelData?.booked_with ?? hotelData?.booking_provider)
+      : (flightData?.booked_with ?? flightData?.booking_provider)) || ''
   );
 
   // Price fields (stored in cents)
@@ -350,10 +354,10 @@ function EditBookingModal({
         const origConfCode = hotelData?.confirmation_code ?? hotelData?.confirmation_number ?? '';
         const origProvider = hotelData?.booked_with ?? hotelData?.booking_provider ?? '';
 
-        if (confirmationCode !== origConfCode) {
+        if (confirmationCode && confirmationCode !== origConfCode) {
           patchData.confirmation_code = confirmationCode;
         }
-        if (bookingProvider !== origProvider) {
+        if (bookingProvider && bookingProvider !== origProvider) {
           patchData.booking_provider = bookingProvider;
         }
 
@@ -405,10 +409,10 @@ function EditBookingModal({
         const origConfCode = flightData?.confirmation_code ?? flightData?.confirmation_number ?? '';
         const origProvider = flightData?.booked_with ?? flightData?.booking_provider ?? '';
 
-        if (confirmationCode !== origConfCode) {
+        if (confirmationCode && confirmationCode !== origConfCode) {
           patchData.confirmation_code = confirmationCode;
         }
-        if (bookingProvider !== origProvider) {
+        if (bookingProvider && bookingProvider !== origProvider) {
           patchData.booking_provider = bookingProvider;
         }
 
