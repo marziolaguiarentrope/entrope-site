@@ -212,8 +212,21 @@ class ApiClient {
   }
 
   // Members
-  async searchMember(email: string): Promise<MemberSummary | null> {
+  async searchMemberByEmail(email: string): Promise<MemberSummary | null> {
     return this.fetch<MemberSummary | null>(`/members/search?email=${encodeURIComponent(email)}`);
+  }
+
+  async searchMemberByPhone(phone: string): Promise<MemberSummary | null> {
+    return this.fetch<MemberSummary | null>(`/members/search?phone=${encodeURIComponent(phone)}`);
+  }
+
+  async searchMember(query: string): Promise<MemberSummary | null> {
+    // Detect if query looks like a phone number (starts with + or contains only digits/spaces/dashes)
+    const isPhone = /^[\d\s\-+()]+$/.test(query.trim()) && query.trim().length >= 10;
+    if (isPhone) {
+      return this.searchMemberByPhone(query.trim());
+    }
+    return this.searchMemberByEmail(query.trim());
   }
 
   async getMember(userId: string): Promise<MemberContext> {

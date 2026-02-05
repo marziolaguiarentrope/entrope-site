@@ -57,7 +57,10 @@ function MemberRow({ member, onClick }: { member: MemberSummary; onClick: () => 
 }
 
 
+type SearchMode = 'email' | 'phone';
+
 export default function MemberOverviewPage() {
+  const [searchMode, setSearchMode] = useState<SearchMode>('email');
   const [search, setSearch] = useState('');
   const [member, setMember] = useState<MemberSummary | null>(null);
   const [loading, setLoading] = useState(false);
@@ -79,7 +82,9 @@ export default function MemberOverviewPage() {
     setMember(null);
 
     try {
-      const result = await api.searchMember(search.trim());
+      const result = searchMode === 'email'
+        ? await api.searchMemberByEmail(search.trim())
+        : await api.searchMemberByPhone(search.trim());
       setMember(result);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to search member');
@@ -129,6 +134,32 @@ export default function MemberOverviewPage() {
         </p>
       </div>
 
+      {/* Search Mode Tabs */}
+      <div className="flex gap-1 mb-3">
+        <button
+          onClick={() => { setSearchMode('email'); setSearch(''); setHasSearched(false); }}
+          className={cn(
+            'px-4 py-2 text-sm font-medium rounded-lg transition-colors',
+            searchMode === 'email'
+              ? 'bg-primary text-primary-foreground'
+              : 'bg-accent/50 text-muted-foreground hover:bg-accent'
+          )}
+        >
+          Email
+        </button>
+        <button
+          onClick={() => { setSearchMode('phone'); setSearch(''); setHasSearched(false); }}
+          className={cn(
+            'px-4 py-2 text-sm font-medium rounded-lg transition-colors',
+            searchMode === 'phone'
+              ? 'bg-primary text-primary-foreground'
+              : 'bg-accent/50 text-muted-foreground hover:bg-accent'
+          )}
+        >
+          Phone
+        </button>
+      </div>
+
       {/* Search */}
       <form onSubmit={handleSearch} className="mb-4">
         <div className="flex gap-2">
@@ -136,7 +167,7 @@ export default function MemberOverviewPage() {
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search by email address..."
+            placeholder={searchMode === 'email' ? 'Search by email address...' : 'Search by phone number...'}
             className="flex-1 max-w-md px-4 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
           />
           <button
@@ -153,7 +184,7 @@ export default function MemberOverviewPage() {
       <div className="bg-card border border-border rounded-lg overflow-hidden">
         {!hasSearched ? (
           <div className="p-6 text-center text-muted-foreground">
-            Enter an email address to find a member
+            Enter {searchMode === 'email' ? 'an email address' : 'a phone number'} to find a member
           </div>
         ) : loading ? (
           <div className="p-6 text-center text-muted-foreground">
