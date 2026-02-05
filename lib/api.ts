@@ -735,19 +735,24 @@ export interface WatchTerminateResponse {
 export interface HotelMatchRequest {
   hotel_name: string;
   address?: string;
-  city?: string;
+  coordinates?: { latitude: number; longitude: number };
+  provider_ids?: Record<string, string>;
 }
 
 export interface HotelMatchResult {
   hotel_id: string;
   name: string;
-  address: string | null;
-  city: string | null;
   confidence_score: number;
+  match_type: string;
+  matched_fields: string[];
+  distance_meters: number;
+  provider_mappings: Record<string, string>;
 }
 
 export interface HotelMatchResponse {
   matches: HotelMatchResult[];
+  total_matches: number;
+  search_id: string;
 }
 
 export const api = new ApiClient(API_BASE);

@@ -287,7 +287,7 @@ function EditBookingModal({
   // Hotel lookup state
   const [showHotelLookup, setShowHotelLookup] = useState(false);
   const [lookupSearchName, setLookupSearchName] = useState(hotelData?.hotel_name || '');
-  const [lookupSearchCity, setLookupSearchCity] = useState(hotelData?.hotel_city || '');
+  const [lookupSearchAddress, setLookupSearchAddress] = useState('');
   const [lookupResults, setLookupResults] = useState<HotelMatchResult[]>([]);
   const [lookupLoading, setLookupLoading] = useState(false);
   const [lookupError, setLookupError] = useState<string | null>(null);
@@ -480,11 +480,11 @@ function EditBookingModal({
     try {
       const response = await api.matchHotel({
         hotel_name: lookupSearchName.trim(),
-        city: lookupSearchCity.trim() || undefined,
+        address: lookupSearchAddress.trim() || undefined,
       });
       setLookupResults(response.matches);
       if (response.matches.length === 0) {
-        setLookupError('No matches found. Try adjusting the hotel name or city.');
+        setLookupError('No matches found. Try adjusting the hotel name or address.');
       }
     } catch (err) {
       setLookupError(err instanceof Error ? err.message : 'Failed to search hotels');
@@ -652,12 +652,12 @@ function EditBookingModal({
                         />
                       </div>
                       <div>
-                        <label className="block text-sm text-muted-foreground mb-1">City (optional)</label>
+                        <label className="block text-sm text-muted-foreground mb-1">Address (optional)</label>
                         <input
                           type="text"
-                          value={lookupSearchCity}
-                          onChange={(e) => setLookupSearchCity(e.target.value)}
-                          placeholder="e.g. New York"
+                          value={lookupSearchAddress}
+                          onChange={(e) => setLookupSearchAddress(e.target.value)}
+                          placeholder="e.g. 123 Main St, New York, NY"
                           className="w-full px-3 py-2 bg-background border border-border rounded focus:outline-none focus:ring-2 focus:ring-primary text-sm"
                         />
                       </div>
@@ -696,11 +696,9 @@ function EditBookingModal({
                                 {Math.round(match.confidence_score * 100)}%
                               </span>
                             </div>
-                            {(match.address || match.city) && (
-                              <div className="text-xs text-muted-foreground mt-1">
-                                {[match.address, match.city].filter(Boolean).join(', ')}
-                              </div>
-                            )}
+                            <div className="text-xs text-muted-foreground mt-1">
+                              {match.match_type} match · {match.matched_fields.join(', ')}
+                            </div>
                             <div className="text-xs text-muted-foreground mt-1 font-mono">
                               {match.hotel_id}
                             </div>
