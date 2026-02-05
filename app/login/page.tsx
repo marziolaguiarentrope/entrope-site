@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useEffect, Suspense } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/contexts/auth-context";
 
@@ -13,6 +13,21 @@ function GoogleIcon({ className }: { className?: string }) {
       <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
       <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
     </svg>
+  );
+}
+
+function SessionExpiredBanner() {
+  const searchParams = useSearchParams();
+  const sessionExpired = searchParams.get('error') === 'session_expired';
+
+  if (!sessionExpired) return null;
+
+  return (
+    <div className="w-full max-w-sm mb-4">
+      <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-lg px-4 py-3 text-sm text-yellow-400">
+        Your session has expired. Please sign in again.
+      </div>
+    </div>
   );
 }
 
@@ -46,6 +61,11 @@ export default function LoginPage() {
         <h1 className="text-4xl font-bold tracking-tight mb-2">Axel</h1>
         <p className="text-muted-foreground text-lg">Operator Dashboard</p>
       </div>
+
+      {/* Session expired banner */}
+      <Suspense fallback={null}>
+        <SessionExpiredBanner />
+      </Suspense>
 
       {/* Login card */}
       <div className="w-full max-w-sm">

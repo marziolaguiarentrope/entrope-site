@@ -21,7 +21,9 @@ import {
   FlightBookingPatchRequest,
   HotelBookingPatchRequest,
   HotelMatchResult,
+  CreditAdjustmentRequest,
 } from '@/lib/api';
+import { useAuth } from '@/contexts/auth-context';
 
 // Helper to get price from booking (handles both old and new schema)
 function getBookingPrice(flight: FlightBookingView | null, hotel: HotelBookingView | null): { amount: number | null; currency: string } {
@@ -148,13 +150,302 @@ function timeAgo(dateString: string): string {
   return date.toLocaleDateString();
 }
 
-// Sub-components for each data type
+// Credit Adjustment Modal with double confirmation
+function CreditAdjustmentModal({
+  userId,
+  currentBalance,
+  currentCurrency,
+  operatorEmail,
+  onClose,
+  onSuccess,
+}: {
+  userId: string;
+  currentBalance: number;
+  currentCurrency: string;
+  operatorEmail: string;
+  onClose: () => void;
+  onSuccess: (deltaDollars: number) => void;
+}) {
+  // Ensure currentBalance is always a number (API may return string)
+  const safeBalance = Number(currentBalance) || 0;
 
-function UserSettingsCard({ context }: { context: MemberContext }) {
-  const user = context.user;
-  if (!user) return <p className="text-sm text-muted-foreground">No user settings available</p>;
+  const [adjustmentType, setAdjustmentType] = useState<'add' | 'subtract'>('add');
+  const [amount, setAmount] = useState('');
+  const [reason, setReason] = useState('');
+  const [notes, setNotes] = useState('');
+  const [step, setStep] = useState<'input' | 'confirm'>('input');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const reasonOptions = [
+    'Goodwill credit',
+    'Refund adjustment',
+    'Billing correction',
+    'Promotional credit',
+    'Referral bonus',
+    'Service recovery',
+    'Other',
+  ];
+
+  const parsedAmount = parseFloat(amount) || 0;
+
+  // Delta in dollars (positive = add, negative = subtract)
+  const deltaDollars = adjustmentType === 'add' ? parsedAmount : -parsedAmount;
+  const newBalance = safeBalance + deltaDollars;
+
+  // Delta in cents for the API
+  const deltaCents = Math.round(deltaDollars * 100);
+
+  // Build the full reason string (reason + notes, must be >= 10 chars)
+  const fullReason = notes.trim()
+    ? `${reason}: ${notes.trim()}`
+    : reason;
+
+  function handleProceedToConfirm() {
+    if (!amount || parsedAmount <= 0) return;
+    if (!reason) return;
+    if (fullReason.length < 10) return;
+    setStep('confirm');
+  }
+
+  async function handleConfirmAndSubmit() {
+    setSaving(true);
+    setError(null);
+
+    try {
+      // Generate idempotency key to prevent double-submits
+      const idempotencyKey = `${userId}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+      const requestData: CreditAdjustmentRequest = {
+        user_id: userId,
+        amount_cents: deltaCents,
+        reason: fullReason,
+        idempotency_key: idempotencyKey,
+      };
+
+      await api.adjustCredit(requestData);
+      onSuccess(deltaDollars);
+      onClose();
+    } catch (err) {
+      console.error('Credit adjustment failed:', err);
+      setError(err instanceof Error ? err.message : 'Failed to adjust credit');
+      setStep('input'); // Go back to input on error
+    } finally {
+      setSaving(false);
+    }
+  }
 
   return (
+    <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-[60]">
+      <div className="bg-card border border-border rounded-lg p-5 w-full max-w-md">
+        {step === 'input' ? (
+          <>
+            <h3 className="text-lg font-semibold mb-1">Adjust Credit Balance</h3>
+            <p className="text-sm text-muted-foreground mb-4">
+              Current balance: <span className="font-medium text-foreground">${safeBalance.toFixed(2)} {currentCurrency}</span>
+            </p>
+
+            <div className="space-y-4">
+              {/* Adjustment type */}
+              <div>
+                <label className="block text-sm text-muted-foreground mb-2">Adjustment Type</label>
+                <div className="flex gap-1">
+                  {([
+                    { value: 'add', label: 'Add Credit' },
+                    { value: 'subtract', label: 'Remove Credit' },
+                  ] as const).map((opt) => (
+                    <button
+                      key={opt.value}
+                      onClick={() => setAdjustmentType(opt.value)}
+                      className={cn(
+                        'flex-1 px-3 py-2 text-sm font-medium rounded transition-colors',
+                        adjustmentType === opt.value
+                          ? opt.value === 'subtract' ? 'bg-red-500/20 text-red-400 ring-1 ring-red-500/30' :
+                            'bg-green-500/20 text-green-400 ring-1 ring-green-500/30'
+                          : 'bg-accent/50 text-muted-foreground hover:bg-accent'
+                      )}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Amount */}
+              <div>
+                <label className="block text-sm text-muted-foreground mb-1">
+                  Amount ({currentCurrency})
+                </label>
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">$</span>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={amount}
+                    onChange={(e) => setAmount(e.target.value)}
+                    placeholder="0.00"
+                    className="w-full pl-7 pr-3 py-2 bg-background border border-border rounded focus:outline-none focus:ring-2 focus:ring-primary text-sm"
+                    autoFocus
+                  />
+                </div>
+              </div>
+
+              {/* Preview */}
+              {parsedAmount > 0 && (
+                <div className="bg-accent/30 rounded p-3 text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Current</span>
+                    <span>${safeBalance.toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Change</span>
+                    <span className={deltaDollars >= 0 ? 'text-green-400' : 'text-red-400'}>
+                      {deltaDollars >= 0 ? '+' : ''}{deltaDollars.toFixed(2)}
+                    </span>
+                  </div>
+                  <div className="flex justify-between font-medium border-t border-border mt-1 pt-1">
+                    <span>New Balance</span>
+                    <span className={newBalance < 0 ? 'text-red-400' : ''}>${newBalance.toFixed(2)}</span>
+                  </div>
+                </div>
+              )}
+
+              {/* Reason */}
+              <div>
+                <label className="block text-sm text-muted-foreground mb-1">Reason</label>
+                <select
+                  value={reason}
+                  onChange={(e) => setReason(e.target.value)}
+                  className="w-full px-3 py-2 bg-background border border-border rounded focus:outline-none focus:ring-2 focus:ring-primary text-sm"
+                >
+                  <option value="">Select a reason...</option>
+                  {reasonOptions.map((r) => (
+                    <option key={r} value={r}>{r}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Notes */}
+              <div>
+                <label className="block text-sm text-muted-foreground mb-1">Notes (optional)</label>
+                <textarea
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  placeholder="Additional context for this adjustment..."
+                  rows={2}
+                  className="w-full px-3 py-2 bg-background border border-border rounded focus:outline-none focus:ring-2 focus:ring-primary text-sm resize-none"
+                />
+              </div>
+
+              {error && (
+                <div className="text-red-400 text-sm">{error}</div>
+              )}
+            </div>
+
+            <div className="flex justify-end gap-2 mt-5">
+              <button
+                onClick={onClose}
+                className="px-4 py-2 text-sm border border-border rounded hover:bg-accent transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleProceedToConfirm}
+                disabled={!parsedAmount || parsedAmount <= 0 || !reason || newBalance < 0 || fullReason.length < 10}
+                className="px-4 py-2 text-sm bg-primary text-primary-foreground rounded hover:bg-primary/90 disabled:opacity-50 transition-colors"
+              >
+                Review Changes
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
+            {/* CONFIRMATION STEP */}
+            <div className="flex items-center gap-2 mb-4">
+              <svg className="w-6 h-6 text-yellow-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
+              </svg>
+              <h3 className="text-lg font-semibold">Confirm Credit Adjustment</h3>
+            </div>
+
+            <div className="space-y-3 mb-4">
+              <div className="bg-accent/30 rounded p-4 space-y-2 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Current Balance</span>
+                  <span className="font-medium">${safeBalance.toFixed(2)} {currentCurrency}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Adjustment</span>
+                  <span className={cn('font-medium', deltaDollars >= 0 ? 'text-green-400' : 'text-red-400')}>
+                    {deltaDollars >= 0 ? '+' : ''}{deltaDollars.toFixed(2)} {currentCurrency}
+                  </span>
+                </div>
+                <div className="flex justify-between border-t border-border pt-2">
+                  <span className="font-medium">New Balance</span>
+                  <span className="font-bold text-base">${newBalance.toFixed(2)} {currentCurrency}</span>
+                </div>
+              </div>
+
+              <div className="bg-accent/30 rounded p-4 space-y-2 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Reason</span>
+                  <span className="text-right max-w-[200px]">{fullReason}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Performed by</span>
+                  <span className="font-mono text-xs">{operatorEmail}</span>
+                </div>
+              </div>
+
+              <p className="text-sm text-yellow-400">
+                This action will immediately update the member&apos;s credit balance. Are you sure?
+              </p>
+            </div>
+
+            {error && (
+              <div className="text-red-400 text-sm mb-3">{error}</div>
+            )}
+
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => setStep('input')}
+                disabled={saving}
+                className="px-4 py-2 text-sm border border-border rounded hover:bg-accent transition-colors"
+              >
+                Go Back
+              </button>
+              <button
+                onClick={handleConfirmAndSubmit}
+                disabled={saving}
+                className="px-4 py-2 text-sm bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50 transition-colors font-medium"
+              >
+                {saving ? 'Submitting...' : 'Confirm & Apply'}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Sub-components for each data type
+
+function UserSettingsCard({ context, userId, onRefresh }: { context: MemberContext; userId: string; onRefresh?: () => void }) {
+  const user = context.user;
+  const { user: authUser } = useAuth();
+  const [showCreditModal, setShowCreditModal] = useState(false);
+  // Track cumulative local adjustments since the backend balance endpoint
+  // doesn't reflect credit ledger changes immediately
+  const [localAdjustment, setLocalAdjustment] = useState(0);
+
+  if (!user) return <p className="text-sm text-muted-foreground">No user settings available</p>;
+
+  const displayBalance = (Number(user.credit_balance) || 0) + localAdjustment;
+
+  return (
+    <>
     <div className="grid grid-cols-2 gap-2 text-sm">
       <div className="flex justify-between">
         <span className="text-muted-foreground">Subscription</span>
@@ -162,9 +453,22 @@ function UserSettingsCard({ context }: { context: MemberContext }) {
           user.subscription_status === 'PAYING' ? 'text-green-400' : 'text-muted-foreground'
         )}>{user.subscription_status}</span>
       </div>
-      <div className="flex justify-between">
+      <div className="col-span-2 flex justify-between items-center">
         <span className="text-muted-foreground">Credit Balance</span>
-        <span>{formatMoney(user.credit_balance * 100, user.credit_currency)}</span>
+        <div className="flex items-center gap-2">
+          <span>{formatMoney(displayBalance * 100, user.credit_currency)}</span>
+          {localAdjustment !== 0 && (
+            <span className="text-xs text-yellow-400" title="Balance includes local adjustments not yet synced to backend">
+              (adjusted)
+            </span>
+          )}
+          <button
+            onClick={() => setShowCreditModal(true)}
+            className="px-2 py-0.5 text-xs bg-accent hover:bg-accent/80 rounded transition-colors"
+          >
+            Adjust
+          </button>
+        </div>
       </div>
       <div className="flex justify-between">
         <span className="text-muted-foreground">Total Savings</span>
@@ -193,6 +497,21 @@ function UserSettingsCard({ context }: { context: MemberContext }) {
         </div>
       )}
     </div>
+
+    {showCreditModal && (
+      <CreditAdjustmentModal
+        userId={userId}
+        currentBalance={displayBalance}
+        currentCurrency={user.credit_currency}
+        operatorEmail={authUser?.email || 'unknown'}
+        onClose={() => setShowCreditModal(false)}
+        onSuccess={(deltaDollars) => {
+          setLocalAdjustment(prev => prev + deltaDollars);
+          onRefresh?.();
+        }}
+      />
+    )}
+    </>
   );
 }
 
@@ -1630,7 +1949,7 @@ export function MemberDetail({
               {/* Settings Card */}
               <div className="bg-card border border-border rounded-lg p-4">
                 <h3 className="text-sm font-medium mb-3">Settings</h3>
-                <UserSettingsCard context={context} />
+                <UserSettingsCard context={context} userId={member.id} onRefresh={onRefresh} />
               </div>
 
               {/* Activity Card */}
@@ -1688,14 +2007,16 @@ export function MemberDetail({
                 {context.trips.length === 0 ? (
                   <p className="text-sm text-muted-foreground">No trips</p>
                 ) : (
-                  context.trips.map((trip) => (
-                    <TripCard
-                      key={trip.id}
-                      trip={trip}
-                      watches={context.watches}
-                      onRefresh={onRefresh}
-                    />
-                  ))
+                  <>
+                    {context.trips.map((trip) => (
+                      <TripCard
+                        key={trip.id}
+                        trip={trip}
+                        watches={context.watches}
+                        onRefresh={onRefresh}
+                      />
+                    ))}
+                  </>
                 )}
               </Section>
 
@@ -1707,18 +2028,22 @@ export function MemberDetail({
                   defaultOpen={openEscalations > 0}
                   badge={openEscalations > 0 ? { text: `${openEscalations} open`, variant: 'error' } : undefined}
                 >
-                  {context.escalations.map((esc) => (
-                    <EscalationCard key={esc.id} escalation={esc} />
-                  ))}
+                  <>
+                    {context.escalations.map((esc, idx) => (
+                      <EscalationCard key={esc.id ?? `esc-${idx}`} escalation={esc} />
+                    ))}
+                  </>
                 </Section>
               )}
 
               {/* Pending Tasks */}
               {context.pending_tasks.length > 0 && (
                 <Section title="Pending Tasks" count={context.pending_tasks.length} defaultOpen>
-                  {context.pending_tasks.map((task) => (
-                    <TaskCard key={task.id} task={task} />
-                  ))}
+                  <>
+                    {context.pending_tasks.map((task, idx) => (
+                      <TaskCard key={task.id ?? `task-${idx}`} task={task} />
+                    ))}
+                  </>
                 </Section>
               )}
 
@@ -1730,12 +2055,14 @@ export function MemberDetail({
                   badge={{ text: 'Active', variant: 'success' }}
                   defaultOpen
                 >
-                  {context.flight_opportunities.map((opp) => (
-                    <OpportunityCard key={opp.id} opportunity={opp} type="flight" />
-                  ))}
-                  {context.hotel_opportunities.map((opp) => (
-                    <OpportunityCard key={opp.id} opportunity={opp} type="hotel" />
-                  ))}
+                  {[
+                    ...context.flight_opportunities.map((opp) => (
+                      <OpportunityCard key={`flight-${opp.id}`} opportunity={opp} type="flight" />
+                    )),
+                    ...context.hotel_opportunities.map((opp) => (
+                      <OpportunityCard key={`hotel-${opp.id}`} opportunity={opp} type="hotel" />
+                    )),
+                  ]}
                 </Section>
               )}
             </>
