@@ -20,6 +20,7 @@ import {
   api,
   FlightBookingPatchRequest,
   HotelBookingPatchRequest,
+  HotelMatchResult,
 } from '@/lib/api';
 
 // Helper to get price from booking (handles both old and new schema)
@@ -257,7 +258,7 @@ function EditBookingModal({
   onClose: () => void;
   onSave: () => void;
 }) {
-  const isHotel = booking.type === 'HOTEL';
+  const isHotel = booking.type?.toLowerCase() === 'hotel';
   const flightData = booking.flight;
   const hotelData = booking.hotel;
 
@@ -277,10 +278,19 @@ function EditBookingModal({
   const [priceCurrency, setPriceCurrency] = useState(currentCurrency || 'USD');
 
   // Hotel-specific fields
+  const [hotelId, setHotelId] = useState(hotelData?.hotel_id || '');
   const [hotelName, setHotelName] = useState(hotelData?.hotel_name || '');
   const [checkInDate, setCheckInDate] = useState(hotelData?.check_in || hotelData?.check_in_date || '');
   const [checkOutDate, setCheckOutDate] = useState(hotelData?.check_out || hotelData?.check_out_date || '');
   const [roomType, setRoomType] = useState(hotelData?.room_type || '');
+
+  // Hotel lookup state
+  const [showHotelLookup, setShowHotelLookup] = useState(false);
+  const [lookupSearchName, setLookupSearchName] = useState(hotelData?.hotel_name || '');
+  const [lookupSearchCity, setLookupSearchCity] = useState(hotelData?.hotel_city || '');
+  const [lookupResults, setLookupResults] = useState<HotelMatchResult[]>([]);
+  const [lookupLoading, setLookupLoading] = useState(false);
+  const [lookupError, setLookupError] = useState<string | null>(null);
 
   // Flight-specific fields - handle both old and new schema
   // New schema: legs[].segments[].origin/destination/departure
@@ -353,16 +363,34 @@ function EditBookingModal({
           patchData.customer_price = { amount: newPriceAmount, currency: priceCurrency };
         }
 
-        // Stay changes
-        const stayChanges: HotelBookingPatchRequest['stay'] = {};
+        // Stay changes - build full stay object matching backend schema
+        const origHotelId = hotelData?.hotel_id || '';
         const origCheckIn = hotelData?.check_in || hotelData?.check_in_date || '';
         const origCheckOut = hotelData?.check_out || hotelData?.check_out_date || '';
-        if (hotelName !== (hotelData?.hotel_name || '')) stayChanges.hotel_name = hotelName;
-        if (checkInDate !== origCheckIn) stayChanges.check_in_date = checkInDate;
-        if (checkOutDate !== origCheckOut) stayChanges.check_out_date = checkOutDate;
-        if (roomType !== (hotelData?.room_type || '')) stayChanges.room_type = roomType;
-        if (Object.keys(stayChanges).length > 0) {
-          patchData.stay = stayChanges;
+
+        const hotelIdChanged = hotelId !== origHotelId;
+        const hotelNameChanged = hotelName !== (hotelData?.hotel_name || '');
+        const checkInChanged = checkInDate !== origCheckIn;
+        const checkOutChanged = checkOutDate !== origCheckOut;
+        const roomTypeChanged = roomType !== (hotelData?.room_type || '');
+
+        if (hotelIdChanged || hotelNameChanged || checkInChanged || checkOutChanged || roomTypeChanged) {
+          const stayChanges: HotelBookingPatchRequest['stay'] = {};
+
+          // Hotel object with id and name
+          if (hotelIdChanged || hotelNameChanged) {
+            stayChanges.hotel = {};
+            if (hotelId) stayChanges.hotel.id = hotelId;
+            if (hotelName) stayChanges.hotel.name = hotelName;
+          }
+
+          if (checkInChanged && checkInDate) stayChanges.check_in = checkInDate;
+          if (checkOutChanged && checkOutDate) stayChanges.check_out = checkOutDate;
+          if (roomTypeChanged && roomType) stayChanges.room_type_name = roomType;
+
+          if (Object.keys(stayChanges).length > 0) {
+            patchData.stay = stayChanges;
+          }
         }
 
         if (Object.keys(patchData).length === 0) {
@@ -442,6 +470,36 @@ function EditBookingModal({
     }
   }
 
+  async function handleHotelLookup() {
+    if (!lookupSearchName.trim()) return;
+
+    setLookupLoading(true);
+    setLookupError(null);
+    setLookupResults([]);
+
+    try {
+      const response = await api.matchHotel({
+        hotel_name: lookupSearchName.trim(),
+        city: lookupSearchCity.trim() || undefined,
+      });
+      setLookupResults(response.matches);
+      if (response.matches.length === 0) {
+        setLookupError('No matches found. Try adjusting the hotel name or city.');
+      }
+    } catch (err) {
+      setLookupError(err instanceof Error ? err.message : 'Failed to search hotels');
+    } finally {
+      setLookupLoading(false);
+    }
+  }
+
+  function handleSelectHotelMatch(match: HotelMatchResult) {
+    setHotelId(match.hotel_id);
+    setHotelName(match.name);
+    setShowHotelLookup(false);
+    setLookupResults([]);
+  }
+
   return (
     <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-[60]">
       <div className="bg-card border border-border rounded-lg p-4 w-full max-w-lg max-h-[90vh] overflow-y-auto">
@@ -503,6 +561,27 @@ function EditBookingModal({
           {isHotel && (
             <>
               <div>
+                <label className="block text-sm text-muted-foreground mb-1">
+                  Hotel ID <span className="text-xs text-yellow-400">(required for repricing)</span>
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={hotelId}
+                    onChange={(e) => setHotelId(e.target.value)}
+                    placeholder="Content service hotel ID"
+                    className="flex-1 px-3 py-2 bg-background border border-border rounded focus:outline-none focus:ring-2 focus:ring-primary text-sm font-mono"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowHotelLookup(true)}
+                    className="px-3 py-2 text-sm bg-accent hover:bg-accent/80 rounded transition-colors"
+                  >
+                    Lookup
+                  </button>
+                </div>
+              </div>
+              <div>
                 <label className="block text-sm text-muted-foreground mb-1">Hotel Name</label>
                 <input
                   type="text"
@@ -540,6 +619,98 @@ function EditBookingModal({
                   className="w-full px-3 py-2 bg-background border border-border rounded focus:outline-none focus:ring-2 focus:ring-primary text-sm"
                 />
               </div>
+
+              {/* Hotel Lookup Modal */}
+              {showHotelLookup && (
+                <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-[70]">
+                  <div className="bg-card border border-border rounded-lg p-4 w-full max-w-md max-h-[80vh] overflow-y-auto">
+                    <div className="flex items-center justify-between mb-4">
+                      <h4 className="font-semibold">Find Hotel ID</h4>
+                      <button
+                        onClick={() => {
+                          setShowHotelLookup(false);
+                          setLookupResults([]);
+                          setLookupError(null);
+                        }}
+                        className="text-muted-foreground hover:text-foreground"
+                      >
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </button>
+                    </div>
+
+                    <div className="space-y-3 mb-4">
+                      <div>
+                        <label className="block text-sm text-muted-foreground mb-1">Hotel Name</label>
+                        <input
+                          type="text"
+                          value={lookupSearchName}
+                          onChange={(e) => setLookupSearchName(e.target.value)}
+                          placeholder="e.g. Marriott Downtown"
+                          className="w-full px-3 py-2 bg-background border border-border rounded focus:outline-none focus:ring-2 focus:ring-primary text-sm"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm text-muted-foreground mb-1">City (optional)</label>
+                        <input
+                          type="text"
+                          value={lookupSearchCity}
+                          onChange={(e) => setLookupSearchCity(e.target.value)}
+                          placeholder="e.g. New York"
+                          className="w-full px-3 py-2 bg-background border border-border rounded focus:outline-none focus:ring-2 focus:ring-primary text-sm"
+                        />
+                      </div>
+                      <button
+                        onClick={handleHotelLookup}
+                        disabled={!lookupSearchName.trim() || lookupLoading}
+                        className="w-full px-4 py-2 bg-primary text-primary-foreground rounded hover:bg-primary/90 disabled:opacity-50 transition-colors text-sm"
+                      >
+                        {lookupLoading ? 'Searching...' : 'Search'}
+                      </button>
+                    </div>
+
+                    {lookupError && (
+                      <div className="text-sm text-yellow-400 mb-3">{lookupError}</div>
+                    )}
+
+                    {lookupResults.length > 0 && (
+                      <div className="space-y-2">
+                        <div className="text-sm text-muted-foreground mb-2">
+                          {lookupResults.length} match{lookupResults.length !== 1 ? 'es' : ''} found
+                        </div>
+                        {lookupResults.map((match, idx) => (
+                          <button
+                            key={idx}
+                            onClick={() => handleSelectHotelMatch(match)}
+                            className="w-full text-left p-3 bg-accent/30 hover:bg-accent/50 rounded transition-colors"
+                          >
+                            <div className="flex items-center justify-between">
+                              <span className="font-medium text-sm">{match.name}</span>
+                              <span className={cn(
+                                'text-xs px-2 py-0.5 rounded',
+                                match.confidence_score >= 0.8 ? 'bg-green-500/20 text-green-400' :
+                                match.confidence_score >= 0.5 ? 'bg-yellow-500/20 text-yellow-400' :
+                                'bg-red-500/20 text-red-400'
+                              )}>
+                                {Math.round(match.confidence_score * 100)}%
+                              </span>
+                            </div>
+                            {(match.address || match.city) && (
+                              <div className="text-xs text-muted-foreground mt-1">
+                                {[match.address, match.city].filter(Boolean).join(', ')}
+                              </div>
+                            )}
+                            <div className="text-xs text-muted-foreground mt-1 font-mono">
+                              {match.hotel_id}
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
             </>
           )}
 
@@ -649,13 +820,13 @@ function EditBookingModal({
   );
 }
 
-function BookingCard({ booking, onRefresh }: { booking: BookingView; onRefresh?: () => void }) {
-  const isHotel = booking.type === 'HOTEL';
+function BookingCard({ booking, watch, onRefresh }: { booking: BookingView; watch?: WatchView; onRefresh?: () => void }) {
+  const isHotel = booking.type?.toLowerCase() === 'hotel';
   const data = isHotel ? booking.hotel : booking.flight;
 
   const [showActions, setShowActions] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
-  const [actionLoading, setActionLoading] = useState(false);
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
   const statusColors: Record<string, string> = {
@@ -666,7 +837,7 @@ function BookingCard({ booking, onRefresh }: { booking: BookingView; onRefresh?:
   };
 
   async function handleRegenerateWatch() {
-    setActionLoading(true);
+    setActionLoading('regenerate');
     setActionError(null);
     try {
       await api.regenerateWatch(booking.id);
@@ -675,9 +846,40 @@ function BookingCard({ booking, onRefresh }: { booking: BookingView; onRefresh?:
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Failed to regenerate watch');
     } finally {
-      setActionLoading(false);
+      setActionLoading(null);
     }
   }
+
+  async function handleRetryWatch() {
+    if (!watch) return;
+    setActionLoading('retry');
+    setActionError(null);
+    try {
+      await api.retryWatchNow(watch.id);
+      onRefresh?.();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Failed to retry watch');
+    } finally {
+      setActionLoading(null);
+    }
+  }
+
+  async function handleTerminateWatch() {
+    if (!watch) return;
+    setActionLoading('terminate');
+    setActionError(null);
+    try {
+      await api.terminateWatch(watch.id);
+      onRefresh?.();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Failed to terminate watch');
+    } finally {
+      setActionLoading(null);
+    }
+  }
+
+  const watchHealth = watch ? getWatchHealthStatus(watch) : null;
+  const isWatchActive = watch?.status?.toLowerCase() === 'active';
 
   if (!data) return null;
 
@@ -706,18 +908,7 @@ function BookingCard({ booking, onRefresh }: { booking: BookingView; onRefresh?:
             >
               Edit Booking
             </button>
-            <button
-              onClick={handleRegenerateWatch}
-              disabled={actionLoading}
-              className="w-full px-3 py-2 text-left text-sm hover:bg-accent transition-colors disabled:opacity-50"
-            >
-              {actionLoading ? 'Regenerating...' : 'Regenerate Watch'}
-            </button>
           </div>
-        )}
-
-        {actionError && (
-          <div className="text-red-400 text-xs mb-1">{actionError}</div>
         )}
 
         <div className="flex items-center gap-2 mb-1 pr-6">
@@ -842,6 +1033,96 @@ function BookingCard({ booking, onRefresh }: { booking: BookingView; onRefresh?:
             </div>
           );
         })()}
+
+        {/* Embedded Watch Info */}
+        {watch && isWatchActive ? (
+          <div className="mt-2 pt-2 border-t border-border/50">
+            <div className="flex items-center justify-between mb-1">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-medium">Watch</span>
+                {watchHealth && (
+                  <span className={cn('flex items-center gap-1 px-1.5 py-0.5 text-xs rounded', watchHealth.color)}>
+                    <span>{watchHealth.icon}</span>
+                    <span>{watchHealth.label}</span>
+                  </span>
+                )}
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-xs">
+              {watch.latest_observed_price && (
+                <div>
+                  <span className="text-muted-foreground">Last price: </span>
+                  <span className="font-medium">
+                    {formatMoney(watch.latest_observed_price.amount, watch.latest_observed_price.currency)}
+                  </span>
+                  {watch.latest_observed_at && (
+                    <span className="text-muted-foreground"> ({timeAgo(watch.latest_observed_at)})</span>
+                  )}
+                </div>
+              )}
+              {!watch.latest_observed_price && watch.last_executed_at && (
+                <div>
+                  <span className="text-muted-foreground">Last price: </span>
+                  <span>--</span>
+                </div>
+              )}
+              {watch.next_due_at && (
+                <div>
+                  <span className="text-muted-foreground">Next check: </span>
+                  <span>{formatTimeUntil(watch.next_due_at)}</span>
+                </div>
+              )}
+              {watch.last_executed_at && (
+                <div>
+                  <span className="text-muted-foreground">Last check: </span>
+                  <span>{timeAgo(watch.last_executed_at)}</span>
+                  {watch.last_result && watch.last_result !== 'success' && (
+                    <span className="text-yellow-400"> ({watch.last_result})</span>
+                  )}
+                </div>
+              )}
+            </div>
+            {/* Watch actions */}
+            <div className="flex gap-2 mt-2">
+              <button
+                onClick={handleRetryWatch}
+                disabled={!!actionLoading}
+                className="px-2 py-1 text-xs bg-primary/20 text-primary hover:bg-primary/30 rounded transition-colors disabled:opacity-50"
+              >
+                {actionLoading === 'retry' ? 'Retrying...' : 'Retry Now'}
+              </button>
+              <button
+                onClick={handleRegenerateWatch}
+                disabled={!!actionLoading}
+                className="px-2 py-1 text-xs bg-accent hover:bg-accent/80 rounded transition-colors disabled:opacity-50"
+              >
+                {actionLoading === 'regenerate' ? 'Regenerating...' : 'Regenerate'}
+              </button>
+              <button
+                onClick={handleTerminateWatch}
+                disabled={!!actionLoading}
+                className="px-2 py-1 text-xs bg-red-500/20 text-red-400 hover:bg-red-500/30 rounded transition-colors disabled:opacity-50"
+              >
+                {actionLoading === 'terminate' ? 'Terminating...' : 'Terminate'}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="text-xs mt-2 pt-2 border-t border-border/50">
+            <span className="text-yellow-400">No active monitoring</span>
+            <button
+              onClick={handleRegenerateWatch}
+              disabled={!!actionLoading}
+              className="ml-2 px-2 py-0.5 text-xs bg-accent hover:bg-accent/80 rounded transition-colors disabled:opacity-50"
+            >
+              {actionLoading === 'regenerate' ? 'Creating...' : 'Create Watch'}
+            </button>
+          </div>
+        )}
+
+        {actionError && (
+          <div className="text-red-400 text-xs mt-1">{actionError}</div>
+        )}
       </div>
 
       {showEditModal && (
@@ -855,14 +1136,22 @@ function BookingCard({ booking, onRefresh }: { booking: BookingView; onRefresh?:
   );
 }
 
-function TripCard({ trip, onRefresh }: { trip: TripView; onRefresh?: () => void }) {
-  const [expanded, setExpanded] = useState(false);
+function TripCard({ trip, watches, onRefresh }: { trip: TripView; watches?: WatchView[]; onRefresh?: () => void }) {
+  const [expanded, setExpanded] = useState(true); // Default expanded
 
   const statusColors: Record<string, string> = {
     FUTURE: 'bg-blue-500/20 text-blue-400',
     IN_PROGRESS: 'bg-green-500/20 text-green-400',
     PAST: 'bg-gray-500/20 text-gray-400',
   };
+
+  // Create a map of booking_id -> watch for quick lookup
+  const watchByBookingId = new Map<string, WatchView>();
+  watches?.forEach(w => {
+    if (w.booking_id) {
+      watchByBookingId.set(w.booking_id, w);
+    }
+  });
 
   return (
     <div className="bg-accent/30 rounded overflow-hidden">
@@ -887,7 +1176,12 @@ function TripCard({ trip, onRefresh }: { trip: TripView; onRefresh?: () => void 
       {expanded && trip.bookings.length > 0 && (
         <div className="p-2 pt-0 space-y-2">
           {trip.bookings.map((booking) => (
-            <BookingCard key={booking.id} booking={booking} onRefresh={onRefresh} />
+            <BookingCard
+              key={booking.id}
+              booking={booking}
+              watch={watchByBookingId.get(booking.id) || (booking.watch_id ? watches?.find(w => w.id === booking.watch_id) : undefined)}
+              onRefresh={onRefresh}
+            />
           ))}
         </div>
       )}
@@ -895,34 +1189,197 @@ function TripCard({ trip, onRefresh }: { trip: TripView; onRefresh?: () => void 
   );
 }
 
-function WatchCard({ watch }: { watch: WatchView }) {
+function getWatchHealthStatus(watch: WatchView): { color: string; label: string; icon: string } {
+  if (!watch.last_result) {
+    return { color: 'bg-gray-500/20 text-gray-400', label: 'Pending', icon: '⚪' };
+  }
+  switch (watch.last_result) {
+    case 'success':
+      return { color: 'bg-green-500/20 text-green-400', label: 'Healthy', icon: '🟢' };
+    case 'empty':
+      return { color: 'bg-yellow-500/20 text-yellow-400', label: 'No Results', icon: '🟡' };
+    case 'timeout':
+    case 'supplier_error':
+      return { color: 'bg-red-500/20 text-red-400', label: 'Error', icon: '🔴' };
+    default:
+      return { color: 'bg-gray-500/20 text-gray-400', label: 'Unknown', icon: '⚪' };
+  }
+}
+
+function formatTimeUntil(dateStr: string | null): string {
+  if (!dateStr) return 'N/A';
+  const now = new Date();
+  const date = new Date(dateStr);
+  const diffMs = date.getTime() - now.getTime();
+
+  if (diffMs < 0) return 'overdue';
+
+  const diffMins = Math.floor(diffMs / 60000);
+  if (diffMins < 60) return `in ${diffMins}m`;
+  const diffHours = Math.floor(diffMins / 60);
+  if (diffHours < 24) return `in ${diffHours}h`;
+  const diffDays = Math.floor(diffHours / 24);
+  return `in ${diffDays}d`;
+}
+
+function WatchCard({ watch, onRefresh }: { watch: WatchView; onRefresh?: () => void }) {
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+
   const statusColors: Record<string, string> = {
     ACTIVE: 'bg-green-500/20 text-green-400',
+    active: 'bg-green-500/20 text-green-400',
     PAUSED: 'bg-yellow-500/20 text-yellow-400',
+    paused: 'bg-yellow-500/20 text-yellow-400',
     ENDED: 'bg-gray-500/20 text-gray-400',
+    ended: 'bg-gray-500/20 text-gray-400',
   };
 
+  const health = getWatchHealthStatus(watch);
+  const isActive = watch.status?.toLowerCase() === 'active';
+
+  async function handleRetryNow() {
+    setActionLoading('retry');
+    setActionError(null);
+    try {
+      await api.retryWatchNow(watch.id);
+      onRefresh?.();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Failed to retry watch');
+    } finally {
+      setActionLoading(null);
+    }
+  }
+
+  async function handleTerminate() {
+    setActionLoading('terminate');
+    setActionError(null);
+    try {
+      await api.terminateWatch(watch.id);
+      onRefresh?.();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Failed to terminate watch');
+    } finally {
+      setActionLoading(null);
+    }
+  }
+
+  async function handleRegenerate() {
+    if (!watch.booking_id) return;
+    setActionLoading('regenerate');
+    setActionError(null);
+    try {
+      await api.regenerateWatch(watch.booking_id);
+      onRefresh?.();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Failed to regenerate watch');
+    } finally {
+      setActionLoading(null);
+    }
+  }
+
   return (
-    <div className="bg-accent/30 rounded p-2 text-sm">
-      <div className="flex items-center gap-2">
-        <span className="font-medium">{watch.watch_type}</span>
-        <span className={cn('px-1.5 py-0.5 text-xs rounded', statusColors[watch.status] || 'bg-gray-500/20')}>
-          {watch.status}
-        </span>
-        {watch.priority && (
-          <span className="text-xs text-muted-foreground">{watch.priority}</span>
+    <div className="bg-accent/30 rounded p-3 text-sm">
+      {/* Header row */}
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center gap-2">
+          <span className="font-medium">{watch.watch_type}</span>
+          <span className={cn('px-1.5 py-0.5 text-xs rounded', statusColors[watch.status] || 'bg-gray-500/20')}>
+            {watch.status}
+          </span>
+          {watch.priority && (
+            <span className="text-xs text-muted-foreground">{watch.priority}</span>
+          )}
+        </div>
+        {/* Health indicator */}
+        <div className={cn('flex items-center gap-1 px-2 py-0.5 text-xs rounded', health.color)}>
+          <span>{health.icon}</span>
+          <span>{health.label}</span>
+        </div>
+      </div>
+
+      {/* Watch observability info */}
+      <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs mb-2">
+        {watch.latest_observed_price && (
+          <div>
+            <span className="text-muted-foreground">Last price: </span>
+            <span className="font-medium">
+              {formatMoney(watch.latest_observed_price.amount, watch.latest_observed_price.currency)}
+            </span>
+            {watch.latest_observed_at && (
+              <span className="text-muted-foreground"> ({timeAgo(watch.latest_observed_at)})</span>
+            )}
+          </div>
+        )}
+        {!watch.latest_observed_price && watch.last_executed_at && (
+          <div>
+            <span className="text-muted-foreground">Last price: </span>
+            <span>--</span>
+          </div>
+        )}
+        {watch.next_due_at && isActive && (
+          <div>
+            <span className="text-muted-foreground">Next check: </span>
+            <span>{formatTimeUntil(watch.next_due_at)}</span>
+          </div>
+        )}
+        {watch.last_executed_at && (
+          <div>
+            <span className="text-muted-foreground">Last check: </span>
+            <span>{timeAgo(watch.last_executed_at)}</span>
+            {watch.last_result && watch.last_result !== 'success' && (
+              <span className="text-yellow-400"> ({watch.last_result})</span>
+            )}
+          </div>
         )}
       </div>
-      {watch.goal && <div className="text-xs text-muted-foreground mt-1">Goal: {watch.goal}</div>}
+
+      {/* Goal and threshold */}
+      {watch.goal && <div className="text-xs text-muted-foreground mb-1">Goal: {watch.goal}</div>}
       {watch.threshold_amount && (
-        <div className="text-xs mt-1">
+        <div className="text-xs mb-1">
           Threshold: {formatMoney(watch.threshold_amount, watch.threshold_currency)}
         </div>
       )}
-      <div className="text-xs text-muted-foreground mt-1">
+
+      {/* Meta info */}
+      <div className="text-xs text-muted-foreground mb-2">
         Created {timeAgo(watch.created_at)}
         {watch.source && ` · Source: ${watch.source}`}
       </div>
+
+      {/* Action buttons */}
+      {isActive && (
+        <div className="flex gap-2 mt-2 pt-2 border-t border-border">
+          <button
+            onClick={handleRetryNow}
+            disabled={!!actionLoading}
+            className="px-2 py-1 text-xs bg-primary/20 text-primary hover:bg-primary/30 rounded transition-colors disabled:opacity-50"
+          >
+            {actionLoading === 'retry' ? 'Retrying...' : 'Retry Now'}
+          </button>
+          {watch.booking_id && (
+            <button
+              onClick={handleRegenerate}
+              disabled={!!actionLoading}
+              className="px-2 py-1 text-xs bg-accent hover:bg-accent/80 rounded transition-colors disabled:opacity-50"
+            >
+              {actionLoading === 'regenerate' ? 'Regenerating...' : 'Regenerate'}
+            </button>
+          )}
+          <button
+            onClick={handleTerminate}
+            disabled={!!actionLoading}
+            className="px-2 py-1 text-xs bg-red-500/20 text-red-400 hover:bg-red-500/30 rounded transition-colors disabled:opacity-50"
+          >
+            {actionLoading === 'terminate' ? 'Terminating...' : 'Terminate'}
+          </button>
+        </div>
+      )}
+
+      {actionError && (
+        <div className="text-red-400 text-xs mt-2">{actionError}</div>
+      )}
     </div>
   );
 }
@@ -1063,7 +1520,7 @@ function TaskCard({ task }: { task: PendingTaskView }) {
   );
 }
 
-// Main component
+// Main component - Full page layout
 export function MemberDetail({
   member,
   context,
@@ -1082,28 +1539,59 @@ export function MemberDetail({
   const openEscalations = context?.escalations.filter(e => e.status === 'open').length || 0;
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex justify-end z-50">
-      <div className="w-full max-w-3xl bg-card border-l border-border h-full overflow-y-auto">
-        {/* Header */}
-        <div className="sticky top-0 bg-card border-b border-border p-4 flex items-center justify-between z-10">
-          <div>
-            <h2 className="text-lg font-semibold">{member.name || 'Unknown'}</h2>
-            <p className="text-sm text-muted-foreground">{member.email}</p>
-          </div>
+    <div className="w-full">
+      {/* Header with back button */}
+      <div className="mb-6 flex items-center gap-4">
+        <button
+          onClick={onClose}
+          className="flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors"
+        >
+          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+          </svg>
+          <span className="text-sm">Back to search</span>
+        </button>
+        {onRefresh && (
           <button
-            onClick={onClose}
-            className="p-2 hover:bg-accent rounded-md transition-colors"
+            onClick={onRefresh}
+            disabled={loading}
+            className="ml-auto flex items-center gap-2 px-3 py-1.5 text-sm border border-border rounded-lg hover:bg-accent transition-colors disabled:opacity-50"
           >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            <svg className={cn('w-4 h-4', loading && 'animate-spin')} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
             </svg>
+            Refresh
           </button>
-        </div>
+        )}
+      </div>
 
-        <div className="p-4 space-y-4">
-          {/* Basic Info */}
-          <div className="bg-accent/50 rounded-lg p-3 space-y-2 text-sm">
-            <div className="grid grid-cols-2 gap-2">
+      {/* Member header info */}
+      <div className="mb-6">
+        <h1 className="text-2xl font-semibold">{member.name || 'Unknown'}</h1>
+        <p className="text-muted-foreground">{member.email}</p>
+      </div>
+
+      {/* Loading/Error */}
+      {loading && (
+        <div className="text-center text-muted-foreground py-8">
+          Loading member context...
+        </div>
+      )}
+
+      {error && (
+        <div className="bg-red-500/20 text-red-400 p-3 rounded-lg text-sm mb-6">
+          {error}
+        </div>
+      )}
+
+      {/* Three-column layout for full page */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        {/* Left column - Member info & settings */}
+        <div className="lg:col-span-3 space-y-4">
+          {/* Basic Info Card */}
+          <div className="bg-card border border-border rounded-lg p-4">
+            <h3 className="text-sm font-medium mb-3">Member Info</h3>
+            <div className="space-y-2 text-sm">
               <div className="flex justify-between">
                 <span className="text-muted-foreground">ID</span>
                 <span className="font-mono text-xs">{member.id.slice(0, 8)}...</span>
@@ -1118,47 +1606,102 @@ export function MemberDetail({
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Membership</span>
-                <span>{member.membership_status || 'None'} {member.membership_plan ? `(${member.membership_plan})` : ''}</span>
+                <span>{member.membership_status || 'None'}</span>
               </div>
+              {member.membership_plan && (
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Plan</span>
+                  <span>{member.membership_plan}</span>
+                </div>
+              )}
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Joined</span>
                 <span>{formatDate(member.created_at)}</span>
               </div>
-              {context?.user_extras.stripe_customer_id && (
+              {context?.user_extras?.stripe_customer_id && (
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Stripe</span>
-                  <span className="font-mono text-xs">{context.user_extras.stripe_customer_id.slice(0, 16)}...</span>
+                  <span className="font-mono text-xs">{context.user_extras.stripe_customer_id.slice(0, 12)}...</span>
                 </div>
               )}
             </div>
           </div>
 
-          {/* Loading/Error */}
-          {loading && (
-            <div className="text-center text-muted-foreground py-8">
-              Loading member context...
-            </div>
-          )}
-
-          {error && (
-            <div className="bg-red-500/20 text-red-400 p-3 rounded-lg text-sm">
-              {error}
-            </div>
-          )}
-
-          {/* Full Context */}
           {context && (
             <>
-              {/* User Settings & Activity */}
-              <Section title="Settings & Preferences" defaultOpen>
+              {/* Settings Card */}
+              <div className="bg-card border border-border rounded-lg p-4">
+                <h3 className="text-sm font-medium mb-3">Settings</h3>
                 <UserSettingsCard context={context} />
-              </Section>
+              </div>
 
-              <Section title="Activity & Engagement">
+              {/* Activity Card */}
+              <div className="bg-card border border-border rounded-lg p-4">
+                <h3 className="text-sm font-medium mb-3">Activity</h3>
                 <UserContextCard userContext={context.user_context} />
+              </div>
+
+              {/* Travellers Card */}
+              <div className="bg-card border border-border rounded-lg p-4">
+                <h3 className="text-sm font-medium mb-3">Travellers ({context.travellers.length})</h3>
+                {context.travellers.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No travellers</p>
+                ) : (
+                  <div className="space-y-2">
+                    {context.travellers.map((t) => <TravelerCard key={t.id} traveler={t} />)}
+                  </div>
+                )}
+              </div>
+
+              {/* Referral Stats */}
+              {context.referral_stats && (
+                <div className="bg-card border border-border rounded-lg p-4">
+                  <h3 className="text-sm font-medium mb-3">Referrals</h3>
+                  <div className="space-y-2 text-sm">
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Code</span>
+                      <span className="font-mono">{context.referral_stats.referral_code}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Total</span>
+                      <span>{context.referral_stats.total_referrals}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Successful</span>
+                      <span className="text-green-400">{context.referral_stats.successful_referrals}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Earnings</span>
+                      <span>{formatMoney(context.referral_stats.total_earnings * 100, context.referral_stats.earnings_currency)}</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+
+        {/* Center column - Trips first, then other items */}
+        <div className="lg:col-span-6 space-y-4">
+          {context && (
+            <>
+              {/* Trips & Bookings - main focus, always first */}
+              <Section title="Trips" count={context.trips.length} defaultOpen>
+                {context.trips.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No trips</p>
+                ) : (
+                  context.trips.map((trip) => (
+                    <TripCard
+                      key={trip.id}
+                      trip={trip}
+                      watches={context.watches}
+                      onRefresh={onRefresh}
+                    />
+                  ))
+                )}
               </Section>
 
-              {/* Escalations - prominent if open */}
+              {/* Escalations - only show if any exist */}
               {context.escalations.length > 0 && (
                 <Section
                   title="Escalations"
@@ -1181,30 +1724,13 @@ export function MemberDetail({
                 </Section>
               )}
 
-              {/* Trips & Bookings */}
-              <Section title="Trips" count={context.trips.length} defaultOpen={context.trips.length > 0}>
-                {context.trips.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">No trips</p>
-                ) : (
-                  context.trips.map((trip) => <TripCard key={trip.id} trip={trip} onRefresh={onRefresh} />)
-                )}
-              </Section>
-
-              {/* Watches */}
-              <Section title="Watches" count={context.watches.length}>
-                {context.watches.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">No active watches</p>
-                ) : (
-                  context.watches.map((watch) => <WatchCard key={watch.id} watch={watch} />)
-                )}
-              </Section>
-
               {/* Opportunities */}
               {(context.flight_opportunities.length > 0 || context.hotel_opportunities.length > 0) && (
                 <Section
                   title="Opportunities"
                   count={context.flight_opportunities.length + context.hotel_opportunities.length}
                   badge={{ text: 'Active', variant: 'success' }}
+                  defaultOpen
                 >
                   {context.flight_opportunities.map((opp) => (
                     <OpportunityCard key={opp.id} opportunity={opp} type="flight" />
@@ -1214,78 +1740,59 @@ export function MemberDetail({
                   ))}
                 </Section>
               )}
+            </>
+          )}
+        </div>
 
-              {/* Travellers */}
-              <Section title="Travellers" count={context.travellers.length}>
-                {context.travellers.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">No travellers</p>
-                ) : (
-                  context.travellers.map((t) => <TravelerCard key={t.id} traveler={t} />)
-                )}
-              </Section>
-
+        {/* Right column - Communications, Payments, Credits */}
+        <div className="lg:col-span-3 space-y-4">
+          {context && (
+            <>
               {/* Communications */}
-              <Section title="Communications" count={context.communications.length}>
+              <div className="bg-card border border-border rounded-lg p-4">
+                <h3 className="text-sm font-medium mb-3">Communications ({context.communications.length})</h3>
                 {context.communications.length === 0 ? (
                   <p className="text-sm text-muted-foreground">No recent communications</p>
                 ) : (
-                  <div className="space-y-2">
+                  <div className="space-y-2 max-h-[400px] overflow-y-auto">
                     {context.communications.map((comm) => (
                       <CommunicationCard key={comm.id} comm={comm} />
                     ))}
                   </div>
                 )}
-              </Section>
+              </div>
 
               {/* Payment History */}
-              <Section title="Payment History" count={context.payment_records.length}>
+              <div className="bg-card border border-border rounded-lg p-4">
+                <h3 className="text-sm font-medium mb-3">Payments ({context.payment_records.length})</h3>
                 {context.payment_records.length === 0 ? (
                   <p className="text-sm text-muted-foreground">No payment records</p>
                 ) : (
-                  context.payment_records.map((pay) => <PaymentCard key={pay.id} payment={pay} />)
+                  <div className="space-y-2 max-h-[300px] overflow-y-auto">
+                    {context.payment_records.map((pay) => <PaymentCard key={pay.id} payment={pay} />)}
+                  </div>
                 )}
-              </Section>
+              </div>
 
               {/* Airline Credits */}
               {context.airline_credits.length > 0 && (
-                <Section title="Airline Credits" count={context.airline_credits.length}>
-                  {context.airline_credits.map((credit) => (
-                    <div key={credit.id} className="bg-accent/30 rounded p-2 text-sm">
-                      <div className="flex justify-between">
-                        <span className="font-medium">{credit.airline}</span>
-                        <span>{formatMoney(credit.amount * 100, credit.currency)}</span>
+                <div className="bg-card border border-border rounded-lg p-4">
+                  <h3 className="text-sm font-medium mb-3">Airline Credits ({context.airline_credits.length})</h3>
+                  <div className="space-y-2">
+                    {context.airline_credits.map((credit) => (
+                      <div key={credit.id} className="bg-accent/30 rounded p-2 text-sm">
+                        <div className="flex justify-between">
+                          <span className="font-medium">{credit.airline}</span>
+                          <span>{formatMoney(credit.amount * 100, credit.currency)}</span>
+                        </div>
+                        <div className="text-xs text-muted-foreground">
+                          {credit.status}
+                          {credit.expiry_date && ` · Expires ${formatDate(credit.expiry_date)}`}
+                        </div>
                       </div>
-                      <div className="text-xs text-muted-foreground">
-                        {credit.status}
-                        {credit.expiry_date && ` · Expires ${formatDate(credit.expiry_date)}`}
-                      </div>
-                    </div>
-                  ))}
-                </Section>
-              )}
-
-              {/* Referral Stats */}
-              {context.referral_stats && (
-                <Section title="Referrals">
-                  <div className="grid grid-cols-2 gap-2 text-sm">
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Code</span>
-                      <span className="font-mono">{context.referral_stats.referral_code}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Total</span>
-                      <span>{context.referral_stats.total_referrals}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Successful</span>
-                      <span className="text-green-400">{context.referral_stats.successful_referrals}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Earnings</span>
-                      <span>{formatMoney(context.referral_stats.total_earnings * 100, context.referral_stats.earnings_currency)}</span>
-                    </div>
+                    ))}
                   </div>
-                </Section>
+                </div>
               )}
             </>
           )}

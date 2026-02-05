@@ -298,6 +298,18 @@ class ApiClient {
     });
   }
 
+  async retryWatchNow(watchId: string): Promise<WatchRetryResponse> {
+    return this.fetch<WatchRetryResponse>(`/watches/${watchId}/retry-now`, {
+      method: 'POST',
+    });
+  }
+
+  async terminateWatch(watchId: string): Promise<WatchTerminateResponse> {
+    return this.fetch<WatchTerminateResponse>(`/watches/${watchId}/terminate`, {
+      method: 'POST',
+    });
+  }
+
   // Emails
   async getEmailForBooking(bookingType: 'flight' | 'hotel', bookingId: string): Promise<RawEmail> {
     return this.fetch<RawEmail>(`/emails/for-booking/${bookingType}/${bookingId}`);
@@ -305,6 +317,14 @@ class ApiClient {
 
   async getEmailForTask(taskId: string): Promise<RawEmail> {
     return this.fetch<RawEmail>(`/emails/for-task/${taskId}`);
+  }
+
+  // Hotels
+  async matchHotel(request: HotelMatchRequest): Promise<HotelMatchResponse> {
+    return this.fetch<HotelMatchResponse>('/hotels/match', {
+      method: 'POST',
+      body: JSON.stringify(request),
+    });
   }
 }
 
@@ -485,6 +505,7 @@ export interface BookingView {
   flight: FlightBookingView | null;
   hotel: HotelBookingView | null;
   created_at: string;
+  watch_id: string | null; // NEW - link to watch if monitoring
 }
 
 export interface TripView {
@@ -522,6 +543,12 @@ export interface WatchView {
   ended_at: string | null;
   threshold_amount: number | null;
   threshold_currency: string | null;
+  // New observability fields
+  latest_observed_price: MoneyView | null;
+  latest_observed_at: string | null;
+  last_executed_at: string | null;
+  last_result: 'success' | 'empty' | 'timeout' | 'supplier_error' | null;
+  next_due_at: string | null;
 }
 
 export interface FlightOpportunityView {
@@ -666,10 +693,13 @@ export interface HotelBookingPatchRequest {
   booking_provider?: string;
   verification_status?: 'unverified' | 'functional' | 'complete';
   stay?: {
-    check_in_date?: string;
-    check_out_date?: string;
-    hotel_name?: string;
-    room_type?: string;
+    hotel?: {
+      id?: string;
+      name?: string;
+    };
+    check_in?: string;
+    check_out?: string;
+    room_type_name?: string;
   };
   customer_price?: {
     amount: number;
@@ -687,6 +717,37 @@ export interface WatchRegenerateResponse {
   old_watch_id: string | null;
   new_watch_id: string;
   booking_id: string;
+}
+
+export interface WatchRetryResponse {
+  success: boolean;
+  watch_id: string;
+  quote_request_id: string;
+  next_due_at: string;
+}
+
+export interface WatchTerminateResponse {
+  success: boolean;
+  watch_id: string;
+}
+
+// Hotel matching types
+export interface HotelMatchRequest {
+  hotel_name: string;
+  address?: string;
+  city?: string;
+}
+
+export interface HotelMatchResult {
+  hotel_id: string;
+  name: string;
+  address: string | null;
+  city: string | null;
+  confidence_score: number;
+}
+
+export interface HotelMatchResponse {
+  matches: HotelMatchResult[];
 }
 
 export const api = new ApiClient(API_BASE);

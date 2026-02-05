@@ -125,6 +125,24 @@ export default function MemberOverviewPage() {
     }
   }
 
+  // If a member is selected, show full-page detail view
+  if (selectedMember) {
+    return (
+      <MemberDetail
+        member={selectedMember}
+        context={memberContext}
+        onClose={() => {
+          setSelectedMember(null);
+          setMemberContext(null);
+        }}
+        onRefresh={handleRefreshContext}
+        loading={contextLoading}
+        error={contextError}
+      />
+    );
+  }
+
+  // Otherwise show the search view
   return (
     <div>
       <div className="mb-6">
@@ -205,21 +223,6 @@ export default function MemberOverviewPage() {
           />
         )}
       </div>
-
-      {/* Member Detail Panel */}
-      {selectedMember && (
-        <MemberDetail
-          member={selectedMember}
-          context={memberContext}
-          onClose={() => {
-            setSelectedMember(null);
-            setMemberContext(null);
-          }}
-          onRefresh={handleRefreshContext}
-          loading={contextLoading}
-          error={contextError}
-        />
-      )}
     </div>
   );
 }
