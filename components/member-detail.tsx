@@ -1398,9 +1398,15 @@ export function MemberDetail({
           <div className="bg-card border border-border rounded-lg p-4">
             <h3 className="text-sm font-medium mb-3">Member Info</h3>
             <div className="space-y-2 text-sm">
-              <div className="flex justify-between">
+              <div className="flex justify-between items-center">
                 <span className="text-muted-foreground">ID</span>
-                <span className="font-mono text-xs">{member.id.slice(0, 8)}...</span>
+                <button
+                  onClick={() => { navigator.clipboard.writeText(member.id); }}
+                  title="Click to copy"
+                  className="font-mono text-xs hover:text-foreground transition-colors cursor-pointer text-right break-all"
+                >
+                  {member.id}
+                </button>
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Phone</span>

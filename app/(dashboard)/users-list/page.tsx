@@ -46,39 +46,6 @@ function formatDate(dateString: string): string {
   });
 }
 
-// ── Sort Header ──────────────────────────────────────────
-
-function SortHeader({
-  label,
-  sortKey,
-  currentKey,
-  currentDir,
-  onSort,
-}: {
-  label: string;
-  sortKey: SortKey;
-  currentKey: SortKey;
-  currentDir: SortDir;
-  onSort: (key: SortKey) => void;
-}) {
-  const active = currentKey === sortKey;
-  return (
-    <th
-      className="px-4 py-2 text-left text-xs font-medium text-muted-foreground cursor-pointer select-none hover:text-foreground transition-colors group"
-      onClick={() => onSort(sortKey)}
-    >
-      <span className="inline-flex items-center gap-1">
-        {label}
-        {active ? (
-          <span className="text-primary font-bold">{currentDir === 'asc' ? '↑' : '↓'}</span>
-        ) : (
-          <span className="opacity-0 group-hover:opacity-50 text-muted-foreground">↕</span>
-        )}
-      </span>
-    </th>
-  );
-}
-
 function StatusBadge({ status }: { status: string }) {
   const colors: Record<string, string> = {
     active: 'bg-green-500/20 text-green-400',
@@ -152,6 +119,17 @@ function MembershipBadge({ status, plan }: { status: string | null; plan: string
   );
 }
 
+// ── Column Definitions ───────────────────────────────────
+
+const COLUMNS = [
+  { key: 'name' as SortKey, label: 'Name', defaultWidth: 180, minWidth: 100 },
+  { key: 'email' as SortKey, label: 'Email', defaultWidth: 220, minWidth: 120 },
+  { key: 'phone' as SortKey | 'phone', label: 'Phone', defaultWidth: 140, minWidth: 100 },
+  { key: 'status' as SortKey, label: 'Status', defaultWidth: 100, minWidth: 80 },
+  { key: 'membership' as SortKey, label: 'Membership', defaultWidth: 120, minWidth: 80 },
+  { key: 'created_at' as SortKey, label: 'Created', defaultWidth: 200, minWidth: 120 },
+] as const;
+
 // ── Main Page ────────────────────────────────────────────
 
 export default function UsersListPage() {
@@ -159,6 +137,10 @@ export default function UsersListPage() {
   const [users, setUsers] = useState<UserListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Column widths for resizing
+  const [colWidths, setColWidths] = useState<number[]>(COLUMNS.map(c => c.defaultWidth));
+  const resizing = useRef<{ colIndex: number; startX: number; startWidth: number } | null>(null);
 
   // Pagination
   const [page, setPage] = useState(0);
@@ -266,6 +248,37 @@ export default function UsersListPage() {
       setContextLoading(false);
     }
   }
+
+  // Column resize handlers
+  const handleResizeStart = useCallback((colIndex: number, e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    resizing.current = { colIndex, startX: e.clientX, startWidth: colWidths[colIndex] };
+
+    const handleMouseMove = (ev: MouseEvent) => {
+      if (!resizing.current) return;
+      const delta = ev.clientX - resizing.current.startX;
+      const newWidth = Math.max(COLUMNS[resizing.current.colIndex].minWidth, resizing.current.startWidth + delta);
+      setColWidths(prev => {
+        const next = [...prev];
+        next[resizing.current!.colIndex] = newWidth;
+        return next;
+      });
+    };
+
+    const handleMouseUp = () => {
+      resizing.current = null;
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+  }, [colWidths]);
 
   // Sort handler
   function handleSort(key: SortKey) {
@@ -385,47 +398,68 @@ export default function UsersListPage() {
               : 'No users found'}
           </div>
         ) : (
-          <table className="w-full">
-            <thead className="border-b border-border bg-accent/30">
-              <tr>
-                <SortHeader label="Name" sortKey="name" currentKey={sortKey} currentDir={sortDir} onSort={handleSort} />
-                <SortHeader label="Email" sortKey="email" currentKey={sortKey} currentDir={sortDir} onSort={handleSort} />
-                <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground">Phone</th>
-                <SortHeader label="Status" sortKey="status" currentKey={sortKey} currentDir={sortDir} onSort={handleSort} />
-                <SortHeader label="Membership" sortKey="membership" currentKey={sortKey} currentDir={sortDir} onSort={handleSort} />
-                <SortHeader label="Created" sortKey="created_at" currentKey={sortKey} currentDir={sortDir} onSort={handleSort} />
-              </tr>
-            </thead>
-            <tbody>
-              {sortedUsers.map((user) => (
-                <tr
-                  key={user.id}
-                  onClick={() => handleSelectUser(user)}
-                  className="border-b border-border last:border-0 hover:bg-accent/50 transition-colors cursor-pointer"
-                >
-                  <td className="px-4 py-3 text-sm font-medium">
-                    {user.name || '—'}
-                  </td>
-                  <td className="px-4 py-3 text-sm text-muted-foreground">
-                    {user.email || '—'}
-                  </td>
-                  <td className="px-4 py-3 text-sm text-muted-foreground">
-                    {user.phone_number || '—'}
-                  </td>
-                  <td className="px-4 py-3">
-                    <StatusBadge status={user.status} />
-                  </td>
-                  <td className="px-4 py-3">
-                    <MembershipBadge status={user.membership_status} plan={user.membership_plan} />
-                  </td>
-                  <td className="px-4 py-3 text-sm text-muted-foreground">
-                    <span>{formatDate(user.created_at)}</span>
-                    <span className="text-xs text-muted-foreground/60 ml-1.5">({timeAgo(user.created_at)})</span>
-                  </td>
+          <div className="overflow-x-auto">
+            <table style={{ tableLayout: 'fixed', width: colWidths.reduce((a, b) => a + b, 0) }}>
+              <thead className="border-b border-border bg-accent/30">
+                <tr>
+                  {COLUMNS.map((col, i) => (
+                    <th
+                      key={col.key}
+                      style={{ width: colWidths[i] }}
+                      className="relative px-4 py-2 text-left text-xs font-medium text-muted-foreground cursor-pointer select-none hover:text-foreground transition-colors group"
+                      onClick={() => col.key !== 'phone' && handleSort(col.key as SortKey)}
+                    >
+                      <span className="inline-flex items-center gap-1">
+                        {col.label}
+                        {col.key !== 'phone' && sortKey === col.key ? (
+                          <span className="text-primary font-bold">{sortDir === 'asc' ? '↑' : '↓'}</span>
+                        ) : col.key !== 'phone' ? (
+                          <span className="opacity-0 group-hover:opacity-50 text-muted-foreground">↕</span>
+                        ) : null}
+                      </span>
+                      {/* Resize handle */}
+                      {i < COLUMNS.length - 1 && (
+                        <div
+                          className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-primary/30 active:bg-primary/50 z-10"
+                          onMouseDown={(e) => handleResizeStart(i, e)}
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                      )}
+                    </th>
+                  ))}
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {sortedUsers.map((user) => (
+                  <tr
+                    key={user.id}
+                    onClick={() => handleSelectUser(user)}
+                    className="border-b border-border last:border-0 hover:bg-accent/50 transition-colors cursor-pointer"
+                  >
+                    <td style={{ width: colWidths[0] }} className="px-4 py-3 text-sm font-medium truncate">
+                      {user.name || '—'}
+                    </td>
+                    <td style={{ width: colWidths[1] }} className="px-4 py-3 text-sm text-muted-foreground truncate">
+                      {user.email || '—'}
+                    </td>
+                    <td style={{ width: colWidths[2] }} className="px-4 py-3 text-sm text-muted-foreground truncate">
+                      {user.phone_number || '—'}
+                    </td>
+                    <td style={{ width: colWidths[3] }} className="px-4 py-3">
+                      <StatusBadge status={user.status} />
+                    </td>
+                    <td style={{ width: colWidths[4] }} className="px-4 py-3">
+                      <MembershipBadge status={user.membership_status} plan={user.membership_plan} />
+                    </td>
+                    <td style={{ width: colWidths[5] }} className="px-4 py-3 text-sm text-muted-foreground truncate">
+                      <span>{formatDate(user.created_at)}</span>
+                      <span className="text-xs text-muted-foreground/60 ml-1.5">({timeAgo(user.created_at)})</span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
 
