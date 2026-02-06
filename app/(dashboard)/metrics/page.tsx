@@ -22,6 +22,7 @@ import { cn } from '@/lib/utils';
 type DateRange = '7d' | '30d' | '90d' | '6m' | '1y' | 'all' | 'custom';
 type Granularity = 'hourly' | 'daily' | 'weekly' | 'monthly';
 type ChartMode = 'cumulative' | 'new';
+type Timezone = 'UTC' | 'America/New_York' | 'America/Chicago' | 'America/Los_Angeles';
 
 interface ChartDataPoint {
   date: string;       // display label
@@ -49,6 +50,13 @@ const GRANULARITY_OPTIONS: { value: Granularity; label: string }[] = [
   { value: 'monthly', label: 'Monthly' },
 ];
 
+const TIMEZONE_OPTIONS: { value: Timezone; label: string }[] = [
+  { value: 'UTC', label: 'UTC' },
+  { value: 'America/New_York', label: 'Eastern' },
+  { value: 'America/Chicago', label: 'Central' },
+  { value: 'America/Los_Angeles', label: 'Pacific' },
+];
+
 const STATUS_OPTIONS = [
   { value: null, label: 'All statuses' },
   { value: 'active', label: 'Active' },
@@ -58,6 +66,30 @@ const STATUS_OPTIONS = [
 ] as const;
 
 // ── Helpers ──────────────────────────────────────────────
+
+/** Extract year/month/day/hour/dayOfWeek in a given timezone */
+function getPartsInTz(date: Date, tz: Timezone): { year: number; month: number; day: number; hour: number; dayOfWeek: number } {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: tz,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    weekday: 'short',
+    hour12: false,
+  }).formatToParts(date);
+
+  const get = (type: string) => parts.find(p => p.type === type)?.value ?? '';
+  const weekdayMap: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+
+  return {
+    year: parseInt(get('year')),
+    month: parseInt(get('month')),
+    day: parseInt(get('day')),
+    hour: parseInt(get('hour')) % 24, // handle "24" edge case
+    dayOfWeek: weekdayMap[get('weekday')] ?? 0,
+  };
+}
 
 function getDateRange(range: DateRange): { start: Date | null; end: Date } {
   const now = new Date();
@@ -100,11 +132,12 @@ function getDateRange(range: DateRange): { start: Date | null; end: Date } {
   }
 }
 
-function getBucketKey(date: Date, granularity: Granularity): string {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  const hour = String(date.getHours()).padStart(2, '0');
+function getBucketKey(date: Date, granularity: Granularity, tz: Timezone): string {
+  const p = getPartsInTz(date, tz);
+  const year = p.year;
+  const month = String(p.month).padStart(2, '0');
+  const day = String(p.day).padStart(2, '0');
+  const hour = String(p.hour).padStart(2, '0');
 
   switch (granularity) {
     case 'hourly':
@@ -113,13 +146,13 @@ function getBucketKey(date: Date, granularity: Granularity): string {
       return `${year}-${month}-${day}`;
     case 'weekly': {
       // Get Monday of the week
-      const d = new Date(date);
-      const dayOfWeek = d.getDay();
-      const diff = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
-      d.setDate(d.getDate() + diff);
-      const wy = d.getFullYear();
-      const wm = String(d.getMonth() + 1).padStart(2, '0');
-      const wd = String(d.getDate()).padStart(2, '0');
+      const diff = p.dayOfWeek === 0 ? -6 : 1 - p.dayOfWeek;
+      const monday = new Date(date);
+      monday.setDate(monday.getDate() + diff);
+      const mp = getPartsInTz(monday, tz);
+      const wy = mp.year;
+      const wm = String(mp.month).padStart(2, '0');
+      const wd = String(mp.day).padStart(2, '0');
       return `${wy}-${wm}-${wd}`;
     }
     case 'monthly':
@@ -129,22 +162,27 @@ function getBucketKey(date: Date, granularity: Granularity): string {
 
 function formatBucketLabel(key: string, granularity: Granularity): string {
   if (granularity === 'hourly') {
-    // key is like "2026-02-05T14"
-    const date = new Date(key + ':00:00');
-    if (isNaN(date.getTime())) return key;
-    return date.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric' });
+    // key is like "2026-02-05T14" — parse as parts directly
+    const [datePart, hourPart] = key.split('T');
+    const [y, m, d] = datePart.split('-').map(Number);
+    const h = parseInt(hourPart);
+    const ampm = h >= 12 ? 'PM' : 'AM';
+    const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
+    const monthNames = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    return `${monthNames[m]} ${d}, ${h12} ${ampm}`;
   }
 
-  const date = new Date(key + 'T00:00:00');
-  if (isNaN(date.getTime())) return key;
+  // For daily/weekly/monthly, parse the date string directly (no timezone conversion needed — it's already a label)
+  const [y, m, d] = key.split('-').map(Number);
+  const monthNames = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
   switch (granularity) {
     case 'daily':
-      return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+      return `${monthNames[m]} ${d}`;
     case 'weekly':
-      return `Week of ${date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`;
+      return `Week of ${monthNames[m]} ${d}`;
     case 'monthly':
-      return date.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+      return `${monthNames[m]} ${y}`;
   }
 }
 
@@ -162,6 +200,7 @@ export default function MetricsPage() {
   const [granularity, setGranularity] = useState<Granularity>('daily');
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
   const [chartMode, setChartMode] = useState<ChartMode>('cumulative');
+  const [timezone, setTimezone] = useState<Timezone>('UTC');
 
   // Data
   const [allUsers, setAllUsers] = useState<UserListItem[]>([]);
@@ -240,7 +279,7 @@ export default function MetricsPage() {
       if (!user.created_at) continue;
       const date = new Date(user.created_at);
       if (isNaN(date.getTime())) continue;
-      const key = getBucketKey(date, granularity);
+      const key = getBucketKey(date, granularity, timezone);
       buckets[key] = (buckets[key] || 0) + 1;
     }
 
@@ -249,41 +288,51 @@ export default function MetricsPage() {
     if (sortedKeys.length === 0) return [];
 
     // Fill gaps: generate all bucket keys between first and last
+    // We iterate using a simple counter to avoid timezone conversion issues in the gap filler
     const allKeys: string[] = [];
     const firstKey = sortedKeys[0];
     const lastKey = sortedKeys[sortedKeys.length - 1];
+
+    // For gap filling, use a UTC cursor and convert each step via getBucketKey
+    // Start from the earliest user's created_at that maps to firstKey
     const first = granularity === 'hourly'
-      ? new Date(firstKey + ':00:00')
-      : new Date(firstKey + 'T00:00:00');
+      ? new Date(firstKey + ':00:00Z')
+      : new Date(firstKey + 'T00:00:00Z');
     const last = granularity === 'hourly'
-      ? new Date(lastKey + ':00:00')
-      : new Date(lastKey + 'T00:00:00');
+      ? new Date(lastKey + ':00:00Z')
+      : new Date(lastKey + 'T00:00:00Z');
+    // Add buffer for timezone offset (up to 12h ahead)
+    last.setHours(last.getHours() + 14);
 
     const cursor = new Date(first);
+    const seen = new Set<string>();
     while (cursor <= last) {
-      allKeys.push(getBucketKey(cursor, granularity));
+      const key = getBucketKey(cursor, granularity, timezone);
+      if (!seen.has(key)) {
+        seen.add(key);
+        allKeys.push(key);
+      }
+      // Stop once we've passed the last actual key
+      if (key > lastKey && !buckets[key]) break;
       switch (granularity) {
         case 'hourly':
-          cursor.setHours(cursor.getHours() + 1);
+          cursor.setUTCHours(cursor.getUTCHours() + 1);
           break;
         case 'daily':
-          cursor.setDate(cursor.getDate() + 1);
+          cursor.setUTCDate(cursor.getUTCDate() + 1);
           break;
         case 'weekly':
-          cursor.setDate(cursor.getDate() + 7);
+          cursor.setUTCDate(cursor.getUTCDate() + 7);
           break;
         case 'monthly':
-          cursor.setMonth(cursor.getMonth() + 1);
+          cursor.setUTCMonth(cursor.getUTCMonth() + 1);
           break;
       }
     }
 
-    // Deduplicate keys while preserving order
-    const uniqueKeys = [...new Set(allKeys)];
-
     // Build data points
     let cumulative = 0;
-    return uniqueKeys.map(key => {
+    return allKeys.map(key => {
       const count = buckets[key] || 0;
       cumulative += count;
       return {
@@ -293,7 +342,7 @@ export default function MetricsPage() {
         cumulative,
       };
     });
-  }, [filteredUsers, granularity]);
+  }, [filteredUsers, granularity, timezone]);
 
   // Stats
   const stats = useMemo(() => {
@@ -421,6 +470,24 @@ export default function MetricsPage() {
             <option key={opt.label} value={opt.value ?? ''}>{opt.label}</option>
           ))}
         </select>
+
+        {/* Timezone Toggle */}
+        <div className="flex rounded-lg border border-border overflow-hidden">
+          {TIMEZONE_OPTIONS.map(opt => (
+            <button
+              key={opt.value}
+              onClick={() => setTimezone(opt.value)}
+              className={cn(
+                'px-2.5 py-2 text-sm font-medium transition-colors',
+                timezone === opt.value
+                  ? 'bg-primary text-primary-foreground'
+                  : 'bg-background text-muted-foreground hover:bg-accent'
+              )}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
 
         {/* Chart Mode Toggle */}
         <div className="flex rounded-lg border border-border overflow-hidden">
@@ -573,6 +640,7 @@ export default function MetricsPage() {
         <p className="text-xs text-muted-foreground mt-3">
           Showing {filteredUsers.length.toLocaleString()} users from {dateRangeLabel}
           {statusFilter && ` (${statusFilter} only)`}
+          {` \u00b7 ${TIMEZONE_OPTIONS.find(o => o.value === timezone)?.label ?? timezone} time`}
         </p>
       )}
     </div>
