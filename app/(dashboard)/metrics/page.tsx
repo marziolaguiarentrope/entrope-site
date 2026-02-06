@@ -84,27 +84,46 @@ const AUTO_GRANULARITY: Partial<Record<DateRange, Granularity>> = {
 
 // ── Helpers ──────────────────────────────────────────────
 
+/**
+ * Get the UTC offset in minutes for a given IANA timezone at a specific instant.
+ * Uses Intl.DateTimeFormat to compute the difference between UTC and the target timezone.
+ */
+function getUtcOffsetMinutes(date: Date, tz: Timezone): number {
+  if (tz === 'UTC') return 0;
+  // Format the date in the target timezone and in UTC, then compare
+  const fmt = (timeZone: string) => {
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit',
+      hour12: false,
+    }).formatToParts(date);
+    const g = (t: string) => parseInt(parts.find(p => p.type === t)?.value ?? '0');
+    return { year: g('year'), month: g('month'), day: g('day'), hour: g('hour') % 24, minute: g('minute') };
+  };
+  const utc = fmt('UTC');
+  const local = fmt(tz);
+  // Convert both to a minute-of-epoch approximation and take the difference
+  const toMin = (p: { year: number; month: number; day: number; hour: number; minute: number }) =>
+    ((p.year * 12 + p.month) * 31 + p.day) * 1440 + p.hour * 60 + p.minute;
+  return toMin(local) - toMin(utc);
+}
+
+/** Apply a timezone offset to a Date and return a shifted Date whose UTC fields represent the target timezone's local time. */
+function dateInTz(date: Date, tz: Timezone): Date {
+  const offsetMs = getUtcOffsetMinutes(date, tz) * 60 * 1000;
+  return new Date(date.getTime() + offsetMs);
+}
+
 /** Extract year/month/day/hour/dayOfWeek in a given timezone */
 function getPartsInTz(date: Date, tz: Timezone): { year: number; month: number; day: number; hour: number; dayOfWeek: number } {
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: tz,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    weekday: 'short',
-    hour12: false,
-  }).formatToParts(date);
-
-  const get = (type: string) => parts.find(p => p.type === type)?.value ?? '';
-  const weekdayMap: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
-
+  const shifted = dateInTz(date, tz);
   return {
-    year: parseInt(get('year')),
-    month: parseInt(get('month')),
-    day: parseInt(get('day')),
-    hour: parseInt(get('hour')) % 24,
-    dayOfWeek: weekdayMap[get('weekday')] ?? 0,
+    year: shifted.getUTCFullYear(),
+    month: shifted.getUTCMonth() + 1, // 1-indexed
+    day: shifted.getUTCDate(),
+    hour: shifted.getUTCHours(),
+    dayOfWeek: shifted.getUTCDay(),
   };
 }
 
