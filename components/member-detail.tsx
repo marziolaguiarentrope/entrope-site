@@ -564,20 +564,25 @@ function IntercomCard({ userId, email }: { userId: string; email: string | null 
   );
 }
 
-function CustomerIoCard({ userId, email }: { userId: string; email: string | null }) {
+function CustomerIoCard({ email }: { email: string | null }) {
   const [person, setPerson] = useState<CustomerIoPerson | null>(null);
   const [activities, setActivities] = useState<CustomerIoActivity[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (!email) {
+      setLoading(false);
+      return;
+    }
+
     let cancelled = false;
 
     async function fetchCustomerIo() {
       setLoading(true);
       try {
         const [personData, activityData] = await Promise.all([
-          api.getCustomerIoPerson(userId),
-          api.getCustomerIoActivities(userId),
+          api.getCustomerIoPerson(email!),
+          api.getCustomerIoActivities(email!),
         ]);
         if (cancelled) return;
         setPerson(personData);
@@ -591,7 +596,7 @@ function CustomerIoCard({ userId, email }: { userId: string; email: string | nul
 
     fetchCustomerIo();
     return () => { cancelled = true; };
-  }, [userId]);
+  }, [email]);
 
   // Filter to just email-related activities
   const emailActivities = activities.filter(a =>
@@ -1754,7 +1759,7 @@ export function MemberDetail({
           {/* Customer.io Card */}
           <div className="bg-card border border-border rounded-lg p-4">
             <h3 className="text-sm font-medium mb-3">Customer.io</h3>
-            <CustomerIoCard userId={member.id} email={member.email} />
+            <CustomerIoCard email={member.email} />
           </div>
 
           {context && (

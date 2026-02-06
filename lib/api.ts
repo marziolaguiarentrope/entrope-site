@@ -412,18 +412,18 @@ class ApiClient {
     }
   }
 
-  // Customer.io
-  async getCustomerIoPerson(userId: string): Promise<CustomerIoPerson | null> {
+  // Customer.io — looks up by email (CIO identifies users by email, not UUID)
+  async getCustomerIoPerson(email: string): Promise<CustomerIoPerson | null> {
     try {
-      return await this.fetch<CustomerIoPerson>(`/customerio/customers/${userId}`);
+      return await this.fetch<CustomerIoPerson>(`/customerio/customers/by-email/${encodeURIComponent(email)}`);
     } catch {
       return null; // Endpoint may not exist yet
     }
   }
 
-  async getCustomerIoActivities(userId: string): Promise<CustomerIoActivity[]> {
+  async getCustomerIoActivities(email: string): Promise<CustomerIoActivity[]> {
     try {
-      const result = await this.fetch<{ activities: CustomerIoActivity[] }>(`/customerio/customers/${userId}/activities`);
+      const result = await this.fetch<{ activities: CustomerIoActivity[] }>(`/customerio/customers/by-email/${encodeURIComponent(email)}/activities`);
       return result.activities;
     } catch {
       return []; // Endpoint may not exist yet
