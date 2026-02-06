@@ -55,6 +55,10 @@ function TaskRow({ task, onClick }: { task: Task; onClick: () => void }) {
     low: 'text-muted-foreground',
   };
 
+  // Core fields that make a booking unusable if missing
+  const HOTEL_CORE = ['hotel_name', 'check_in_date', 'check_out_date'];
+  const FLIGHT_CORE = ['departure_date', 'origin_airport', 'destination_airport'];
+
   // Extract display info based on capability
   const getDisplayInfo = () => {
     const data = task.request_data as Record<string, unknown>;
@@ -62,12 +66,28 @@ function TaskRow({ task, onClick }: { task: Task; onClick: () => void }) {
       const airline = data.airline_code as string;
       const pnr = data.pnr as string;
       const passenger = data.passenger_name as string;
-      return { title: `${airline} · ${pnr}`, subtitle: passenger };
+      return { title: `${airline} · ${pnr}`, subtitle: passenger, severity: null as string | null };
     }
-    return { title: task.booking_id || task.id.slice(0, 8), subtitle: task.capability };
+    if (task.capability === 'complete_booking_data') {
+      const bookingType = data.booking_type as string;
+      const missingFields = (data.missing_fields as string[]) || [];
+      const coreFields = bookingType === 'hotel' ? HOTEL_CORE : FLIGHT_CORE;
+      const missingCore = missingFields.filter(f => coreFields.includes(f));
+      const typeLabel = bookingType === 'hotel' ? 'Hotel' : 'Flight';
+      const fieldLabels: Record<string, string> = {
+        hotel_name: 'hotel name', check_in_date: 'check-in', check_out_date: 'check-out',
+        cash_paid: 'price', booking_provider: 'provider', cancellation_policy: 'cancel policy',
+        departure_date: 'departure', origin_airport: 'origin', destination_airport: 'destination',
+        airline: 'airline', record_locator: 'PNR', departure_time: 'dep time',
+      };
+      const readable = missingFields.map(f => fieldLabels[f] || f).join(', ');
+      const severity = missingCore.length > 0 ? 'core' : 'enrichment';
+      return { title: `${typeLabel} Booking`, subtitle: `Missing: ${readable}`, severity };
+    }
+    return { title: task.booking_id || task.id.slice(0, 8), subtitle: task.capability, severity: null as string | null };
   };
 
-  const { title, subtitle } = getDisplayInfo();
+  const { title, subtitle, severity } = getDisplayInfo();
 
   return (
     <div
@@ -82,8 +102,14 @@ function TaskRow({ task, onClick }: { task: Task; onClick: () => void }) {
           <span className="text-sm font-medium truncate">
             {title}
           </span>
+          {severity === 'core' && (
+            <span className="px-1.5 py-0.5 text-[10px] bg-red-500/20 text-red-400 rounded font-medium">CORE MISSING</span>
+          )}
+          {severity === 'enrichment' && (
+            <span className="px-1.5 py-0.5 text-[10px] bg-yellow-500/20 text-yellow-400 rounded font-medium">ENRICHMENT</span>
+          )}
         </div>
-        <div className="text-xs text-muted-foreground mt-1">
+        <div className="text-xs text-muted-foreground mt-1 truncate">
           {subtitle} · {task.status} · {timeAgo(task.created_at)}
         </div>
       </div>

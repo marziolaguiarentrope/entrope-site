@@ -1,18 +1,209 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { Task, api, RawEmail } from '@/lib/api';
 import { cn } from '@/lib/utils';
+
+// ── Email Search Utilities ────────────────────────────────
+
+function highlightSearchInHtml(html: string, query: string, currentIdx: number): { html: string; total: number } {
+  if (!query || query.length < 1) return { html, total: 0 };
+
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(`<div>${html}</div>`, 'text/html');
+  const container = doc.body.firstChild as HTMLElement;
+  if (!container) return { html, total: 0 };
+
+  let matchCount = 0;
+  const lowerQuery = query.toLowerCase();
+
+  function walk(node: Node) {
+    if (node.nodeType === Node.TEXT_NODE) {
+      const text = node.textContent || '';
+      const lower = text.toLowerCase();
+      if (!lower.includes(lowerQuery)) return;
+
+      const frag = doc.createDocumentFragment();
+      let lastIdx = 0;
+      let pos = lower.indexOf(lowerQuery, lastIdx);
+
+      while (pos !== -1) {
+        if (pos > lastIdx) frag.appendChild(doc.createTextNode(text.slice(lastIdx, pos)));
+        const mark = doc.createElement('mark');
+        mark.id = `search-match-${matchCount}`;
+        mark.className = matchCount === currentIdx ? 'search-highlight-current' : 'search-highlight';
+        mark.textContent = text.slice(pos, pos + query.length);
+        frag.appendChild(mark);
+        matchCount++;
+        lastIdx = pos + query.length;
+        pos = lower.indexOf(lowerQuery, lastIdx);
+      }
+      if (lastIdx < text.length) frag.appendChild(doc.createTextNode(text.slice(lastIdx)));
+      node.parentNode?.replaceChild(frag, node);
+    } else if (node.nodeType === Node.ELEMENT_NODE) {
+      const tag = (node as HTMLElement).tagName?.toLowerCase();
+      if (tag === 'mark') return; // skip already-highlighted
+      // Walk children in reverse to avoid index shift issues
+      const children = Array.from(node.childNodes);
+      children.forEach(walk);
+    }
+  }
+
+  walk(container);
+  return { html: container.innerHTML, total: matchCount };
+}
+
+// ── Email Content Renderer ────────────────────────────────
+
+interface EmailContentProps {
+  email: RawEmail;
+  searchQuery: string;
+  currentMatch: number;
+  maxHeight?: string;
+  bodyRef?: React.RefObject<HTMLDivElement | null>;
+}
+
+function EmailContent({ email, searchQuery, currentMatch, maxHeight, bodyRef }: EmailContentProps) {
+  const { html: bodyHtml, total } = useMemo(
+    () => highlightSearchInHtml(email.body || 'No content', searchQuery, currentMatch),
+    [email.body, searchQuery, currentMatch]
+  );
+
+  // Scroll current match into view
+  useEffect(() => {
+    if (total > 0 && searchQuery) {
+      const el = document.getElementById(`search-match-${currentMatch}`);
+      el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }, [currentMatch, total, searchQuery]);
+
+  return (
+    <>
+      <style>{`
+        .search-highlight { background: rgba(250, 204, 21, 0.4); padding: 1px 0; border-radius: 2px; }
+        .search-highlight-current { background: rgba(249, 115, 22, 0.6); padding: 1px 0; border-radius: 2px; }
+      `}</style>
+      <div className="space-y-2 text-sm">
+        <div>
+          <span className="text-muted-foreground">From: </span>
+          <span>{email.from_address || 'N/A'}</span>
+        </div>
+        <div>
+          <span className="text-muted-foreground">Subject: </span>
+          <span className="font-medium">{email.subject || 'N/A'}</span>
+        </div>
+        {email.received_at && (
+          <div>
+            <span className="text-muted-foreground">Received: </span>
+            <span>{new Date(email.received_at).toLocaleString()}</span>
+          </div>
+        )}
+      </div>
+
+      <div className="border-t border-border pt-3">
+        <div
+          ref={bodyRef}
+          className={cn(
+            "text-sm bg-background rounded p-3 overflow-y-auto whitespace-pre-wrap",
+            maxHeight || "max-h-64"
+          )}
+          dangerouslySetInnerHTML={{ __html: bodyHtml }}
+        />
+      </div>
+
+      {email.attachments && email.attachments.length > 0 && (
+        <div className="border-t border-border pt-3">
+          <p className="text-xs text-muted-foreground mb-1">Attachments:</p>
+          <div className="flex flex-wrap gap-2">
+            {email.attachments.map((att, i) => (
+              <span key={i} className="px-2 py-1 bg-background text-xs rounded">
+                {att.filename}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+// ── Email Search Bar ──────────────────────────────────────
+
+function EmailSearchBar({ query, onChange, total, currentIdx, onPrev, onNext, onClose }: {
+  query: string; onChange: (q: string) => void; total: number; currentIdx: number;
+  onPrev: () => void; onNext: () => void; onClose: () => void;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => { inputRef.current?.focus(); }, []);
+
+  return (
+    <div className="flex items-center gap-2 px-3 py-2 bg-accent/50 rounded-lg border border-border">
+      <svg className="w-4 h-4 text-muted-foreground shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+      </svg>
+      <input
+        ref={inputRef}
+        type="text"
+        value={query}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder="Search in email..."
+        className="flex-1 bg-transparent text-sm focus:outline-none"
+        onKeyDown={(e) => { if (e.key === 'Enter') { e.shiftKey ? onPrev() : onNext(); } if (e.key === 'Escape') onClose(); }}
+      />
+      {query && total > 0 && (
+        <span className="text-xs text-muted-foreground whitespace-nowrap">
+          {currentIdx + 1}/{total}
+        </span>
+      )}
+      {query && total === 0 && (
+        <span className="text-xs text-red-400 whitespace-nowrap">No matches</span>
+      )}
+      <button onClick={onPrev} className="p-0.5 text-muted-foreground hover:text-foreground" title="Previous (Shift+Enter)">
+        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
+        </svg>
+      </button>
+      <button onClick={onNext} className="p-0.5 text-muted-foreground hover:text-foreground" title="Next (Enter)">
+        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+      <button onClick={onClose} className="p-0.5 text-muted-foreground hover:text-foreground">
+        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+        </svg>
+      </button>
+    </div>
+  );
+}
+
+// ── Inline Email Viewer (non-fullscreen) ──────────────────
 
 interface EmailViewerProps {
   email: RawEmail | null;
   loading: boolean;
   error: string | null;
   onClose: () => void;
+  onExpand?: () => void;
 }
 
-function EmailViewer({ email, loading, error, onClose }: EmailViewerProps) {
-  const [isFullscreen, setIsFullscreen] = useState(false);
+function EmailViewer({ email, loading, error, onClose, onExpand }: EmailViewerProps) {
+  const [showSearch, setShowSearch] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [currentMatch, setCurrentMatch] = useState(0);
+  const [totalMatches, setTotalMatches] = useState(0);
+
+  const handleSearchChange = useCallback((q: string) => {
+    setSearchQuery(q);
+    setCurrentMatch(0);
+  }, []);
+
+  // Count matches
+  useEffect(() => {
+    if (!email?.body || !searchQuery) { setTotalMatches(0); return; }
+    const { total } = highlightSearchInHtml(email.body, searchQuery, 0);
+    setTotalMatches(total);
+  }, [email?.body, searchQuery]);
 
   if (loading) {
     return (
@@ -39,99 +230,31 @@ function EmailViewer({ email, loading, error, onClose }: EmailViewerProps) {
 
   if (!email) return null;
 
-  const emailContent = (
-    <>
-      <div className="space-y-2 text-sm">
-        <div>
-          <span className="text-muted-foreground">From: </span>
-          <span>{email.from_address || 'N/A'}</span>
-        </div>
-        <div>
-          <span className="text-muted-foreground">Subject: </span>
-          <span className="font-medium">{email.subject || 'N/A'}</span>
-        </div>
-        {email.received_at && (
-          <div>
-            <span className="text-muted-foreground">Received: </span>
-            <span>{new Date(email.received_at).toLocaleString()}</span>
-          </div>
-        )}
-      </div>
-
-      <div className="border-t border-border pt-3">
-        <div
-          className={cn(
-            "text-sm bg-background rounded p-3 overflow-y-auto whitespace-pre-wrap",
-            isFullscreen ? "flex-1" : "max-h-64"
-          )}
-          dangerouslySetInnerHTML={{ __html: email.body || 'No content' }}
-        />
-      </div>
-
-      {email.attachments && email.attachments.length > 0 && (
-        <div className="border-t border-border pt-3">
-          <p className="text-xs text-muted-foreground mb-1">Attachments:</p>
-          <div className="flex flex-wrap gap-2">
-            {email.attachments.map((att, i) => (
-              <span key={i} className="px-2 py-1 bg-background text-xs rounded">
-                {att.filename}
-              </span>
-            ))}
-          </div>
-        </div>
-      )}
-    </>
-  );
-
-  // Fullscreen modal
-  if (isFullscreen) {
-    return (
-      <div className="fixed inset-0 z-50 bg-background/95 backdrop-blur-sm flex flex-col">
-        <div className="flex justify-between items-center p-4 border-b border-border">
-          <h4 className="text-lg font-medium">Original Email</h4>
-          <div className="flex gap-2">
-            <button
-              onClick={() => setIsFullscreen(false)}
-              className="p-2 text-muted-foreground hover:text-foreground hover:bg-accent rounded-lg transition-colors"
-              title="Exit fullscreen"
-            >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 9V4.5M9 9H4.5M9 9L3.75 3.75M9 15v4.5M9 15H4.5M9 15l-5.25 5.25M15 9h4.5M15 9V4.5M15 9l5.25-5.25M15 15h4.5M15 15v4.5m0-4.5l5.25 5.25" />
-              </svg>
-            </button>
-            <button
-              onClick={onClose}
-              className="p-2 text-muted-foreground hover:text-foreground hover:bg-accent rounded-lg transition-colors"
-              title="Close"
-            >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
-          </div>
-        </div>
-        <div className="flex-1 overflow-y-auto p-6 space-y-3">
-          {emailContent}
-        </div>
-      </div>
-    );
-  }
-
-  // Inline view
   return (
     <div className="bg-accent/50 rounded-lg p-4 space-y-3">
       <div className="flex justify-between items-start">
         <h4 className="text-sm font-medium">Original Email</h4>
         <div className="flex gap-1">
           <button
-            onClick={() => setIsFullscreen(true)}
+            onClick={() => setShowSearch(!showSearch)}
             className="p-1 text-muted-foreground hover:text-foreground transition-colors"
-            title="Expand to fullscreen"
+            title="Search in email"
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
             </svg>
           </button>
+          {onExpand && (
+            <button
+              onClick={onExpand}
+              className="p-1 text-muted-foreground hover:text-foreground transition-colors"
+              title="Expand to fullscreen"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15" />
+              </svg>
+            </button>
+          )}
           <button onClick={onClose} className="p-1 text-muted-foreground hover:text-foreground transition-colors">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -139,7 +262,18 @@ function EmailViewer({ email, loading, error, onClose }: EmailViewerProps) {
           </button>
         </div>
       </div>
-      {emailContent}
+      {showSearch && (
+        <EmailSearchBar
+          query={searchQuery}
+          onChange={handleSearchChange}
+          total={totalMatches}
+          currentIdx={currentMatch}
+          onPrev={() => setCurrentMatch(i => (i - 1 + totalMatches) % Math.max(totalMatches, 1))}
+          onNext={() => setCurrentMatch(i => (i + 1) % Math.max(totalMatches, 1))}
+          onClose={() => { setShowSearch(false); setSearchQuery(''); }}
+        />
+      )}
+      <EmailContent email={email} searchQuery={searchQuery} currentMatch={currentMatch} />
     </div>
   );
 }
@@ -710,10 +844,220 @@ function FlightRepriceDetail({ task, onClose, onUpdate }: TaskDetailProps) {
   );
 }
 
+// ── Known Booking Data Card ───────────────────────────────
+
+const HOTEL_CORE_FIELDS = ['hotel_name', 'check_in_date', 'check_out_date'];
+const FLIGHT_CORE_FIELDS = ['departure_date', 'origin_airport', 'destination_airport'];
+
+const HOTEL_ALL_FIELDS = ['hotel_name', 'city', 'check_in_date', 'check_out_date', 'room_type', 'cash_paid', 'booking_provider', 'confirmation_number'];
+const FLIGHT_ALL_FIELDS = ['airline', 'origin_airport', 'destination_airport', 'departure_time', 'arrival_time', 'cabin_class', 'cash_paid', 'record_locator', 'booking_provider'];
+
+function KnownBookingData({ task, missingFields, bookingType }: { task: Task; missingFields: string[]; bookingType: 'hotel' | 'flight' }) {
+  const booking = bookingType === 'hotel' ? task.hotel_booking : task.flight_booking;
+  if (!booking) return null;
+
+  const allFields = bookingType === 'hotel' ? HOTEL_ALL_FIELDS : FLIGHT_ALL_FIELDS;
+  const coreFields = bookingType === 'hotel' ? HOTEL_CORE_FIELDS : FLIGHT_CORE_FIELDS;
+  const missingCore = missingFields.filter(f => coreFields.includes(f));
+  const missingEnrich = missingFields.filter(f => !coreFields.includes(f));
+  const filledCount = allFields.length - missingFields.filter(f => allFields.includes(f)).length;
+  const pct = Math.round((filledCount / allFields.length) * 100);
+
+  const fieldLabels: Record<string, string> = {
+    hotel_name: 'Hotel', city: 'City', check_in_date: 'Check-in', check_out_date: 'Check-out',
+    room_type: 'Room', cash_paid: 'Price', booking_provider: 'Provider', confirmation_number: 'Confirmation #',
+    airline: 'Airline', origin_airport: 'Origin', destination_airport: 'Destination',
+    departure_time: 'Departure', arrival_time: 'Arrival', cabin_class: 'Cabin',
+    record_locator: 'PNR',
+  };
+
+  function getFieldValue(field: string): string | null {
+    const b = booking as unknown as Record<string, unknown>;
+    if (field === 'cash_paid') {
+      const cp = b.cash_paid as { amount: number; currency: string } | null;
+      return cp ? formatMoney(cp.amount, cp.currency) : null;
+    }
+    if (field === 'departure_time' || field === 'arrival_time' || field === 'check_in_date' || field === 'check_out_date') {
+      const v = b[field] as string | null;
+      return v ? new Date(v).toLocaleDateString() : null;
+    }
+    if (field === 'airline') {
+      const code = b.airline_code as string | null;
+      const name = b.airline as string | null;
+      return name ? `${name}${code ? ` (${code})` : ''}` : code || null;
+    }
+    return (b[field] as string | null) || null;
+  }
+
+  return (
+    <section>
+      <div className="flex items-center justify-between mb-2">
+        <h3 className="text-sm font-medium text-muted-foreground">Known Booking Data</h3>
+        <div className="flex items-center gap-2">
+          {booking.source && (
+            <span className="px-2 py-0.5 text-[10px] bg-blue-500/20 text-blue-400 rounded font-medium">
+              {(booking.source as string).replace('_', ' ').toUpperCase()}
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* Completeness bar */}
+      <div className="mb-3">
+        <div className="flex justify-between text-xs mb-1">
+          <span className="text-muted-foreground">{filledCount}/{allFields.length} fields complete</span>
+          <span className={cn(pct >= 80 ? 'text-green-400' : pct >= 50 ? 'text-yellow-400' : 'text-red-400')}>{pct}%</span>
+        </div>
+        <div className="h-1.5 bg-accent rounded-full overflow-hidden">
+          <div
+            className={cn('h-full rounded-full transition-all', pct >= 80 ? 'bg-green-500' : pct >= 50 ? 'bg-yellow-500' : 'bg-red-500')}
+            style={{ width: `${pct}%` }}
+          />
+        </div>
+      </div>
+
+      {/* Core vs Enrichment missing */}
+      {missingCore.length > 0 && (
+        <div className="flex flex-wrap gap-1 mb-2">
+          <span className="text-[10px] text-red-400 font-medium mr-1">CORE:</span>
+          {missingCore.map(f => (
+            <span key={f} className="px-1.5 py-0.5 bg-red-500/20 text-red-400 text-[10px] rounded">{fieldLabels[f] || f}</span>
+          ))}
+        </div>
+      )}
+      {missingEnrich.length > 0 && (
+        <div className="flex flex-wrap gap-1 mb-2">
+          <span className="text-[10px] text-yellow-400 font-medium mr-1">ENRICHMENT:</span>
+          {missingEnrich.map(f => (
+            <span key={f} className="px-1.5 py-0.5 bg-yellow-500/20 text-yellow-400 text-[10px] rounded">{fieldLabels[f] || f}</span>
+          ))}
+        </div>
+      )}
+
+      {/* Data table */}
+      <div className="bg-accent/50 rounded-lg p-3 space-y-1.5">
+        {allFields.map(field => {
+          const isMissing = missingFields.includes(field);
+          const value = getFieldValue(field);
+          return (
+            <div key={field} className="flex justify-between text-sm">
+              <span className="text-muted-foreground">{fieldLabels[field] || field}</span>
+              {isMissing ? (
+                <span className="px-1.5 py-0.5 bg-red-500/20 text-red-400 text-xs rounded">MISSING</span>
+              ) : (
+                <span className="text-right truncate max-w-[60%]">{value || '—'}</span>
+              )}
+            </div>
+          );
+        })}
+
+        {/* Guests / Passengers */}
+        {bookingType === 'hotel' && task.hotel_booking?.guests && task.hotel_booking.guests.length > 0 && (
+          <div className="flex justify-between text-sm pt-1 border-t border-border">
+            <span className="text-muted-foreground">Guests</span>
+            <span className="text-right truncate max-w-[60%]">
+              {task.hotel_booking.guests.map((g: { name: string }) => g.name).join(', ')}
+            </span>
+          </div>
+        )}
+        {bookingType === 'flight' && task.flight_booking?.passengers && task.flight_booking.passengers.length > 0 && (
+          <div className="flex justify-between text-sm pt-1 border-t border-border">
+            <span className="text-muted-foreground">Passengers</span>
+            <span className="text-right truncate max-w-[60%]">
+              {task.flight_booking.passengers.map((p: { name: string }) => p.name).join(', ')}
+            </span>
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+// ── Missing Field Form ────────────────────────────────────
+
+const FIELD_CONFIG: Record<string, { label: string; type: 'text' | 'date' | 'money'; placeholder: string }> = {
+  hotel_name: { label: 'Hotel Name', type: 'text', placeholder: 'e.g., Marriott Downtown' },
+  check_in_date: { label: 'Check-in Date', type: 'date', placeholder: '' },
+  check_out_date: { label: 'Check-out Date', type: 'date', placeholder: '' },
+  cash_paid: { label: 'Cash Paid', type: 'money', placeholder: '0.00' },
+  booking_provider: { label: 'Booking Provider', type: 'text', placeholder: 'e.g., Expedia, Hotels.com' },
+  cancellation_policy: { label: 'Cancellation Policy', type: 'text', placeholder: 'e.g., Free cancellation until...' },
+  airline: { label: 'Airline', type: 'text', placeholder: 'e.g., Delta' },
+  airline_code: { label: 'Airline Code', type: 'text', placeholder: 'e.g., DL' },
+  departure_date: { label: 'Departure Date', type: 'date', placeholder: '' },
+  return_date: { label: 'Return Date', type: 'date', placeholder: '' },
+  pnr: { label: 'PNR / Confirmation', type: 'text', placeholder: 'e.g., ABC123' },
+  departure_time: { label: 'Departure Time', type: 'text', placeholder: 'e.g., 2024-03-15T14:00' },
+  record_locator: { label: 'Record Locator', type: 'text', placeholder: 'e.g., ABC123' },
+  origin_airport: { label: 'Origin Airport', type: 'text', placeholder: 'e.g., JFK' },
+  destination_airport: { label: 'Destination Airport', type: 'text', placeholder: 'e.g., LAX' },
+};
+
+function MissingFieldForm({ fields, fieldValues, currency, onFieldChange, onCurrencyChange }: {
+  fields: string[];
+  fieldValues: Record<string, string>;
+  currency: string;
+  onFieldChange: (field: string, value: string) => void;
+  onCurrencyChange: (c: string) => void;
+}) {
+  return (
+    <div className="space-y-3">
+      {fields.map(field => {
+        const config = FIELD_CONFIG[field] || { label: field, type: 'text' as const, placeholder: '' };
+
+        if (config.type === 'money') {
+          return (
+            <div key={field}>
+              <label className="block text-sm font-medium mb-1">{config.label}</label>
+              <div className="flex gap-2">
+                <select
+                  value={currency}
+                  onChange={(e) => onCurrencyChange(e.target.value)}
+                  className="px-2 py-1.5 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary text-sm"
+                >
+                  <option value="USD">USD</option>
+                  <option value="EUR">EUR</option>
+                  <option value="GBP">GBP</option>
+                  <option value="CAD">CAD</option>
+                </select>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={fieldValues[field]}
+                  onChange={(e) => onFieldChange(field, e.target.value)}
+                  placeholder={config.placeholder}
+                  className="flex-1 px-3 py-1.5 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary font-mono text-sm"
+                />
+              </div>
+            </div>
+          );
+        }
+
+        return (
+          <div key={field}>
+            <label className="block text-sm font-medium mb-1">{config.label}</label>
+            <input
+              type={config.type === 'date' ? 'date' : 'text'}
+              value={fieldValues[field]}
+              onChange={(e) => onFieldChange(field, e.target.value)}
+              placeholder={config.placeholder}
+              className="w-full px-3 py-1.5 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary text-sm"
+            />
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ── CompleteBookingDetail ─────────────────────────────────
+
 function CompleteBookingDetail({ task, onClose, onUpdate }: TaskDetailProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [failReason, setFailReason] = useState('');
+  const [failReasonOther, setFailReasonOther] = useState('');
   const [showFailForm, setShowFailForm] = useState(false);
 
   // Email viewer state
@@ -721,6 +1065,22 @@ function CompleteBookingDetail({ task, onClose, onUpdate }: TaskDetailProps) {
   const [email, setEmail] = useState<RawEmail | null>(null);
   const [emailLoading, setEmailLoading] = useState(false);
   const [emailError, setEmailError] = useState<string | null>(null);
+
+  // Fullscreen split-pane state
+  const [isEmailFullscreen, setIsEmailFullscreen] = useState(false);
+  const [showEmailSearch, setShowEmailSearch] = useState(false);
+  const [emailSearchQuery, setEmailSearchQuery] = useState('');
+  const [emailSearchMatch, setEmailSearchMatch] = useState(0);
+  const [emailSearchTotal, setEmailSearchTotal] = useState(0);
+
+  // Failure reasons from backend
+  const failureReasons = [
+    ...(task.valid_failure_reasons || []).map(reason => ({
+      value: reason.toLowerCase().replace(/\s+/g, '_'),
+      label: reason,
+    })),
+    { value: 'other', label: 'Other (specify)' },
+  ];
 
   const data = task.request_data as {
     booking_id: string;
@@ -737,7 +1097,6 @@ function CompleteBookingDetail({ task, onClose, onUpdate }: TaskDetailProps) {
     setEmailError(null);
 
     try {
-      // Use getEmailForTask - requires operator to have claimed the task
       const result = await api.getEmailForTask(task.id);
       setEmail(result);
     } catch (err) {
@@ -750,13 +1109,9 @@ function CompleteBookingDetail({ task, onClose, onUpdate }: TaskDetailProps) {
   // Form state for each missing field
   const [fieldValues, setFieldValues] = useState<Record<string, string>>(() => {
     const initial: Record<string, string> = {};
-    data.missing_fields.forEach(field => {
-      initial[field] = '';
-    });
+    data.missing_fields.forEach(field => { initial[field] = ''; });
     return initial;
   });
-
-  // Currency for money fields
   const [currency, setCurrency] = useState('USD');
 
   const isClaimed = task.status === 'claimed';
@@ -789,32 +1144,24 @@ function CompleteBookingDetail({ task, onClose, onUpdate }: TaskDetailProps) {
   }
 
   async function handleComplete() {
-    // Validate all fields are filled
     const emptyFields = data.missing_fields.filter(f => !fieldValues[f]?.trim());
     if (emptyFields.length > 0) {
       setError(`Missing values for: ${emptyFields.join(', ')}`);
       return;
     }
-
     setLoading(true);
     setError(null);
     try {
-      // Build response data with proper types
       const responseData: Record<string, unknown> = {};
       data.missing_fields.forEach(field => {
         const value = fieldValues[field].trim();
         if (field === 'cash_paid') {
-          responseData[field] = {
-            amount: Math.round(parseFloat(value) * 100),
-            currency,
-          };
+          responseData[field] = { amount: Math.round(parseFloat(value) * 100), currency };
         } else {
           responseData[field] = value;
         }
       });
-
       const updated = await api.completeTask(task.id, 'success', responseData);
-      // onUpdate handles closing for completed/failed tasks
       onUpdate(updated);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to complete');
@@ -823,19 +1170,25 @@ function CompleteBookingDetail({ task, onClose, onUpdate }: TaskDetailProps) {
     }
   }
 
+  function getFailReasonText(): string {
+    if (failReason === 'other') return failReasonOther.trim();
+    const selected = failureReasons.find(r => r.value === failReason);
+    return selected?.label || failReason;
+  }
+
   async function handleFail() {
-    if (!failReason.trim()) {
-      setError('Failure reason required');
+    if (!failReason) {
+      setError('Please select a failure reason');
+      return;
+    }
+    if (failReason === 'other' && !failReasonOther.trim()) {
+      setError('Please specify the failure reason');
       return;
     }
     setLoading(true);
     setError(null);
     try {
-      // Complete with denied outcome
-      const updated = await api.completeTask(task.id, 'denied', {
-        failure_reason: failReason.trim(),
-      });
-      // onUpdate handles closing for failed tasks
+      const updated = await api.completeTask(task.id, 'denied', { failure_reason: getFailReasonText() });
       onUpdate(updated);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to mark as failed');
@@ -844,25 +1197,149 @@ function CompleteBookingDetail({ task, onClose, onUpdate }: TaskDetailProps) {
     }
   }
 
-  // Field metadata for rendering
-  // TODO: hotel_name and booking_provider should be searchable dropdowns, not free text
-  // Backend needs to provide:
-  // - GET /hotels (or /properties) - searchable list of known hotels
-  // - GET /booking-providers - list of supported OTAs/providers (Expedia, Hotels.com, Booking.com, etc.)
-  // Similarly for flights: airline should come from a known list
-  const fieldConfig: Record<string, { label: string; type: 'text' | 'date' | 'money'; placeholder: string }> = {
-    hotel_name: { label: 'Hotel Name', type: 'text', placeholder: 'e.g., Marriott Downtown' }, // TODO: searchable dropdown
-    check_in_date: { label: 'Check-in Date', type: 'date', placeholder: '' },
-    check_out_date: { label: 'Check-out Date', type: 'date', placeholder: '' },
-    cash_paid: { label: 'Cash Paid', type: 'money', placeholder: '0.00' },
-    booking_provider: { label: 'Booking Provider', type: 'text', placeholder: 'e.g., Expedia, Hotels.com' }, // TODO: dropdown from known providers
-    // Flight fields
-    airline: { label: 'Airline', type: 'text', placeholder: 'e.g., Delta' }, // TODO: dropdown from known airlines
-    airline_code: { label: 'Airline Code', type: 'text', placeholder: 'e.g., DL' },
-    departure_date: { label: 'Departure Date', type: 'date', placeholder: '' },
-    return_date: { label: 'Return Date', type: 'date', placeholder: '' },
-    pnr: { label: 'PNR / Confirmation', type: 'text', placeholder: 'e.g., ABC123' },
-  };
+  // Count email search matches
+  useEffect(() => {
+    if (!email?.body || !emailSearchQuery) { setEmailSearchTotal(0); return; }
+    const { total } = highlightSearchInHtml(email.body, emailSearchQuery, 0);
+    setEmailSearchTotal(total);
+  }, [email?.body, emailSearchQuery]);
+
+  const handleFieldChange = useCallback((field: string, value: string) => {
+    setFieldValues(prev => ({ ...prev, [field]: value }));
+  }, []);
+
+  // ── Fullscreen Split-Pane ──────────────────────────────
+
+  if (isEmailFullscreen && email) {
+    return (
+      <div className="fixed inset-0 z-50 bg-background flex">
+        {/* Left: Email */}
+        <div className="w-3/5 border-r border-border flex flex-col">
+          <div className="p-3 border-b border-border flex items-center justify-between">
+            <h4 className="text-sm font-medium">Original Email</h4>
+            <div className="flex gap-1">
+              <button
+                onClick={() => setShowEmailSearch(!showEmailSearch)}
+                className={cn("p-1.5 rounded-lg transition-colors", showEmailSearch ? "bg-accent text-foreground" : "text-muted-foreground hover:text-foreground")}
+                title="Search in email"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                </svg>
+              </button>
+              <button
+                onClick={() => setIsEmailFullscreen(false)}
+                className="p-1.5 text-muted-foreground hover:text-foreground rounded-lg transition-colors"
+                title="Exit fullscreen"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 9V4.5M9 9H4.5M9 9L3.75 3.75M9 15v4.5M9 15H4.5M9 15l-5.25 5.25M15 9h4.5M15 9V4.5M15 9l5.25-5.25M15 15h4.5M15 15v4.5m0-4.5l5.25 5.25" />
+                </svg>
+              </button>
+              <button
+                onClick={() => { setIsEmailFullscreen(false); setShowEmail(false); setEmail(null); }}
+                className="p-1.5 text-muted-foreground hover:text-foreground rounded-lg transition-colors"
+                title="Close email"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+          </div>
+          {showEmailSearch && (
+            <div className="px-3 py-2 border-b border-border">
+              <EmailSearchBar
+                query={emailSearchQuery}
+                onChange={(q) => { setEmailSearchQuery(q); setEmailSearchMatch(0); }}
+                total={emailSearchTotal}
+                currentIdx={emailSearchMatch}
+                onPrev={() => setEmailSearchMatch(i => (i - 1 + emailSearchTotal) % Math.max(emailSearchTotal, 1))}
+                onNext={() => setEmailSearchMatch(i => (i + 1) % Math.max(emailSearchTotal, 1))}
+                onClose={() => { setShowEmailSearch(false); setEmailSearchQuery(''); }}
+              />
+            </div>
+          )}
+          <div className="flex-1 overflow-y-auto p-4 space-y-3">
+            <EmailContent email={email} searchQuery={emailSearchQuery} currentMatch={emailSearchMatch} maxHeight="flex-1" />
+          </div>
+        </div>
+
+        {/* Right: Form */}
+        <div className="w-2/5 flex flex-col">
+          <div className="p-3 border-b border-border">
+            <h4 className="text-sm font-medium">Complete Missing Fields</h4>
+            <p className="text-xs text-muted-foreground capitalize">{data.booking_type} · {data.booking_id.slice(0, 8)}</p>
+          </div>
+          <div className="flex-1 overflow-y-auto p-4 space-y-4">
+            {/* Compact known data in fullscreen */}
+            <KnownBookingData task={task} missingFields={data.missing_fields} bookingType={data.booking_type} />
+
+            {/* Error */}
+            {error && (
+              <div className="bg-red-500/20 text-red-400 p-2 rounded-lg text-sm">{error}</div>
+            )}
+
+            {/* Field inputs */}
+            {isClaimed && !showFailForm && (
+              <>
+                <MissingFieldForm
+                  fields={data.missing_fields}
+                  fieldValues={fieldValues}
+                  currency={currency}
+                  onFieldChange={handleFieldChange}
+                  onCurrencyChange={setCurrency}
+                />
+                <div className="flex gap-2 pt-2">
+                  <button onClick={handleComplete} disabled={loading}
+                    className="flex-1 py-2 px-4 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 disabled:opacity-50 transition-colors text-sm">
+                    {loading ? 'Completing...' : 'Complete'}
+                  </button>
+                  <button onClick={() => setShowFailForm(true)}
+                    className="py-2 px-4 bg-red-600/20 text-red-400 rounded-lg font-medium hover:bg-red-600/30 transition-colors text-sm">
+                    Fail
+                  </button>
+                </div>
+              </>
+            )}
+
+            {isClaimed && showFailForm && (
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-sm font-medium mb-1">Failure Reason *</label>
+                  <select value={failReason} onChange={(e) => setFailReason(e.target.value)}
+                    className="w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary text-sm">
+                    <option value="">Select a reason...</option>
+                    {failureReasons.map((r) => (<option key={r.value} value={r.value}>{r.label}</option>))}
+                  </select>
+                </div>
+                {failReason === 'other' && (
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Specify Reason *</label>
+                    <textarea value={failReasonOther} onChange={(e) => setFailReasonOther(e.target.value)}
+                      placeholder="Why can't this booking data be completed?" rows={2}
+                      className="w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary resize-none text-sm" />
+                  </div>
+                )}
+                <div className="flex gap-2">
+                  <button onClick={handleFail} disabled={loading}
+                    className="flex-1 py-2 px-4 bg-red-600 text-white rounded-lg font-medium hover:bg-red-700 disabled:opacity-50 transition-colors text-sm">
+                    {loading ? 'Failing...' : 'Mark as Failed'}
+                  </button>
+                  <button onClick={() => { setShowFailForm(false); setFailReason(''); setFailReasonOther(''); }}
+                    className="py-2 px-4 bg-accent text-foreground rounded-lg font-medium hover:bg-accent/80 transition-colors text-sm">
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Normal Side Panel View ─────────────────────────────
 
   return (
     <div className="fixed inset-0 bg-black/50 flex justify-end z-50">
@@ -873,10 +1350,7 @@ function CompleteBookingDetail({ task, onClose, onUpdate }: TaskDetailProps) {
             <h2 className="text-lg font-semibold">Complete Booking Data</h2>
             <p className="text-sm text-muted-foreground capitalize">{data.booking_type} · {data.booking_id.slice(0, 8)}</p>
           </div>
-          <button
-            onClick={onClose}
-            className="p-2 hover:bg-accent rounded-md transition-colors"
-          >
+          <button onClick={onClose} className="p-2 hover:bg-accent rounded-md transition-colors">
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>
@@ -897,17 +1371,12 @@ function CompleteBookingDetail({ task, onClose, onUpdate }: TaskDetailProps) {
                 {task.status.toUpperCase()}
               </span>
               {task.claimed_by && (
-                <span className="text-sm text-muted-foreground">
-                  by {task.claimed_by}
-                </span>
+                <span className="text-sm text-muted-foreground">by {task.claimed_by}</span>
               )}
             </div>
             {isClaimed && (
-              <button
-                onClick={handleUnclaim}
-                disabled={loading}
-                className="text-xs text-muted-foreground hover:text-foreground transition-colors"
-              >
+              <button onClick={handleUnclaim} disabled={loading}
+                className="text-xs text-muted-foreground hover:text-foreground transition-colors">
                 Release claim
               </button>
             )}
@@ -921,14 +1390,15 @@ function CompleteBookingDetail({ task, onClose, onUpdate }: TaskDetailProps) {
             </div>
           </section>
 
-          {/* View Original Email - only show when claimed (backend enforces via 403) */}
+          {/* Known Booking Data */}
+          <KnownBookingData task={task} missingFields={data.missing_fields} bookingType={data.booking_type} />
+
+          {/* View Original Email - only show when claimed */}
           {isClaimed && (
             <section>
               {!showEmail ? (
-                <button
-                  onClick={handleViewEmail}
-                  className="w-full py-2 px-4 bg-accent text-foreground rounded-lg font-medium hover:bg-accent/80 transition-colors flex items-center justify-center gap-2"
-                >
+                <button onClick={handleViewEmail}
+                  className="w-full py-2 px-4 bg-accent text-foreground rounded-lg font-medium hover:bg-accent/80 transition-colors flex items-center justify-center gap-2">
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
                   </svg>
@@ -939,106 +1409,42 @@ function CompleteBookingDetail({ task, onClose, onUpdate }: TaskDetailProps) {
                   email={email}
                   loading={emailLoading}
                   error={emailError}
-                  onClose={() => {
-                    setShowEmail(false);
-                    setEmail(null);
-                  setEmailError(null);
-                }}
-              />
-            )}
+                  onClose={() => { setShowEmail(false); setEmail(null); setEmailError(null); }}
+                  onExpand={() => setIsEmailFullscreen(true)}
+                />
+              )}
             </section>
           )}
 
-          {/* Missing Fields */}
-          <section>
-            <h3 className="text-sm font-medium text-muted-foreground mb-2">Missing Fields</h3>
-            <div className="flex flex-wrap gap-2">
-              {data.missing_fields.map(field => (
-                <span key={field} className="px-2 py-1 bg-orange-500/20 text-orange-400 text-xs rounded">
-                  {fieldConfig[field]?.label || field}
-                </span>
-              ))}
-            </div>
-          </section>
-
           {/* Error */}
           {error && (
-            <div className="bg-red-500/20 text-red-400 p-3 rounded-lg text-sm">
-              {error}
-            </div>
+            <div className="bg-red-500/20 text-red-400 p-3 rounded-lg text-sm">{error}</div>
           )}
 
           {/* Actions */}
           {isPending && (
-            <button
-              onClick={handleClaim}
-              disabled={loading}
-              className="w-full py-2 px-4 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-50 transition-colors"
-            >
+            <button onClick={handleClaim} disabled={loading}
+              className="w-full py-2 px-4 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-50 transition-colors">
               {loading ? 'Claiming...' : 'Claim Task'}
             </button>
           )}
 
           {isClaimed && !showFailForm && (
             <div className="space-y-4">
-              {data.missing_fields.map(field => {
-                const config = fieldConfig[field] || { label: field, type: 'text', placeholder: '' };
-
-                if (config.type === 'money') {
-                  return (
-                    <div key={field}>
-                      <label className="block text-sm font-medium mb-1">{config.label}</label>
-                      <div className="flex gap-2">
-                        <select
-                          value={currency}
-                          onChange={(e) => setCurrency(e.target.value)}
-                          className="px-3 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
-                        >
-                          <option value="USD">USD</option>
-                          <option value="EUR">EUR</option>
-                          <option value="GBP">GBP</option>
-                          <option value="CAD">CAD</option>
-                        </select>
-                        <input
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          value={fieldValues[field]}
-                          onChange={(e) => setFieldValues({ ...fieldValues, [field]: e.target.value })}
-                          placeholder={config.placeholder}
-                          className="flex-1 px-3 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary font-mono"
-                        />
-                      </div>
-                    </div>
-                  );
-                }
-
-                return (
-                  <div key={field}>
-                    <label className="block text-sm font-medium mb-1">{config.label}</label>
-                    <input
-                      type={config.type === 'date' ? 'date' : 'text'}
-                      value={fieldValues[field]}
-                      onChange={(e) => setFieldValues({ ...fieldValues, [field]: e.target.value })}
-                      placeholder={config.placeholder}
-                      className="w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
-                    />
-                  </div>
-                );
-              })}
-
+              <MissingFieldForm
+                fields={data.missing_fields}
+                fieldValues={fieldValues}
+                currency={currency}
+                onFieldChange={handleFieldChange}
+                onCurrencyChange={setCurrency}
+              />
               <div className="flex gap-2 pt-2">
-                <button
-                  onClick={handleComplete}
-                  disabled={loading}
-                  className="flex-1 py-2 px-4 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 disabled:opacity-50 transition-colors"
-                >
+                <button onClick={handleComplete} disabled={loading}
+                  className="flex-1 py-2 px-4 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 disabled:opacity-50 transition-colors">
                   {loading ? 'Completing...' : 'Complete'}
                 </button>
-                <button
-                  onClick={() => setShowFailForm(true)}
-                  className="py-2 px-4 bg-red-600/20 text-red-400 rounded-lg font-medium hover:bg-red-600/30 transition-colors"
-                >
+                <button onClick={() => setShowFailForm(true)}
+                  className="py-2 px-4 bg-red-600/20 text-red-400 rounded-lg font-medium hover:bg-red-600/30 transition-colors">
                   Fail
                 </button>
               </div>
@@ -1049,26 +1455,27 @@ function CompleteBookingDetail({ task, onClose, onUpdate }: TaskDetailProps) {
             <div className="space-y-4">
               <div>
                 <label className="block text-sm font-medium mb-1">Failure Reason *</label>
-                <textarea
-                  value={failReason}
-                  onChange={(e) => setFailReason(e.target.value)}
-                  placeholder="Why can't this booking data be completed?"
-                  rows={3}
-                  className="w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary resize-none"
-                />
+                <select value={failReason} onChange={(e) => setFailReason(e.target.value)}
+                  className="w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary">
+                  <option value="">Select a reason...</option>
+                  {failureReasons.map((r) => (<option key={r.value} value={r.value}>{r.label}</option>))}
+                </select>
               </div>
+              {failReason === 'other' && (
+                <div>
+                  <label className="block text-sm font-medium mb-1">Specify Reason *</label>
+                  <textarea value={failReasonOther} onChange={(e) => setFailReasonOther(e.target.value)}
+                    placeholder="Why can't this booking data be completed?" rows={2}
+                    className="w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary resize-none" />
+                </div>
+              )}
               <div className="flex gap-2">
-                <button
-                  onClick={handleFail}
-                  disabled={loading}
-                  className="flex-1 py-2 px-4 bg-red-600 text-white rounded-lg font-medium hover:bg-red-700 disabled:opacity-50 transition-colors"
-                >
+                <button onClick={handleFail} disabled={loading}
+                  className="flex-1 py-2 px-4 bg-red-600 text-white rounded-lg font-medium hover:bg-red-700 disabled:opacity-50 transition-colors">
                   {loading ? 'Failing...' : 'Mark as Failed'}
                 </button>
-                <button
-                  onClick={() => setShowFailForm(false)}
-                  className="py-2 px-4 bg-accent text-foreground rounded-lg font-medium hover:bg-accent/80 transition-colors"
-                >
+                <button onClick={() => { setShowFailForm(false); setFailReason(''); setFailReasonOther(''); }}
+                  className="py-2 px-4 bg-accent text-foreground rounded-lg font-medium hover:bg-accent/80 transition-colors">
                   Cancel
                 </button>
               </div>
