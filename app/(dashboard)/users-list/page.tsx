@@ -90,11 +90,8 @@ function toMemberSummary(user: UserListItem): MemberSummary {
 }
 
 function MembershipBadge({ status, plan }: { status: string | null; plan: string | null }) {
+  // No membership data at all
   if (!status) return <span className="text-xs text-muted-foreground">—</span>;
-
-  // Determine membership tier from plan name
-  const planLower = (plan || '').toLowerCase();
-  const hasPaidPlan = !!plan && !planLower.includes('free');
 
   let label: string;
   let colorClass: string;
@@ -105,21 +102,23 @@ function MembershipBadge({ status, plan }: { status: string | null; plan: string
   } else if (status === 'trialing') {
     label = plan || 'Trial';
     colorClass = 'bg-blue-500/20 text-blue-400 border border-blue-500/30';
-  } else if (hasPaidPlan) {
-    // Paid member with a real plan name
-    label = plan!;
-    colorClass = 'bg-green-500/20 text-green-400 border border-green-500/30';
+  } else if (plan) {
+    // Has a plan name — check if free or paid
+    const isFree = plan.toLowerCase().includes('free');
+    label = plan;
+    colorClass = isFree
+      ? 'bg-zinc-500/10 text-zinc-500 border border-zinc-500/20'
+      : 'bg-green-500/20 text-green-400 border border-green-500/30';
   } else {
-    // No plan or free plan — show "Free"
-    label = 'Free';
-    colorClass = 'bg-zinc-500/10 text-zinc-500 border border-zinc-500/20';
+    // plan is null — backend bug (ENG-16187), show status as-is
+    label = status;
+    colorClass = status === 'active'
+      ? 'bg-zinc-500/10 text-zinc-500 border border-zinc-500/20'
+      : 'bg-zinc-500/10 text-zinc-500 border border-zinc-500/20';
   }
 
   return (
-    <span
-      className={cn('inline-block px-2 py-0.5 text-xs rounded font-medium', colorClass)}
-      title={`status: ${status}, plan: ${plan ?? 'null'}`}
-    >
+    <span className={cn('inline-block px-2 py-0.5 text-xs rounded font-medium', colorClass)}>
       {label}
     </span>
   );
