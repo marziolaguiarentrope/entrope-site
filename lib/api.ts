@@ -266,6 +266,21 @@ class ApiClient {
     return this.fetch<MemberContext>(`/members/${userId}`);
   }
 
+  async listUsers(params?: {
+    skip?: number;
+    limit?: number;
+    q?: string;
+    status?: string;
+  }): Promise<UserListResponse> {
+    const searchParams = new URLSearchParams();
+    if (params?.skip !== undefined) searchParams.set('skip', params.skip.toString());
+    if (params?.limit !== undefined) searchParams.set('limit', params.limit.toString());
+    if (params?.q) searchParams.set('q', params.q);
+    if (params?.status) searchParams.set('status', params.status);
+    const query = searchParams.toString();
+    return this.fetch<UserListResponse>(`/members/list${query ? `?${query}` : ''}`);
+  }
+
   // Hotel Opportunities
   async listHotelOpportunitiesPendingPayment(params?: {
     limit?: number;
@@ -414,6 +429,22 @@ export interface MemberSummary {
   created_at: string;
   has_active_escalation: boolean;
   pending_opportunities: number;
+}
+
+export interface UserListItem {
+  id: string;
+  email: string | null;
+  phone_number: string | null;
+  name: string | null;
+  status: string;
+  created_at: string;
+}
+
+export interface UserListResponse {
+  users: UserListItem[];
+  total: number;
+  skip: number;
+  limit: number;
 }
 
 

@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { FileText, Plane, Hotel, Users, AlertTriangle, LogOut, ListTodo } from 'lucide-react';
+import { FileText, Plane, Hotel, Users, AlertTriangle, LogOut, ListTodo, Search, Contact } from 'lucide-react';
 import { useAuth } from '@/contexts/auth-context';
 import { cn } from '@/lib/utils';
 
@@ -12,6 +12,8 @@ const navItems = [
   { href: '/complete-repricings', icon: Plane, label: 'Complete Repricings' },
   { href: '/hotel-repricing-tracking', icon: Hotel, label: 'Hotel Repricing Tracking' },
   { href: '/member-overview', icon: Users, label: 'Member Overview' },
+  { href: '/user-search', icon: Search, label: 'User Search' },
+  { href: '/users-list', icon: Contact, label: 'Users List' },
   { href: '/escalations', icon: AlertTriangle, label: 'Escalations' },
 ];
 
