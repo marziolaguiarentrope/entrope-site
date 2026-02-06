@@ -22,6 +22,8 @@ import {
   CreditAdjustmentRequest,
   IntercomContact,
   IntercomConversation,
+  CustomerIoPerson,
+  CustomerIoActivity,
 } from '@/lib/api';
 import { useAuth } from '@/contexts/auth-context';
 import { BookingEditInline } from './booking-edit-inline';
@@ -557,6 +559,177 @@ function IntercomCard({ userId, email }: { userId: string; email: string | null 
             </a>
           ))}
         </div>
+      )}
+    </div>
+  );
+}
+
+function CustomerIoCard({ userId, email }: { userId: string; email: string | null }) {
+  const [person, setPerson] = useState<CustomerIoPerson | null>(null);
+  const [activities, setActivities] = useState<CustomerIoActivity[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function fetchCustomerIo() {
+      setLoading(true);
+      try {
+        const [personData, activityData] = await Promise.all([
+          api.getCustomerIoPerson(userId),
+          api.getCustomerIoActivities(userId),
+        ]);
+        if (cancelled) return;
+        setPerson(personData);
+        setActivities(activityData);
+      } catch {
+        // Silently fail — endpoints may not exist yet
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    fetchCustomerIo();
+    return () => { cancelled = true; };
+  }, [userId]);
+
+  // Filter to just email-related activities
+  const emailActivities = activities.filter(a =>
+    ['sent_email', 'opened_email', 'clicked_email', 'bounced_email', 'delivered_email', 'dropped_email', 'spammed_email', 'unsubscribed_email'].includes(a.type)
+  );
+
+  // Compute email stats
+  const sent = emailActivities.filter(a => a.type === 'sent_email').length;
+  const opened = emailActivities.filter(a => a.type === 'opened_email').length;
+  const clicked = emailActivities.filter(a => a.type === 'clicked_email').length;
+  const bounced = emailActivities.filter(a => a.type === 'bounced_email').length;
+
+  // Group recent emails by subject/name (dedupe opens/clicks per message)
+  const recentMessages: { name: string; subject: string | null; timestamp: number; states: string[] }[] = [];
+  const seen = new Set<string>();
+  for (const a of emailActivities) {
+    const key = a.delivery_id || `${a.campaign_id}-${a.subject}-${a.timestamp}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      recentMessages.push({
+        name: a.name || 'Unknown',
+        subject: a.subject,
+        timestamp: a.timestamp,
+        states: emailActivities.filter(b => (b.delivery_id || `${b.campaign_id}-${b.subject}-${b.timestamp}`) === key).map(b => b.type),
+      });
+    }
+  }
+  // Sort newest first, limit to 8
+  recentMessages.sort((a, b) => b.timestamp - a.timestamp);
+  const displayMessages = recentMessages.slice(0, 8);
+
+  const activityTypeIcons: Record<string, { color: string; label: string }> = {
+    sent_email: { color: 'text-blue-400', label: 'Sent' },
+    delivered_email: { color: 'text-green-400', label: 'Delivered' },
+    opened_email: { color: 'text-green-400', label: 'Opened' },
+    clicked_email: { color: 'text-emerald-400', label: 'Clicked' },
+    bounced_email: { color: 'text-red-400', label: 'Bounced' },
+    dropped_email: { color: 'text-red-400', label: 'Dropped' },
+    spammed_email: { color: 'text-orange-400', label: 'Spam' },
+    unsubscribed_email: { color: 'text-yellow-400', label: 'Unsub' },
+  };
+
+  // Customer.io deep link — search by email
+  const cioProfileUrl = email
+    ? `https://fly.customer.io/env/last/people?email=${encodeURIComponent(email)}`
+    : null;
+
+  return (
+    <div className="space-y-3">
+      {/* Profile link */}
+      {cioProfileUrl && (
+        <a
+          href={cioProfileUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex items-center gap-2 px-3 py-2 bg-accent/50 hover:bg-accent rounded-lg transition-colors text-sm group"
+        >
+          <svg className="w-4 h-4 text-purple-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" />
+            <polyline points="22,6 12,13 2,6" />
+          </svg>
+          <span className="flex-1">View in Customer.io</span>
+          <svg className="w-3.5 h-3.5 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+          </svg>
+        </a>
+      )}
+
+      {loading ? (
+        <p className="text-xs text-muted-foreground">Loading email data...</p>
+      ) : emailActivities.length === 0 && !person ? (
+        <p className="text-xs text-muted-foreground">
+          {email ? 'No email activity found' : 'No email to look up'}
+        </p>
+      ) : (
+        <>
+          {/* Email stats */}
+          {sent > 0 && (
+            <div className="grid grid-cols-4 gap-1.5">
+              <div className="bg-accent/30 rounded p-1.5 text-center">
+                <div className="text-sm font-semibold">{sent}</div>
+                <div className="text-[10px] text-muted-foreground">Sent</div>
+              </div>
+              <div className="bg-accent/30 rounded p-1.5 text-center">
+                <div className="text-sm font-semibold text-green-400">{opened}</div>
+                <div className="text-[10px] text-muted-foreground">Opened</div>
+              </div>
+              <div className="bg-accent/30 rounded p-1.5 text-center">
+                <div className="text-sm font-semibold text-emerald-400">{clicked}</div>
+                <div className="text-[10px] text-muted-foreground">Clicked</div>
+              </div>
+              <div className="bg-accent/30 rounded p-1.5 text-center">
+                <div className={cn("text-sm font-semibold", bounced > 0 ? "text-red-400" : "text-muted-foreground")}>{bounced}</div>
+                <div className="text-[10px] text-muted-foreground">Bounced</div>
+              </div>
+            </div>
+          )}
+
+          {/* Subscription status */}
+          {person && (
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-muted-foreground">Subscribed</span>
+              <span className={person.unsubscribed ? 'text-red-400' : 'text-green-400'}>
+                {person.unsubscribed ? 'Unsubscribed' : 'Yes'}
+              </span>
+            </div>
+          )}
+
+          {/* Recent messages */}
+          {displayMessages.length > 0 && (
+            <div className="space-y-1.5">
+              <span className="text-xs text-muted-foreground font-medium">Recent Emails</span>
+              {displayMessages.map((msg, i) => {
+                const bestState = msg.states.includes('clicked_email') ? 'clicked_email'
+                  : msg.states.includes('opened_email') ? 'opened_email'
+                  : msg.states.includes('bounced_email') ? 'bounced_email'
+                  : msg.states.includes('delivered_email') ? 'delivered_email'
+                  : 'sent_email';
+                const info = activityTypeIcons[bestState] || { color: 'text-zinc-400', label: bestState };
+                const dateStr = new Date(msg.timestamp * 1000).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+
+                return (
+                  <div key={`${msg.name}-${msg.timestamp}-${i}`} className="bg-accent/30 rounded p-2">
+                    <div className="flex items-center gap-2">
+                      <span className={cn('px-1.5 py-0.5 text-[10px] rounded bg-accent/50', info.color)}>
+                        {info.label}
+                      </span>
+                      <span className="text-xs truncate flex-1">
+                        {msg.subject || msg.name}
+                      </span>
+                      <span className="text-[10px] text-muted-foreground shrink-0">{dateStr}</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </>
       )}
     </div>
   );
@@ -1576,6 +1749,12 @@ export function MemberDetail({
           <div className="bg-card border border-border rounded-lg p-4">
             <h3 className="text-sm font-medium mb-3">Intercom</h3>
             <IntercomCard userId={member.id} email={member.email} />
+          </div>
+
+          {/* Customer.io Card */}
+          <div className="bg-card border border-border rounded-lg p-4">
+            <h3 className="text-sm font-medium mb-3">Customer.io</h3>
+            <CustomerIoCard userId={member.id} email={member.email} />
           </div>
 
           {context && (

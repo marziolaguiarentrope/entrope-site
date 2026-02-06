@@ -411,6 +411,24 @@ class ApiClient {
       return []; // Endpoint may not exist yet
     }
   }
+
+  // Customer.io
+  async getCustomerIoPerson(userId: string): Promise<CustomerIoPerson | null> {
+    try {
+      return await this.fetch<CustomerIoPerson>(`/customerio/customers/${userId}`);
+    } catch {
+      return null; // Endpoint may not exist yet
+    }
+  }
+
+  async getCustomerIoActivities(userId: string): Promise<CustomerIoActivity[]> {
+    try {
+      const result = await this.fetch<{ activities: CustomerIoActivity[] }>(`/customerio/customers/${userId}/activities`);
+      return result.activities;
+    } catch {
+      return []; // Endpoint may not exist yet
+    }
+  }
 }
 
 export interface HotelOpportunity {
@@ -940,6 +958,26 @@ export interface IntercomConversation {
   waiting_since: string | null;
   source: { type: string; author: { name: string; type: string } } | null;
   statistics: { last_contact_reply_at: string | null; last_admin_reply_at: string | null } | null;
+}
+
+// Customer.io types
+export interface CustomerIoPerson {
+  id: string;
+  email: string | null;
+  created_at: number | null; // unix timestamp
+  attributes: Record<string, unknown>;
+  unsubscribed: boolean;
+}
+
+export interface CustomerIoActivity {
+  id: string;
+  type: string; // sent_email, opened_email, clicked_email, bounced_email, etc.
+  name: string | null; // campaign/message name
+  timestamp: number; // unix timestamp
+  delivery_id: string | null;
+  campaign_id: number | null;
+  subject: string | null;
+  recipient: string | null;
 }
 
 export const api = new ApiClient(API_BASE);
