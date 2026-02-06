@@ -1,9 +1,9 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { api, UserListItem, MemberSummary, MemberContext } from '@/lib/api';
+import { useRouter } from 'next/navigation';
+import { api, UserListItem } from '@/lib/api';
 import { cn } from '@/lib/utils';
-import { MemberDetail } from '@/components/member-detail';
 
 // ── Types ────────────────────────────────────────────────
 
@@ -123,23 +123,6 @@ const STATUS_TABS = [
 
 const PAGE_SIZES = [25, 50, 100];
 
-// ── Bridge: UserListItem → MemberSummary ─────────────────
-
-function toMemberSummary(user: UserListItem): MemberSummary {
-  return {
-    id: user.id,
-    email: user.email,
-    phone_number: user.phone_number,
-    name: user.name,
-    status: user.status,
-    membership_status: user.membership_status,
-    membership_plan: user.membership_plan,
-    created_at: user.created_at,
-    has_active_escalation: false,
-    pending_opportunities: 0,
-  };
-}
-
 function MembershipBadge({ status, plan }: { status: string | null; plan: string | null }) {
   // No membership data at all
   if (!status) return <span className="text-xs text-muted-foreground">—</span>;
@@ -192,6 +175,8 @@ const COLUMNS = [
 // ── Main Page ────────────────────────────────────────────
 
 export default function UsersListPage() {
+  const router = useRouter();
+
   // Data
   const [users, setUsers] = useState<UserListItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -218,12 +203,6 @@ export default function UsersListPage() {
 
   // Timezone
   const [timezone, setTimezone] = useState<Timezone>('America/Los_Angeles');
-
-  // MemberDetail integration
-  const [selectedMember, setSelectedMember] = useState<MemberSummary | null>(null);
-  const [memberContext, setMemberContext] = useState<MemberContext | null>(null);
-  const [contextLoading, setContextLoading] = useState(false);
-  const [contextError, setContextError] = useState<string | null>(null);
 
   // Debounce search input
   useEffect(() => {
@@ -276,39 +255,6 @@ export default function UsersListPage() {
   function handlePageSizeChange(size: number) {
     setPageSize(size);
     setPage(0);
-  }
-
-  // MemberDetail handlers
-  async function handleSelectUser(user: UserListItem) {
-    const member = toMemberSummary(user);
-    setSelectedMember(member);
-    setMemberContext(null);
-    setContextLoading(true);
-    setContextError(null);
-
-    try {
-      const context = await api.getMember(user.id);
-      setMemberContext(context);
-    } catch (err) {
-      setContextError(err instanceof Error ? err.message : 'Failed to load member context');
-    } finally {
-      setContextLoading(false);
-    }
-  }
-
-  async function handleRefreshContext() {
-    if (!selectedMember) return;
-    setContextLoading(true);
-    setContextError(null);
-
-    try {
-      const context = await api.getMember(selectedMember.id);
-      setMemberContext(context);
-    } catch (err) {
-      setContextError(err instanceof Error ? err.message : 'Failed to refresh member context');
-    } finally {
-      setContextLoading(false);
-    }
   }
 
   // Column resize handlers
@@ -394,20 +340,6 @@ export default function UsersListPage() {
       }
     });
   }, [users, sortKey, sortDir]);
-
-  // Full-page MemberDetail view
-  if (selectedMember) {
-    return (
-      <MemberDetail
-        member={selectedMember}
-        context={memberContext}
-        onClose={() => { setSelectedMember(null); setMemberContext(null); }}
-        onRefresh={handleRefreshContext}
-        loading={contextLoading}
-        error={contextError}
-      />
-    );
-  }
 
   return (
     <div>
@@ -529,7 +461,7 @@ export default function UsersListPage() {
                 {sortedUsers.map((user) => (
                   <tr
                     key={user.id}
-                    onClick={() => handleSelectUser(user)}
+                    onClick={() => router.push(`/users-list/${user.id}`)}
                     className="border-b border-border last:border-0 hover:bg-accent/50 transition-colors cursor-pointer"
                   >
                     <td style={{ width: colWidths[0] }} className="px-4 py-3 text-sm font-medium truncate">

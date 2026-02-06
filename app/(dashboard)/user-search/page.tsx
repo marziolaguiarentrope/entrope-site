@@ -1,9 +1,9 @@
 'use client';
 
 import { useState, useMemo } from 'react';
-import { api, MemberSummary, MemberContext } from '@/lib/api';
+import { useRouter } from 'next/navigation';
+import { api, MemberSummary } from '@/lib/api';
 import { cn } from '@/lib/utils';
-import { MemberDetail } from '@/components/member-detail';
 
 // ── Helpers ──────────────────────────────────────────────
 
@@ -103,6 +103,8 @@ function SortHeader({ label, sortKey, currentKey, dir, onSort }: {
 // ── Main Page ────────────────────────────────────────────
 
 export default function UserSearchPage() {
+  const router = useRouter();
+
   // Search state
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(false);
@@ -114,12 +116,6 @@ export default function UserSearchPage() {
   // Sorting
   const [sortKey, setSortKey] = useState<SortKey>('joined');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
-
-  // MemberDetail integration
-  const [selectedMember, setSelectedMember] = useState<MemberSummary | null>(null);
-  const [memberContext, setMemberContext] = useState<MemberContext | null>(null);
-  const [contextLoading, setContextLoading] = useState(false);
-  const [contextError, setContextError] = useState<string | null>(null);
 
   const sorted = useMemo(() => sortMembers(results, sortKey, sortDir), [results, sortKey, sortDir]);
 
@@ -156,51 +152,6 @@ export default function UserSearchPage() {
       setLoading(false);
       setSearch('');
     }
-  }
-
-  async function handleSelectMember(member: MemberSummary) {
-    setSelectedMember(member);
-    setMemberContext(null);
-    setContextLoading(true);
-    setContextError(null);
-
-    try {
-      const context = await api.getMember(member.id);
-      setMemberContext(context);
-    } catch (err) {
-      setContextError(err instanceof Error ? err.message : 'Failed to load member context');
-    } finally {
-      setContextLoading(false);
-    }
-  }
-
-  async function handleRefreshContext() {
-    if (!selectedMember) return;
-    setContextLoading(true);
-    setContextError(null);
-
-    try {
-      const context = await api.getMember(selectedMember.id);
-      setMemberContext(context);
-    } catch (err) {
-      setContextError(err instanceof Error ? err.message : 'Failed to refresh member context');
-    } finally {
-      setContextLoading(false);
-    }
-  }
-
-  // Full-page MemberDetail view
-  if (selectedMember) {
-    return (
-      <MemberDetail
-        member={selectedMember}
-        context={memberContext}
-        onClose={() => { setSelectedMember(null); setMemberContext(null); }}
-        onRefresh={handleRefreshContext}
-        loading={contextLoading}
-        error={contextError}
-      />
-    );
   }
 
   return (
@@ -270,7 +221,7 @@ export default function UserSearchPage() {
               {sorted.map((member) => (
                 <tr
                   key={member.id}
-                  onClick={() => handleSelectMember(member)}
+                  onClick={() => router.push(`/users-list/${member.id}`)}
                   className="border-b border-border last:border-0 hover:bg-accent/50 transition-colors cursor-pointer"
                 >
                   <td className="px-4 py-3 text-sm font-medium">

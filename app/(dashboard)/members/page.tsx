@@ -1,9 +1,9 @@
 'use client';
 
 import { useState } from 'react';
-import { api, MemberSummary, MemberContext } from '@/lib/api';
+import { useRouter } from 'next/navigation';
+import { api, MemberSummary } from '@/lib/api';
 import { cn } from '@/lib/utils';
-import { MemberDetail } from '@/components/member-detail';
 
 function timeAgo(dateString: string): string {
   const now = new Date();
@@ -58,16 +58,12 @@ function MemberRow({ member, onClick }: { member: MemberSummary; onClick: () => 
 
 
 export default function MembersPage() {
+  const router = useRouter();
   const [search, setSearch] = useState('');
   const [member, setMember] = useState<MemberSummary | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hasSearched, setHasSearched] = useState(false);
-
-  const [selectedMember, setSelectedMember] = useState<MemberSummary | null>(null);
-  const [memberContext, setMemberContext] = useState<MemberContext | null>(null);
-  const [contextLoading, setContextLoading] = useState(false);
-  const [contextError, setContextError] = useState<string | null>(null);
 
   async function handleSearch(e: React.FormEvent) {
     e.preventDefault();
@@ -85,38 +81,6 @@ export default function MembersPage() {
       setError(err instanceof Error ? err.message : 'Failed to search member');
     } finally {
       setLoading(false);
-    }
-  }
-
-  async function handleSelectMember(member: MemberSummary) {
-    setSelectedMember(member);
-    setMemberContext(null);
-    setContextLoading(true);
-    setContextError(null);
-
-    try {
-      const context = await api.getMember(member.id);
-      setMemberContext(context);
-    } catch (err) {
-      setContextError(err instanceof Error ? err.message : 'Failed to load member context');
-    } finally {
-      setContextLoading(false);
-    }
-  }
-
-  async function handleRefreshContext() {
-    if (!selectedMember) return;
-
-    setContextLoading(true);
-    setContextError(null);
-
-    try {
-      const context = await api.getMember(selectedMember.id);
-      setMemberContext(context);
-    } catch (err) {
-      setContextError(err instanceof Error ? err.message : 'Failed to refresh member context');
-    } finally {
-      setContextLoading(false);
     }
   }
 
@@ -168,25 +132,11 @@ export default function MembersPage() {
         ) : (
           <MemberRow
             member={member}
-            onClick={() => handleSelectMember(member)}
+            onClick={() => router.push(`/users-list/${member.id}`)}
           />
         )}
       </div>
 
-      {/* Member Detail Panel */}
-      {selectedMember && (
-        <MemberDetail
-          member={selectedMember}
-          context={memberContext}
-          onClose={() => {
-            setSelectedMember(null);
-            setMemberContext(null);
-          }}
-          onRefresh={handleRefreshContext}
-          loading={contextLoading}
-          error={contextError}
-        />
-      )}
     </div>
   );
 }
