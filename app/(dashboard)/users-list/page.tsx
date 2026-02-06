@@ -56,12 +56,27 @@ function toMemberSummary(user: UserListItem): MemberSummary {
     phone_number: user.phone_number,
     name: user.name,
     status: user.status,
-    membership_status: null,
-    membership_plan: null,
+    membership_status: user.membership_status,
+    membership_plan: user.membership_plan,
     created_at: user.created_at,
     has_active_escalation: false,
     pending_opportunities: 0,
   };
+}
+
+function MembershipBadge({ status, plan }: { status: string | null; plan: string | null }) {
+  if (!status) return <span className="text-xs text-muted-foreground">—</span>;
+  const colors: Record<string, string> = {
+    active: 'bg-green-500/20 text-green-400',
+    cancelled: 'bg-red-500/20 text-red-400',
+    expired: 'bg-zinc-500/20 text-zinc-400',
+    trialing: 'bg-blue-500/20 text-blue-400',
+  };
+  return (
+    <span className={cn('px-2 py-0.5 text-xs rounded font-medium', colors[status] || 'bg-zinc-500/20 text-zinc-400')}>
+      {plan || status}
+    </span>
+  );
 }
 
 // ── Main Page ────────────────────────────────────────────
@@ -75,7 +90,7 @@ export default function UsersListPage() {
   // Pagination
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(50);
-  const [hasMore, setHasMore] = useState(false);
+  const [totalCount, setTotalCount] = useState(0);
 
   // Filters
   const [search, setSearch] = useState('');
@@ -108,13 +123,16 @@ export default function UsersListPage() {
 
     try {
       const result = await api.listUsers({
-        skip: page * pageSize,
+        offset: page * pageSize,
         limit: pageSize,
         q: debouncedSearch || undefined,
-        status: statusFilter || undefined,
       });
-      setUsers(result.users);
-      setHasMore(result.users.length === pageSize);
+      // Backend doesn't support status filter — filter client-side
+      const members = statusFilter
+        ? result.members.filter(m => m.status === statusFilter)
+        : result.members;
+      setUsers(members);
+      setTotalCount(result.total_count);
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to load users';
       setError(msg);
@@ -228,10 +246,6 @@ export default function UsersListPage() {
         {error ? (
           <div className="p-8 text-center">
             <p className="text-red-400 mb-2">{error}</p>
-            <p className="text-sm text-muted-foreground">
-              This page requires the backend list endpoint to be deployed.
-              Check back after the backend tickets are completed.
-            </p>
             <button
               onClick={fetchUsers}
               className="mt-3 px-4 py-2 bg-primary text-primary-foreground rounded-lg text-sm font-medium hover:bg-primary/90 transition-colors"
@@ -257,6 +271,7 @@ export default function UsersListPage() {
                 <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground">Email</th>
                 <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground">Phone</th>
                 <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground">Status</th>
+                <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground">Membership</th>
                 <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground">Joined</th>
               </tr>
             </thead>
@@ -278,6 +293,9 @@ export default function UsersListPage() {
                   </td>
                   <td className="px-4 py-3">
                     <StatusBadge status={user.status} />
+                  </td>
+                  <td className="px-4 py-3">
+                    <MembershipBadge status={user.membership_status} plan={user.membership_plan} />
                   </td>
                   <td className="px-4 py-3 text-sm text-muted-foreground">
                     {timeAgo(user.created_at)}
@@ -307,7 +325,7 @@ export default function UsersListPage() {
 
           <div className="flex items-center gap-3">
             <span className="text-sm text-muted-foreground">
-              Page {page + 1}
+              Page {page + 1}{totalCount > 0 ? ` of ${Math.ceil(totalCount / pageSize)}` : ''}{totalCount > 0 ? ` · ${totalCount} total` : ''}
             </span>
             <button
               onClick={() => setPage((p) => Math.max(0, p - 1))}
@@ -318,7 +336,7 @@ export default function UsersListPage() {
             </button>
             <button
               onClick={() => setPage((p) => p + 1)}
-              disabled={!hasMore}
+              disabled={(page + 1) * pageSize >= totalCount}
               className="px-3 py-1 text-sm bg-accent/50 rounded-lg font-medium hover:bg-accent disabled:opacity-30 transition-colors"
             >
               Next

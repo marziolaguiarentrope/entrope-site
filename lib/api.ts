@@ -269,16 +269,18 @@ class ApiClient {
   }
 
   async listUsers(params?: {
-    skip?: number;
+    offset?: number;
     limit?: number;
     q?: string;
-    status?: string;
+    created_after?: string;
+    created_before?: string;
   }): Promise<UserListResponse> {
     const searchParams = new URLSearchParams();
-    if (params?.skip !== undefined) searchParams.set('skip', params.skip.toString());
+    if (params?.offset !== undefined) searchParams.set('offset', params.offset.toString());
     if (params?.limit !== undefined) searchParams.set('limit', params.limit.toString());
     if (params?.q) searchParams.set('q', params.q);
-    if (params?.status) searchParams.set('status', params.status);
+    if (params?.created_after) searchParams.set('created_after', params.created_after);
+    if (params?.created_before) searchParams.set('created_before', params.created_before);
     const query = searchParams.toString();
     return this.fetch<UserListResponse>(`/members/list${query ? `?${query}` : ''}`);
   }
@@ -439,14 +441,14 @@ export interface UserListItem {
   phone_number: string | null;
   name: string | null;
   status: string;
+  membership_status: string | null;
+  membership_plan: string | null;
   created_at: string;
 }
 
 export interface UserListResponse {
-  users: UserListItem[];
-  total: number;
-  skip: number;
-  limit: number;
+  members: UserListItem[];
+  total_count: number;
 }
 
 
