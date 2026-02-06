@@ -124,15 +124,30 @@ function toMemberSummary(user: UserListItem): MemberSummary {
 
 function MembershipBadge({ status, plan }: { status: string | null; plan: string | null }) {
   if (!status) return <span className="text-xs text-muted-foreground">—</span>;
-  const colors: Record<string, string> = {
-    active: 'bg-green-500/20 text-green-400',
-    cancelled: 'bg-red-500/20 text-red-400',
-    expired: 'bg-zinc-500/20 text-zinc-400',
-    trialing: 'bg-blue-500/20 text-blue-400',
-  };
+
+  // Detect free vs paid plan
+  const planLower = (plan || '').toLowerCase();
+  const isFree = planLower === 'free' || planLower.includes('free');
+
+  // Color by plan type + status
+  let colorClass: string;
+  if (isFree) {
+    colorClass = 'bg-zinc-500/20 text-zinc-400'; // muted for free
+  } else if (status === 'active') {
+    colorClass = 'bg-green-500/20 text-green-400'; // green for paid active
+  } else if (status === 'cancelled') {
+    colorClass = 'bg-red-500/20 text-red-400';
+  } else if (status === 'trialing') {
+    colorClass = 'bg-blue-500/20 text-blue-400';
+  } else {
+    colorClass = 'bg-zinc-500/20 text-zinc-400';
+  }
+
+  const label = isFree ? 'Free' : (plan || status);
+
   return (
-    <span className={cn('px-2 py-0.5 text-xs rounded font-medium', colors[status] || 'bg-zinc-500/20 text-zinc-400')}>
-      {plan || status}
+    <span className={cn('px-2 py-0.5 text-xs rounded font-medium', colorClass)}>
+      {label}
     </span>
   );
 }
