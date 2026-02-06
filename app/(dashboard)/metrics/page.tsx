@@ -553,7 +553,12 @@ export default function MetricsPage() {
 
     for (const user of filteredUsers) {
       if (!user.created_at) continue;
-      const date = new Date(user.created_at);
+      // Ensure created_at is parsed as UTC — backend may omit the Z suffix
+      let raw = user.created_at;
+      if (!raw.endsWith('Z') && !raw.includes('+') && !raw.includes('-', 10)) {
+        raw = raw.replace(' ', 'T') + 'Z';
+      }
+      const date = new Date(raw);
       if (isNaN(date.getTime())) continue;
       const key = getBucketKey(date, granularity, timezone);
       buckets[key] = (buckets[key] || 0) + 1;
