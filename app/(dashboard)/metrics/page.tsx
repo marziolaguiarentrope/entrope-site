@@ -1,10 +1,8 @@
 'use client';
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   ResponsiveContainer,
-  LineChart,
-  Line,
   AreaChart,
   Area,
   BarChart,
@@ -19,14 +17,14 @@ import { cn } from '@/lib/utils';
 
 // ── Types ────────────────────────────────────────────────
 
-type DateRange = '7d' | '30d' | '90d' | '6m' | '1y' | 'all' | 'custom';
+type DateRange = '24h' | '7d' | '30d' | '90d' | '6m' | '1y' | 'all' | 'custom';
 type Granularity = 'hourly' | 'daily' | 'weekly' | 'monthly';
 type ChartMode = 'cumulative' | 'new';
 type Timezone = 'UTC' | 'America/New_York' | 'America/Chicago' | 'America/Los_Angeles';
 
 interface ChartDataPoint {
   date: string;       // display label
-  dateRaw: string;    // ISO date for sorting
+  dateRaw: string;    // bucket key for sorting
   count: number;      // new users in this bucket
   cumulative: number; // running total
 }
@@ -34,6 +32,7 @@ interface ChartDataPoint {
 // ── Constants ────────────────────────────────────────────
 
 const DATE_RANGE_OPTIONS: { value: DateRange; label: string }[] = [
+  { value: '24h', label: 'Last 24 hours' },
   { value: '7d', label: 'Last 7 days' },
   { value: '30d', label: 'Last 30 days' },
   { value: '90d', label: 'Last 90 days' },
@@ -58,11 +57,11 @@ const TIMEZONE_OPTIONS: { value: Timezone; label: string }[] = [
 ];
 
 // ── Chart Color Palette (Robinhood-inspired) ────────────
-const CHART_GREEN = '#00C805';        // Robinhood signature green
-const CHART_GREEN_LIGHT = '#00E608';  // Brighter hover/accent
-const CHART_GREEN_DIM = '#00C80540';  // Faded for grid
-const CHART_GRID = '#1a1f2e';         // Subtle dark grid lines
-const CHART_AXIS = '#6b7280';         // Gray-400 for axis text
+const CHART_GREEN = '#00C805';
+const CHART_GREEN_LIGHT = '#00E608';
+const CHART_GREEN_DIM = '#00C80540';
+const CHART_GRID = '#1a1f2e';
+const CHART_AXIS = '#6b7280';
 
 const STATUS_OPTIONS = [
   { value: null, label: 'All statuses' },
@@ -71,6 +70,17 @@ const STATUS_OPTIONS = [
   { value: 'banned', label: 'Banned' },
   { value: 'deactivated', label: 'Deactivated' },
 ] as const;
+
+// ── Auto-granularity map for preset ranges ──────────────
+const AUTO_GRANULARITY: Partial<Record<DateRange, Granularity>> = {
+  '24h': 'hourly',
+  '7d': 'daily',
+  '30d': 'daily',
+  '90d': 'weekly',
+  '6m': 'weekly',
+  '1y': 'monthly',
+  'all': 'monthly',
+};
 
 // ── Helpers ──────────────────────────────────────────────
 
@@ -93,13 +103,19 @@ function getPartsInTz(date: Date, tz: Timezone): { year: number; month: number; 
     year: parseInt(get('year')),
     month: parseInt(get('month')),
     day: parseInt(get('day')),
-    hour: parseInt(get('hour')) % 24, // handle "24" edge case
+    hour: parseInt(get('hour')) % 24,
     dayOfWeek: weekdayMap[get('weekday')] ?? 0,
   };
 }
 
 function getDateRange(range: DateRange): { start: Date | null; end: Date } {
   const now = new Date();
+
+  if (range === '24h') {
+    const start = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+    return { start, end: now };
+  }
+
   const end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59);
 
   switch (range) {
@@ -152,36 +168,87 @@ function getBucketKey(date: Date, granularity: Granularity, tz: Timezone): strin
     case 'daily':
       return `${year}-${month}-${day}`;
     case 'weekly': {
-      // Get Monday of the week
       const diff = p.dayOfWeek === 0 ? -6 : 1 - p.dayOfWeek;
       const monday = new Date(date);
       monday.setDate(monday.getDate() + diff);
       const mp = getPartsInTz(monday, tz);
-      const wy = mp.year;
-      const wm = String(mp.month).padStart(2, '0');
-      const wd = String(mp.day).padStart(2, '0');
-      return `${wy}-${wm}-${wd}`;
+      return `${mp.year}-${String(mp.month).padStart(2, '0')}-${String(mp.day).padStart(2, '0')}`;
     }
     case 'monthly':
       return `${year}-${month}-01`;
   }
 }
 
-function formatBucketLabel(key: string, granularity: Granularity): string {
+/** Days in a given month (1-indexed) */
+function daysInMonth(year: number, month: number): number {
+  return new Date(year, month, 0).getDate();
+}
+
+/**
+ * Advance a bucket key by one step, operating purely on the key string.
+ * This avoids timezone conversion issues that occur when using Date cursors.
+ */
+function advanceBucketKey(key: string, granularity: Granularity): string {
   if (granularity === 'hourly') {
-    // key is like "2026-02-05T14" — parse as parts directly
+    // key = "YYYY-MM-DDThh"
     const [datePart, hourPart] = key.split('T');
     const [y, m, d] = datePart.split('-').map(Number);
+    let h = parseInt(hourPart) + 1;
+    let day = d, month = m, year = y;
+    if (h >= 24) {
+      h = 0;
+      day += 1;
+      const dim = daysInMonth(year, month);
+      if (day > dim) {
+        day = 1;
+        month += 1;
+        if (month > 12) { month = 1; year += 1; }
+      }
+    }
+    return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}T${String(h).padStart(2, '0')}`;
+  }
+
+  // key = "YYYY-MM-DD"
+  const [y, m, d] = key.split('-').map(Number);
+  let year = y, month = m, day = d;
+
+  switch (granularity) {
+    case 'daily':
+      day += 1;
+      if (day > daysInMonth(year, month)) { day = 1; month += 1; }
+      if (month > 12) { month = 1; year += 1; }
+      break;
+    case 'weekly':
+      day += 7;
+      while (day > daysInMonth(year, month)) {
+        day -= daysInMonth(year, month);
+        month += 1;
+        if (month > 12) { month = 1; year += 1; }
+      }
+      break;
+    case 'monthly':
+      month += 1;
+      if (month > 12) { month = 1; year += 1; }
+      day = 1;
+      break;
+  }
+
+  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
+function formatBucketLabel(key: string, granularity: Granularity): string {
+  const monthNames = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+  if (granularity === 'hourly') {
+    const [datePart, hourPart] = key.split('T');
+    const [, m, d] = datePart.split('-').map(Number);
     const h = parseInt(hourPart);
     const ampm = h >= 12 ? 'PM' : 'AM';
     const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
-    const monthNames = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     return `${monthNames[m]} ${d}, ${h12} ${ampm}`;
   }
 
-  // For daily/weekly/monthly, parse the date string directly (no timezone conversion needed — it's already a label)
   const [y, m, d] = key.split('-').map(Number);
-  const monthNames = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
   switch (granularity) {
     case 'daily':
@@ -193,8 +260,156 @@ function formatBucketLabel(key: string, granularity: Granularity): string {
   }
 }
 
-function formatDateForInput(date: Date): string {
-  return date.toISOString().split('T')[0];
+// ── Calendar Picker Component ────────────────────────────
+
+function CalendarPicker({
+  startDate,
+  endDate,
+  onApply,
+  onClose,
+}: {
+  startDate: string; // YYYY-MM-DD
+  endDate: string;
+  onApply: (start: string, end: string) => void;
+  onClose: () => void;
+}) {
+  const [viewYear, setViewYear] = useState(() => {
+    const d = startDate ? new Date(startDate + 'T00:00:00') : new Date();
+    return d.getFullYear();
+  });
+  const [viewMonth, setViewMonth] = useState(() => {
+    const d = startDate ? new Date(startDate + 'T00:00:00') : new Date();
+    return d.getMonth(); // 0-indexed
+  });
+  const [selStart, setSelStart] = useState(startDate);
+  const [selEnd, setSelEnd] = useState(endDate);
+  const [selectingEnd, setSelectingEnd] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  // Close on outside click
+  useEffect(() => {
+    function handler(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        onClose();
+      }
+    }
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [onClose]);
+
+  const dim = daysInMonth(viewYear, viewMonth + 1); // daysInMonth uses 1-indexed month
+  const firstDow = new Date(viewYear, viewMonth, 1).getDay(); // 0=Sun
+
+  function prevMonth() {
+    if (viewMonth === 0) { setViewMonth(11); setViewYear(y => y - 1); }
+    else setViewMonth(m => m - 1);
+  }
+  function nextMonth() {
+    if (viewMonth === 11) { setViewMonth(0); setViewYear(y => y + 1); }
+    else setViewMonth(m => m + 1);
+  }
+
+  function toKey(d: number) {
+    return `${viewYear}-${String(viewMonth + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+  }
+
+  function handleDayClick(d: number) {
+    const key = toKey(d);
+    if (!selectingEnd) {
+      setSelStart(key);
+      setSelEnd('');
+      setSelectingEnd(true);
+    } else {
+      if (key < selStart) {
+        setSelEnd(selStart);
+        setSelStart(key);
+      } else {
+        setSelEnd(key);
+      }
+      setSelectingEnd(false);
+    }
+  }
+
+  function isInRange(d: number) {
+    if (!selStart || !selEnd) return false;
+    const key = toKey(d);
+    return key >= selStart && key <= selEnd;
+  }
+
+  function isStart(d: number) { return toKey(d) === selStart; }
+  function isEnd(d: number) { return toKey(d) === selEnd; }
+
+  const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  const today = new Date();
+  const todayKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+
+  return (
+    <div ref={ref} className="absolute top-full mt-2 z-50 bg-[#0d1117] border border-[#1a1f2e] rounded-xl shadow-2xl p-4 w-[320px]">
+      {/* Month nav */}
+      <div className="flex items-center justify-between mb-3">
+        <button onClick={prevMonth} className="p-1 rounded hover:bg-zinc-800 text-zinc-400 hover:text-white transition-colors">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M15 18l-6-6 6-6" /></svg>
+        </button>
+        <span className="text-sm font-medium text-zinc-200">{monthNames[viewMonth]} {viewYear}</span>
+        <button onClick={nextMonth} className="p-1 rounded hover:bg-zinc-800 text-zinc-400 hover:text-white transition-colors">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 18l6-6-6-6" /></svg>
+        </button>
+      </div>
+
+      {/* Day headers */}
+      <div className="grid grid-cols-7 gap-0.5 mb-1">
+        {['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'].map(d => (
+          <div key={d} className="text-center text-xs text-zinc-600 py-1">{d}</div>
+        ))}
+      </div>
+
+      {/* Days grid */}
+      <div className="grid grid-cols-7 gap-0.5">
+        {Array.from({ length: firstDow }).map((_, i) => (
+          <div key={`empty-${i}`} />
+        ))}
+        {Array.from({ length: dim }).map((_, i) => {
+          const d = i + 1;
+          const inRange = isInRange(d);
+          const start = isStart(d);
+          const end = isEnd(d);
+          const isToday = toKey(d) === todayKey;
+
+          return (
+            <button
+              key={d}
+              onClick={() => handleDayClick(d)}
+              className={cn(
+                'text-center text-sm py-1.5 rounded-md transition-all',
+                inRange && !start && !end && 'bg-[#00C80520] text-zinc-200',
+                (start || end) && 'text-white font-semibold',
+                !inRange && !start && !end && 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200',
+                isToday && !start && !end && !inRange && 'ring-1 ring-zinc-600',
+              )}
+              style={(start || end) ? { backgroundColor: CHART_GREEN } : undefined}
+            >
+              {d}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Selection info + Apply */}
+      <div className="mt-3 flex items-center justify-between">
+        <div className="text-xs text-zinc-500">
+          {selStart && selEnd ? `${selStart} → ${selEnd}` : selStart ? `${selStart} → ...` : 'Select start date'}
+        </div>
+        <button
+          disabled={!selStart || !selEnd}
+          onClick={() => onApply(selStart, selEnd)}
+          className="px-3 py-1.5 text-xs font-medium rounded-md transition-colors disabled:opacity-30 disabled:cursor-not-allowed text-white"
+          style={{ backgroundColor: CHART_GREEN }}
+        >
+          Apply
+        </button>
+      </div>
+    </div>
+  );
 }
 
 // ── Main Page ────────────────────────────────────────────
@@ -208,12 +423,23 @@ export default function MetricsPage() {
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
   const [chartMode, setChartMode] = useState<ChartMode>('cumulative');
   const [timezone, setTimezone] = useState<Timezone>('UTC');
+  const [showCalendar, setShowCalendar] = useState(false);
 
   // Data
   const [allUsers, setAllUsers] = useState<UserListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [fetchProgress, setFetchProgress] = useState<string | null>(null);
+
+  // Auto-set granularity when date range changes
+  const handleDateRangeChange = useCallback((range: DateRange) => {
+    setDateRange(range);
+    const auto = AUTO_GRANULARITY[range];
+    if (auto) setGranularity(auto);
+    if (range === 'custom') {
+      setShowCalendar(true);
+    }
+  }, []);
 
   // Compute effective date range
   const effectiveDates = useMemo(() => {
@@ -294,47 +520,18 @@ export default function MetricsPage() {
     const sortedKeys = Object.keys(buckets).sort();
     if (sortedKeys.length === 0) return [];
 
-    // Fill gaps: generate all bucket keys between first and last
-    // We iterate using a simple counter to avoid timezone conversion issues in the gap filler
+    // Fill gaps using advanceBucketKey (operates on key strings, no timezone issues)
     const allKeys: string[] = [];
     const firstKey = sortedKeys[0];
     const lastKey = sortedKeys[sortedKeys.length - 1];
 
-    // For gap filling, use a UTC cursor and convert each step via getBucketKey
-    // Start from the earliest user's created_at that maps to firstKey
-    const first = granularity === 'hourly'
-      ? new Date(firstKey + ':00:00Z')
-      : new Date(firstKey + 'T00:00:00Z');
-    const last = granularity === 'hourly'
-      ? new Date(lastKey + ':00:00Z')
-      : new Date(lastKey + 'T00:00:00Z');
-    // Add buffer for timezone offset (up to 12h ahead)
-    last.setHours(last.getHours() + 14);
-
-    const cursor = new Date(first);
-    const seen = new Set<string>();
-    while (cursor <= last) {
-      const key = getBucketKey(cursor, granularity, timezone);
-      if (!seen.has(key)) {
-        seen.add(key);
-        allKeys.push(key);
-      }
-      // Stop once we've passed the last actual key
-      if (key > lastKey && !buckets[key]) break;
-      switch (granularity) {
-        case 'hourly':
-          cursor.setUTCHours(cursor.getUTCHours() + 1);
-          break;
-        case 'daily':
-          cursor.setUTCDate(cursor.getUTCDate() + 1);
-          break;
-        case 'weekly':
-          cursor.setUTCDate(cursor.getUTCDate() + 7);
-          break;
-        case 'monthly':
-          cursor.setUTCMonth(cursor.getUTCMonth() + 1);
-          break;
-      }
+    let cursor = firstKey;
+    const maxIter = 10000; // safety limit
+    let iter = 0;
+    while (cursor <= lastKey && iter < maxIter) {
+      allKeys.push(cursor);
+      cursor = advanceBucketKey(cursor, granularity);
+      iter++;
     }
 
     // Build data points
@@ -357,7 +554,6 @@ export default function MetricsPage() {
     const periods = chartData.length || 1;
     const avgPerPeriod = totalInRange / periods;
 
-    // Growth rate: compare first half to second half
     let growthRate: number | null = null;
     if (chartData.length >= 2) {
       const mid = Math.floor(chartData.length / 2);
@@ -387,7 +583,7 @@ export default function MetricsPage() {
     return `All time through ${fmt(effectiveDates.end)}`;
   }, [effectiveDates]);
 
-  // Custom tooltip component
+  // Custom tooltip
   const CustomTooltip = ({ active, payload, label }: { active?: boolean; payload?: Array<{ value: number }>; label?: string }) => {
     if (!active || !payload?.length) return null;
     return (
@@ -424,36 +620,49 @@ export default function MetricsPage() {
         </button>
       </div>
 
-      {/* Controls */}
-      <div className="flex flex-wrap gap-3 mb-4">
+      {/* Controls Row 1: Date range, Granularity, Status */}
+      <div className="flex flex-wrap gap-3 mb-3">
         {/* Date Range */}
-        <select
-          value={dateRange}
-          onChange={(e) => setDateRange(e.target.value as DateRange)}
-          className="bg-background border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
-        >
-          {DATE_RANGE_OPTIONS.map(opt => (
-            <option key={opt.value} value={opt.value}>{opt.label}</option>
-          ))}
-        </select>
+        <div className="relative">
+          <select
+            value={dateRange}
+            onChange={(e) => handleDateRangeChange(e.target.value as DateRange)}
+            className="bg-background border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+          >
+            {DATE_RANGE_OPTIONS.map(opt => (
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
+            ))}
+          </select>
 
-        {/* Custom date inputs */}
-        {dateRange === 'custom' && (
-          <div className="flex items-center gap-2">
-            <input
-              type="date"
-              value={customStart}
-              onChange={(e) => setCustomStart(e.target.value)}
-              className="bg-background border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+          {/* Calendar Picker (shown for custom) */}
+          {dateRange === 'custom' && showCalendar && (
+            <CalendarPicker
+              startDate={customStart}
+              endDate={customEnd}
+              onApply={(start, end) => {
+                setCustomStart(start);
+                setCustomEnd(end);
+                setShowCalendar(false);
+              }}
+              onClose={() => setShowCalendar(false)}
             />
-            <span className="text-muted-foreground text-sm">to</span>
-            <input
-              type="date"
-              value={customEnd || formatDateForInput(new Date())}
-              onChange={(e) => setCustomEnd(e.target.value)}
-              className="bg-background border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
-            />
-          </div>
+          )}
+        </div>
+
+        {/* Custom range display badge */}
+        {dateRange === 'custom' && customStart && customEnd && (
+          <button
+            onClick={() => setShowCalendar(true)}
+            className="flex items-center gap-1.5 bg-[#0d1117] border border-[#1a1f2e] rounded-lg px-3 py-2 text-sm text-zinc-300 hover:border-zinc-600 transition-colors"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-zinc-500">
+              <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+              <line x1="16" y1="2" x2="16" y2="6" />
+              <line x1="8" y1="2" x2="8" y2="6" />
+              <line x1="3" y1="10" x2="21" y2="10" />
+            </svg>
+            {customStart} → {customEnd}
+          </button>
         )}
 
         {/* Granularity */}
@@ -477,7 +686,10 @@ export default function MetricsPage() {
             <option key={opt.label} value={opt.value ?? ''}>{opt.label}</option>
           ))}
         </select>
+      </div>
 
+      {/* Controls Row 2: Timezone + Chart mode */}
+      <div className="flex flex-wrap gap-3 mb-4">
         {/* Timezone Toggle */}
         <div className="flex rounded-lg border border-border overflow-hidden">
           {TIMEZONE_OPTIONS.map(opt => (
@@ -487,9 +699,10 @@ export default function MetricsPage() {
               className={cn(
                 'px-2.5 py-2 text-sm font-medium transition-colors',
                 timezone === opt.value
-                  ? 'bg-primary text-primary-foreground'
+                  ? 'text-white'
                   : 'bg-background text-muted-foreground hover:bg-accent'
               )}
+              style={timezone === opt.value ? { backgroundColor: CHART_GREEN } : undefined}
             >
               {opt.label}
             </button>
@@ -503,9 +716,10 @@ export default function MetricsPage() {
             className={cn(
               'px-3 py-2 text-sm font-medium transition-colors',
               chartMode === 'cumulative'
-                ? 'bg-primary text-primary-foreground'
+                ? 'text-white'
                 : 'bg-background text-muted-foreground hover:bg-accent'
             )}
+            style={chartMode === 'cumulative' ? { backgroundColor: CHART_GREEN } : undefined}
           >
             Cumulative
           </button>
@@ -514,9 +728,10 @@ export default function MetricsPage() {
             className={cn(
               'px-3 py-2 text-sm font-medium transition-colors',
               chartMode === 'new'
-                ? 'bg-primary text-primary-foreground'
+                ? 'text-white'
                 : 'bg-background text-muted-foreground hover:bg-accent'
             )}
+            style={chartMode === 'new' ? { backgroundColor: CHART_GREEN } : undefined}
           >
             New Users
           </button>
@@ -542,13 +757,11 @@ export default function MetricsPage() {
           <div className="bg-[#0d1117] border border-[#1a1f2e] rounded-lg p-4">
             <p className="text-xs text-zinc-500 mb-1">Growth Rate</p>
             {stats.growthRate !== null ? (
-              <p className={cn(
-                'text-2xl font-semibold',
-              )} style={{ color: stats.growthRate > 0 ? CHART_GREEN : stats.growthRate < 0 ? '#ff5000' : '#9ca3af' }}>
+              <p className="text-2xl font-semibold" style={{ color: stats.growthRate > 0 ? CHART_GREEN : stats.growthRate < 0 ? '#ff5000' : '#9ca3af' }}>
                 {stats.growthRate > 0 ? '+' : ''}{stats.growthRate.toFixed(0)}%
               </p>
             ) : (
-              <p className="text-2xl font-semibold text-zinc-600">—</p>
+              <p className="text-2xl font-semibold text-zinc-600">&mdash;</p>
             )}
             <p className="text-xs text-zinc-500">2nd half vs 1st half</p>
           </div>
@@ -562,7 +775,8 @@ export default function MetricsPage() {
             <p className="text-red-400 mb-2">{error}</p>
             <button
               onClick={fetchData}
-              className="mt-3 px-4 py-2 bg-primary text-primary-foreground rounded-lg text-sm font-medium hover:bg-primary/90 transition-colors"
+              className="mt-3 px-4 py-2 rounded-lg text-sm font-medium text-white transition-colors hover:opacity-90"
+              style={{ backgroundColor: CHART_GREEN }}
             >
               Retry
             </button>
