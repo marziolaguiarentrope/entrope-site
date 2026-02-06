@@ -1073,12 +1073,18 @@ function CompleteBookingDetail({ task, onClose, onUpdate }: TaskDetailProps) {
   const [emailSearchMatch, setEmailSearchMatch] = useState(0);
   const [emailSearchTotal, setEmailSearchTotal] = useState(0);
 
-  // Failure reasons from backend
+  // Failure reasons from backend + client-side additions
+  const backendReasons = (task.valid_failure_reasons || []).map(reason => ({
+    value: reason.toLowerCase().replace(/\s+/g, '_'),
+    label: reason,
+  }));
+  // Add common reasons that the backend may not include yet
+  const extraReasons = [
+    { value: 'booking_in_the_past', label: 'Booking is in the past' },
+  ].filter(r => !backendReasons.some(br => br.value === r.value));
   const failureReasons = [
-    ...(task.valid_failure_reasons || []).map(reason => ({
-      value: reason.toLowerCase().replace(/\s+/g, '_'),
-      label: reason,
-    })),
+    ...backendReasons,
+    ...extraReasons,
     { value: 'other', label: 'Other (specify)' },
   ];
 
