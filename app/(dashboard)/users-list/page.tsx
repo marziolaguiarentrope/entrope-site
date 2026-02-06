@@ -462,6 +462,7 @@ export default function UsersListPage() {
                   <tr
                     key={user.id}
                     onClick={() => router.push(`/users-list/${user.id}`)}
+                    onMouseEnter={() => router.prefetch(`/users-list/${user.id}`)}
                     className="border-b border-border last:border-0 hover:bg-accent/50 transition-colors cursor-pointer"
                   >
                     <td style={{ width: colWidths[0] }} className="px-4 py-3 text-sm font-medium truncate">
