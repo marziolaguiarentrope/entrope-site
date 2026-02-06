@@ -2,9 +2,103 @@
 
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import Link from 'next/link';
-import { RefreshCw, ChevronDown, ChevronRight, ExternalLink, Search } from 'lucide-react';
+import { RefreshCw, ChevronDown, ChevronRight, ExternalLink, Search, Mail, Database, Eye, Telescope, MessageSquare, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { api, RepricingPipelineIssue, RepricingPipelineResponse, RepricingIssueTypeInfo } from '@/lib/api';
+
+// ---------------------------------------------------------------------------
+// Pipeline stage definitions — each issue type belongs to a stage
+// ---------------------------------------------------------------------------
+
+interface PipelineStage {
+  key: string;
+  label: string;
+  description: string;
+  icon: typeof Mail;
+  issueTypes: string[];
+  color: string;      // badge text/border color class
+  bgColor: string;    // badge background class
+  headerColor: string; // section header accent
+}
+
+const PIPELINE_STAGES: PipelineStage[] = [
+  {
+    key: 'import',
+    label: 'Import',
+    description: 'Email ingestion and booking creation',
+    icon: Mail,
+    issueTypes: ['email_no_booking', 'gmail_import_no_booking'],
+    color: 'text-purple-400 border-purple-500/20',
+    bgColor: 'bg-purple-500/15',
+    headerColor: 'border-l-purple-500',
+  },
+  {
+    key: 'booking',
+    label: 'Booking',
+    description: 'Booking data quality and reprice eligibility',
+    icon: Database,
+    issueTypes: ['bad_data_blocking_eligibility'],
+    color: 'text-amber-400 border-amber-500/20',
+    bgColor: 'bg-amber-500/15',
+    headerColor: 'border-l-amber-500',
+  },
+  {
+    key: 'watch',
+    label: 'Watch',
+    description: 'Price monitoring setup and linking',
+    icon: Eye,
+    issueTypes: ['eligible_no_watch', 'watch_not_linked'],
+    color: 'text-cyan-400 border-cyan-500/20',
+    bgColor: 'bg-cyan-500/15',
+    headerColor: 'border-l-cyan-500',
+  },
+  {
+    key: 'observation',
+    label: 'Observation',
+    description: 'Price check execution and delivery',
+    icon: Telescope,
+    issueTypes: ['watch_no_observations', 'email_not_delivered'],
+    color: 'text-blue-400 border-blue-500/20',
+    bgColor: 'bg-blue-500/15',
+    headerColor: 'border-l-blue-500',
+  },
+  {
+    key: 'opportunity',
+    label: 'Opportunity',
+    description: 'Savings surfaced and communicated to user',
+    icon: MessageSquare,
+    issueTypes: ['opportunity_no_comms', 'opportunity_bad_outcome'],
+    color: 'text-orange-400 border-orange-500/20',
+    bgColor: 'bg-orange-500/15',
+    headerColor: 'border-l-orange-500',
+  },
+  {
+    key: 'completion',
+    label: 'Completion',
+    description: 'Accepted repricing fulfilled',
+    icon: CheckCircle2,
+    issueTypes: ['hotel_accepted_no_new_booking', 'flight_accepted_not_resolved'],
+    color: 'text-red-400 border-red-500/20',
+    bgColor: 'bg-red-500/15',
+    headerColor: 'border-l-red-500',
+  },
+];
+
+// Map issue_type → readable stage badge label
+const ISSUE_STAGE_LABEL: Record<string, string> = {};
+for (const stage of PIPELINE_STAGES) {
+  for (const t of stage.issueTypes) {
+    ISSUE_STAGE_LABEL[t] = stage.label;
+  }
+}
+
+function getStageForIssue(issueType: string): PipelineStage | undefined {
+  return PIPELINE_STAGES.find((s) => s.issueTypes.includes(issueType));
+}
+
+// ---------------------------------------------------------------------------
+// Utilities
+// ---------------------------------------------------------------------------
 
 function timeAgo(dateString: string): string {
   const now = new Date();
@@ -32,35 +126,23 @@ function formatDate(dateString: string): string {
   });
 }
 
-function getPriorityFromType(issueTypes: RepricingIssueTypeInfo[], issueType: string): number {
-  return issueTypes.find((t) => t.type === issueType)?.priority ?? 99;
-}
-
-function getPriorityColor(priority: number): string {
-  if (priority <= 2) return 'text-red-400';
-  if (priority <= 7) return 'text-orange-400';
-  return 'text-blue-400';
-}
-
-function getPriorityBadgeBg(priority: number): string {
-  if (priority <= 2) return 'bg-red-500/15 text-red-400 border-red-500/20';
-  if (priority <= 7) return 'bg-orange-500/15 text-orange-400 border-orange-500/20';
-  return 'bg-blue-500/15 text-blue-400 border-blue-500/20';
-}
-
 function truncateId(id: string): string {
   if (id.length <= 12) return id;
   return `${id.slice(0, 8)}…`;
 }
 
+// ---------------------------------------------------------------------------
+// Issue row component
+// ---------------------------------------------------------------------------
+
 function IssueRow({
   issue,
-  priority,
+  stage,
   isExpanded,
   onToggle,
 }: {
   issue: RepricingPipelineIssue;
-  priority: number;
+  stage: PipelineStage | undefined;
   isExpanded: boolean;
   onToggle: () => void;
 }) {
@@ -77,14 +159,6 @@ function IssueRow({
             ) : (
               <ChevronRight className="size-3.5 text-muted-foreground flex-shrink-0" />
             )}
-            <span
-              className={cn(
-                'text-xs font-mono font-semibold px-1.5 py-0.5 rounded border',
-                getPriorityBadgeBg(priority)
-              )}
-            >
-              P{priority}
-            </span>
             <span className="text-sm font-medium truncate">{issue.label}</span>
           </div>
         </td>
@@ -131,10 +205,12 @@ function IssueRow({
               <div>
                 <span className="text-muted-foreground">Issue Type</span>
                 <div className="font-medium mt-0.5">
-                  {issue.label}{' '}
-                  <span className={cn('font-mono text-xs', getPriorityColor(priority))}>
-                    (P{priority})
-                  </span>
+                  {issue.label}
+                  {stage && (
+                    <span className={cn('ml-2 text-xs font-medium px-1.5 py-0.5 rounded border', stage.color, stage.bgColor)}>
+                      {stage.label}
+                    </span>
+                  )}
                 </div>
               </div>
               <div>
@@ -212,12 +288,108 @@ function IssueRow({
   );
 }
 
+// ---------------------------------------------------------------------------
+// Section component — one per pipeline stage
+// ---------------------------------------------------------------------------
+
+function StageSection({
+  stage,
+  issues,
+  expandedId,
+  setExpandedId,
+  getRowKey,
+  defaultCollapsed,
+}: {
+  stage: PipelineStage;
+  issues: RepricingPipelineIssue[];
+  expandedId: string | null;
+  setExpandedId: (id: string | null) => void;
+  getRowKey: (issue: RepricingPipelineIssue, index: number) => string;
+  defaultCollapsed?: boolean;
+}) {
+  const [collapsed, setCollapsed] = useState(defaultCollapsed ?? false);
+  const Icon = stage.icon;
+
+  return (
+    <div className="mb-6">
+      {/* Section header */}
+      <button
+        onClick={() => setCollapsed(!collapsed)}
+        className={cn(
+          'w-full flex items-center gap-3 px-4 py-3 rounded-t-lg border border-border bg-card hover:bg-accent/50 transition-colors border-l-4',
+          stage.headerColor,
+          collapsed && 'rounded-b-lg'
+        )}
+      >
+        {collapsed ? (
+          <ChevronRight className="size-4 text-muted-foreground" />
+        ) : (
+          <ChevronDown className="size-4 text-muted-foreground" />
+        )}
+        <Icon className={cn('size-4', stage.color.split(' ')[0])} />
+        <span className="text-sm font-semibold">{stage.label}</span>
+        <span className="text-xs text-muted-foreground">{stage.description}</span>
+        <span className={cn('ml-auto text-xs font-semibold px-2 py-0.5 rounded-full border', stage.color, stage.bgColor)}>
+          {issues.length}
+        </span>
+      </button>
+
+      {/* Table */}
+      {!collapsed && (
+        <div className="border border-t-0 border-border rounded-b-lg overflow-hidden">
+          <table className="w-full">
+            <thead>
+              <tr className="border-b border-border bg-card/50">
+                <th className="py-2 px-4 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                  Issue
+                </th>
+                <th className="py-2 px-4 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                  User
+                </th>
+                <th className="py-2 px-4 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                  Booking
+                </th>
+                <th className="py-2 px-4 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                  Reason
+                </th>
+                <th className="py-2 px-4 text-right text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                  Created
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {issues.map((issue, idx) => {
+                const key = getRowKey(issue, idx);
+                return (
+                  <IssueRow
+                    key={key}
+                    issue={issue}
+                    stage={stage}
+                    isExpanded={expandedId === key}
+                    onToggle={() =>
+                      setExpandedId(expandedId === key ? null : key)
+                    }
+                  />
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Main page
+// ---------------------------------------------------------------------------
+
 export default function BookingIssuesPage() {
   const [data, setData] = useState<RepricingPipelineResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [filterType, setFilterType] = useState<string>('all');
+  const [filterStage, setFilterStage] = useState<string>('all');
   const [userIdInput, setUserIdInput] = useState('');
   const [activeUserId, setActiveUserId] = useState<string | undefined>(undefined);
 
@@ -241,7 +413,6 @@ export default function BookingIssuesPage() {
   const handleUserSearch = () => {
     const trimmed = userIdInput.trim();
     if (trimmed) {
-      // Basic UUID validation
       const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
       if (!uuidRegex.test(trimmed)) {
         setError('Invalid UUID format. Expected: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx');
@@ -260,30 +431,41 @@ export default function BookingIssuesPage() {
     setExpandedId(null);
   };
 
-  const filteredIssues = useMemo(() => {
+  // Group issues by pipeline stage
+  const stagesWithIssues = useMemo(() => {
     if (!data) return [];
-    if (filterType === 'all') return data.issues;
-    return data.issues.filter((i) => i.issue_type === filterType);
-  }, [data, filterType]);
+    return PIPELINE_STAGES
+      .map((stage) => {
+        const issues = data.issues.filter((i) => stage.issueTypes.includes(i.issue_type));
+        return { stage, issues };
+      })
+      .filter(({ issues }) => {
+        if (filterStage === 'all') return issues.length > 0;
+        return filterStage === issues[0]?.issue_type
+          ? true
+          : PIPELINE_STAGES.find((s) => s.key === filterStage)?.issueTypes.some((t) =>
+              issues.some((i) => i.issue_type === t)
+            ) ?? false;
+      })
+      .filter(({ stage }) => {
+        if (filterStage === 'all') return true;
+        return stage.key === filterStage;
+      });
+  }, [data, filterStage]);
 
-  // Summary counts
-  const summaryCounts = useMemo(() => {
-    if (!data) return { total: 0, critical: 0, warning: 0, info: 0 };
-    const issues = data.issues;
-    const issueTypes = data.issue_types;
-    let critical = 0;
-    let warning = 0;
-    let info = 0;
-    for (const issue of issues) {
-      const p = getPriorityFromType(issueTypes, issue.issue_type);
-      if (p <= 2) critical++;
-      else if (p <= 7) warning++;
-      else info++;
+  // Summary counts per stage
+  const stageCounts = useMemo(() => {
+    if (!data) return {};
+    const counts: Record<string, number> = {};
+    for (const stage of PIPELINE_STAGES) {
+      const count = data.issues.filter((i) => stage.issueTypes.includes(i.issue_type)).length;
+      if (count > 0) counts[stage.key] = count;
     }
-    return { total: issues.length, critical, warning, info };
+    return counts;
   }, [data]);
 
-  // Generate a unique key for expanding rows (some issues may not have booking_id)
+  const totalIssues = data?.issues.length ?? 0;
+
   const getRowKey = (issue: RepricingPipelineIssue, index: number) => {
     return `${issue.issue_type}-${issue.user_id}-${issue.booking_id ?? ''}-${index}`;
   };
@@ -310,22 +492,22 @@ export default function BookingIssuesPage() {
 
       {/* Filters */}
       <div className="flex items-center gap-3 mb-4 flex-wrap">
-        {/* Issue type filter */}
+        {/* Stage filter */}
         <select
-          value={filterType}
+          value={filterStage}
           onChange={(e) => {
-            setFilterType(e.target.value);
+            setFilterStage(e.target.value);
             setExpandedId(null);
           }}
           className="px-3 py-2 text-sm rounded-md border border-border bg-background hover:bg-accent transition-colors"
         >
-          <option value="all">All Types ({data?.issues.length ?? 0})</option>
-          {data?.issue_types.map((t) => {
-            const count = data.issues.filter((i) => i.issue_type === t.type).length;
-            if (count === 0) return null;
+          <option value="all">All Stages ({totalIssues})</option>
+          {PIPELINE_STAGES.map((stage) => {
+            const count = stageCounts[stage.key] ?? 0;
+            if (count === 0 && !data) return null;
             return (
-              <option key={t.type} value={t.type}>
-                P{t.priority} {t.label} ({count})
+              <option key={stage.key} value={stage.key}>
+                {stage.label} ({count})
               </option>
             );
           })}
@@ -360,9 +542,9 @@ export default function BookingIssuesPage() {
           )}
         </div>
 
-        {/* Issue count */}
+        {/* Total count */}
         <div className="ml-auto text-sm text-muted-foreground">
-          {filteredIssues.length} issue{filteredIssues.length !== 1 ? 's' : ''}
+          {totalIssues} issue{totalIssues !== 1 ? 's' : ''}
         </div>
       </div>
 
@@ -372,45 +554,59 @@ export default function BookingIssuesPage() {
           <span className="text-muted-foreground">Filtering by user:</span>
           <span className="font-mono text-primary">{activeUserId}</span>
           <span className="text-muted-foreground">
-            — includes cross-service checks (P4–P7, P10–P11)
+            — includes cross-service checks (Observation, Opportunity, Import)
           </span>
         </div>
       )}
 
-      {/* Summary badges */}
-      {!loading && data && (
-        <div className="flex items-center gap-3 mb-4">
-          <span className="text-sm px-2.5 py-1 rounded-md bg-card border border-border">
-            Total: <strong>{summaryCounts.total}</strong>
-          </span>
-          {summaryCounts.critical > 0 && (
-            <span className="text-sm px-2.5 py-1 rounded-md bg-red-500/10 border border-red-500/20 text-red-400">
-              Critical: <strong>{summaryCounts.critical}</strong>
-            </span>
-          )}
-          {summaryCounts.warning > 0 && (
-            <span className="text-sm px-2.5 py-1 rounded-md bg-orange-500/10 border border-orange-500/20 text-orange-400">
-              Warning: <strong>{summaryCounts.warning}</strong>
-            </span>
-          )}
-          {summaryCounts.info > 0 && (
-            <span className="text-sm px-2.5 py-1 rounded-md bg-blue-500/10 border border-blue-500/20 text-blue-400">
-              Info: <strong>{summaryCounts.info}</strong>
-            </span>
-          )}
+      {/* Stage summary pills */}
+      {!loading && data && totalIssues > 0 && (
+        <div className="flex items-center gap-2 mb-5 flex-wrap">
+          {PIPELINE_STAGES.map((stage) => {
+            const count = stageCounts[stage.key] ?? 0;
+            if (count === 0) return null;
+            const Icon = stage.icon;
+            return (
+              <button
+                key={stage.key}
+                onClick={() => setFilterStage(filterStage === stage.key ? 'all' : stage.key)}
+                className={cn(
+                  'flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-md border transition-colors',
+                  filterStage === stage.key
+                    ? cn(stage.color, stage.bgColor, 'ring-1 ring-current/20')
+                    : 'border-border text-muted-foreground hover:text-foreground hover:bg-accent'
+                )}
+              >
+                <Icon className="size-3" />
+                {stage.label}
+                <span className="font-semibold">{count}</span>
+              </button>
+            );
+          })}
         </div>
       )}
 
       {/* Loading state */}
       {loading && (
-        <div className="border border-border rounded-lg overflow-hidden">
-          {Array.from({ length: 5 }).map((_, i) => (
-            <div key={i} className="flex items-center gap-4 py-3 px-4 border-b border-border last:border-0 animate-pulse">
-              <div className="h-5 w-10 bg-accent rounded" />
-              <div className="h-4 w-40 bg-accent rounded" />
-              <div className="h-4 w-20 bg-accent rounded" />
-              <div className="h-4 w-24 bg-accent rounded" />
-              <div className="ml-auto h-4 w-16 bg-accent rounded" />
+        <div className="space-y-6">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <div key={i} className="border border-border rounded-lg overflow-hidden animate-pulse">
+              <div className="px-4 py-3 bg-card flex items-center gap-3">
+                <div className="h-4 w-4 bg-accent rounded" />
+                <div className="h-4 w-24 bg-accent rounded" />
+                <div className="h-3 w-48 bg-accent rounded" />
+                <div className="ml-auto h-5 w-8 bg-accent rounded-full" />
+              </div>
+              <div className="border-t border-border">
+                {Array.from({ length: 2 }).map((_, j) => (
+                  <div key={j} className="flex items-center gap-4 py-3 px-4 border-b border-border last:border-0">
+                    <div className="h-4 w-40 bg-accent rounded" />
+                    <div className="h-4 w-20 bg-accent rounded" />
+                    <div className="h-4 w-24 bg-accent rounded" />
+                    <div className="ml-auto h-4 w-16 bg-accent rounded" />
+                  </div>
+                ))}
+              </div>
             </div>
           ))}
         </div>
@@ -430,61 +626,33 @@ export default function BookingIssuesPage() {
       )}
 
       {/* Empty state */}
-      {!loading && !error && filteredIssues.length === 0 && (
+      {!loading && !error && totalIssues === 0 && (
         <div className="border border-border rounded-lg p-8 text-center">
+          <CheckCircle2 className="size-8 text-green-400 mx-auto mb-3" />
           <p className="text-muted-foreground">
-            {data?.issues.length === 0
-              ? 'No pipeline issues found. Everything looks healthy!'
-              : 'No issues match the selected filter.'}
+            No pipeline issues found. Everything looks healthy!
           </p>
         </div>
       )}
 
-      {/* Issues table */}
-      {!loading && !error && filteredIssues.length > 0 && (
-        <div className="border border-border rounded-lg overflow-hidden">
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-border bg-card">
-                <th className="py-2.5 px-4 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                  Issue Type
-                </th>
-                <th className="py-2.5 px-4 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                  User
-                </th>
-                <th className="py-2.5 px-4 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                  Booking
-                </th>
-                <th className="py-2.5 px-4 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                  Reason
-                </th>
-                <th className="py-2.5 px-4 text-right text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                  Created
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredIssues.map((issue, idx) => {
-                const key = getRowKey(issue, idx);
-                const priority = data
-                  ? getPriorityFromType(data.issue_types, issue.issue_type)
-                  : 99;
-                return (
-                  <IssueRow
-                    key={key}
-                    issue={issue}
-                    priority={priority}
-                    isExpanded={expandedId === key}
-                    onToggle={() =>
-                      setExpandedId((prev) => (prev === key ? null : key))
-                    }
-                  />
-                );
-              })}
-            </tbody>
-          </table>
+      {/* Empty filter state */}
+      {!loading && !error && totalIssues > 0 && stagesWithIssues.length === 0 && (
+        <div className="border border-border rounded-lg p-8 text-center">
+          <p className="text-muted-foreground">No issues match the selected filter.</p>
         </div>
       )}
+
+      {/* Staged issue sections */}
+      {!loading && !error && stagesWithIssues.map(({ stage, issues }) => (
+        <StageSection
+          key={stage.key}
+          stage={stage}
+          issues={issues}
+          expandedId={expandedId}
+          setExpandedId={setExpandedId}
+          getRowKey={getRowKey}
+        />
+      ))}
     </div>
   );
 }
