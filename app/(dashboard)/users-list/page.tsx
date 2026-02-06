@@ -9,6 +9,50 @@ import { MemberDetail } from '@/components/member-detail';
 
 type SortKey = 'name' | 'email' | 'status' | 'membership' | 'hotels' | 'flights' | 'emails' | 'created_at';
 type SortDir = 'asc' | 'desc';
+type Timezone = 'UTC' | 'America/New_York' | 'America/Chicago' | 'America/Los_Angeles';
+
+const TIMEZONE_OPTIONS: { value: Timezone; label: string }[] = [
+  { value: 'UTC', label: 'UTC' },
+  { value: 'America/New_York', label: 'Eastern' },
+  { value: 'America/Chicago', label: 'Central' },
+  { value: 'America/Los_Angeles', label: 'Pacific' },
+];
+
+// ── Timezone Helpers ────────────────────────────────────
+
+function dayOfYear(year: number, month: number, day: number): number {
+  const daysInMonths = [0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  if ((year % 4 === 0 && year % 100 !== 0) || year % 400 === 0) daysInMonths[2] = 29;
+  let doy = 0;
+  for (let i = 1; i < month; i++) doy += daysInMonths[i];
+  return doy + day;
+}
+
+function isUsDst(utcYear: number, utcMonth: number, utcDay: number, utcHour: number): boolean {
+  const mar1dow = new Date(Date.UTC(utcYear, 2, 1)).getUTCDay();
+  const mar2ndSun = 1 + ((7 - mar1dow) % 7) + 7;
+  const nov1dow = new Date(Date.UTC(utcYear, 10, 1)).getUTCDay();
+  const nov1stSun = 1 + ((7 - nov1dow) % 7);
+  const doy = dayOfYear(utcYear, utcMonth, utcDay);
+  const dstStartDoy = dayOfYear(utcYear, 3, mar2ndSun);
+  const dstEndDoy = dayOfYear(utcYear, 11, nov1stSun);
+  if (doy > dstStartDoy && doy < dstEndDoy) return true;
+  if (doy < dstStartDoy || doy > dstEndDoy) return false;
+  if (doy === dstStartDoy) return utcHour >= 7;
+  if (doy === dstEndDoy) return utcHour < 6;
+  return false;
+}
+
+function getUtcOffsetHours(date: Date, tz: Timezone): number {
+  if (tz === 'UTC') return 0;
+  const dst = isUsDst(date.getUTCFullYear(), date.getUTCMonth() + 1, date.getUTCDate(), date.getUTCHours());
+  switch (tz) {
+    case 'America/New_York':    return dst ? -4 : -5;
+    case 'America/Chicago':     return dst ? -5 : -6;
+    case 'America/Los_Angeles': return dst ? -7 : -8;
+    default: return 0;
+  }
+}
 
 // ── Helpers ──────────────────────────────────────────────
 
@@ -18,7 +62,7 @@ function timeAgo(dateString: string): string {
   const date = new Date(dateString);
   if (isNaN(date.getTime())) return '—';
   const seconds = Math.floor((now.getTime() - date.getTime()) / 1000);
-  if (seconds < 0) return 'just now'; // future dates (timezone edge case)
+  if (seconds < 0) return 'just now';
   if (seconds < 60) return 'just now';
   const minutes = Math.floor(seconds / 60);
   if (minutes < 60) return `${minutes}m ago`;
@@ -33,17 +77,24 @@ function timeAgo(dateString: string): string {
   return `${years}y ago`;
 }
 
-function formatDate(dateString: string): string {
+function formatDate(dateString: string, tz: Timezone): string {
   if (!dateString) return '—';
   const date = new Date(dateString);
-  if (isNaN(date.getTime())) return dateString; // fallback to raw string
-  return date.toLocaleDateString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  });
+  if (isNaN(date.getTime())) return dateString;
+
+  const offsetMs = getUtcOffsetHours(date, tz) * 60 * 60 * 1000;
+  const shifted = new Date(date.getTime() + offsetMs);
+
+  const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const m = monthNames[shifted.getUTCMonth()];
+  const d = shifted.getUTCDate();
+  const y = shifted.getUTCFullYear();
+  const h = shifted.getUTCHours();
+  const min = String(shifted.getUTCMinutes()).padStart(2, '0');
+  const ampm = h >= 12 ? 'PM' : 'AM';
+  const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
+
+  return `${m} ${d}, ${y}, ${h12}:${min} ${ampm}`;
 }
 
 function StatusBadge({ status }: { status: string }) {
@@ -164,6 +215,9 @@ export default function UsersListPage() {
   // Sorting — default to newest first
   const [sortKey, setSortKey] = useState<SortKey>('created_at');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
+
+  // Timezone
+  const [timezone, setTimezone] = useState<Timezone>('America/Los_Angeles');
 
   // MemberDetail integration
   const [selectedMember, setSelectedMember] = useState<MemberSummary | null>(null);
@@ -402,6 +456,16 @@ export default function UsersListPage() {
             </button>
           ))}
         </div>
+
+        <select
+          value={timezone}
+          onChange={(e) => setTimezone(e.target.value as Timezone)}
+          className="bg-background border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+        >
+          {TIMEZONE_OPTIONS.map(opt => (
+            <option key={opt.value} value={opt.value}>{opt.label}</option>
+          ))}
+        </select>
       </div>
 
       {/* Table */}
@@ -505,7 +569,7 @@ export default function UsersListPage() {
                       )}
                     </td>
                     <td style={{ width: colWidths[8] }} className="px-4 py-3 text-sm text-muted-foreground truncate">
-                      <span>{formatDate(user.created_at)}</span>
+                      <span>{formatDate(user.created_at, timezone)}</span>
                       <span className="text-xs text-muted-foreground/60 ml-1.5">({timeAgo(user.created_at)})</span>
                     </td>
                   </tr>
