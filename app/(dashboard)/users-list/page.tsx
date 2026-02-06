@@ -7,7 +7,7 @@ import { MemberDetail } from '@/components/member-detail';
 
 // ── Types ────────────────────────────────────────────────
 
-type SortKey = 'name' | 'email' | 'status' | 'membership' | 'created_at';
+type SortKey = 'name' | 'email' | 'status' | 'membership' | 'hotels' | 'flights' | 'emails' | 'created_at';
 type SortDir = 'asc' | 'desc';
 
 // ── Helpers ──────────────────────────────────────────────
@@ -122,12 +122,15 @@ function MembershipBadge({ status, plan }: { status: string | null; plan: string
 // ── Column Definitions ───────────────────────────────────
 
 const COLUMNS = [
-  { key: 'name' as SortKey, label: 'Name', defaultWidth: 180, minWidth: 100 },
-  { key: 'email' as SortKey, label: 'Email', defaultWidth: 220, minWidth: 120 },
-  { key: 'phone' as SortKey | 'phone', label: 'Phone', defaultWidth: 140, minWidth: 100 },
-  { key: 'status' as SortKey, label: 'Status', defaultWidth: 100, minWidth: 80 },
-  { key: 'membership' as SortKey, label: 'Membership', defaultWidth: 120, minWidth: 80 },
-  { key: 'created_at' as SortKey, label: 'Created', defaultWidth: 200, minWidth: 120 },
+  { key: 'name' as SortKey, label: 'Name', defaultWidth: 160, minWidth: 100, sortable: true },
+  { key: 'email' as SortKey, label: 'Email', defaultWidth: 200, minWidth: 120, sortable: true },
+  { key: 'phone' as SortKey | 'phone', label: 'Phone', defaultWidth: 130, minWidth: 100, sortable: false },
+  { key: 'status' as SortKey, label: 'Status', defaultWidth: 90, minWidth: 70, sortable: true },
+  { key: 'membership' as SortKey, label: 'Membership', defaultWidth: 110, minWidth: 70, sortable: true },
+  { key: 'hotels' as SortKey, label: 'Hotels', defaultWidth: 70, minWidth: 55, sortable: true },
+  { key: 'flights' as SortKey, label: 'Flights', defaultWidth: 70, minWidth: 55, sortable: true },
+  { key: 'emails' as SortKey, label: 'Emails', defaultWidth: 70, minWidth: 55, sortable: true },
+  { key: 'created_at' as SortKey, label: 'Created', defaultWidth: 190, minWidth: 120, sortable: true },
 ] as const;
 
 // ── Main Page ────────────────────────────────────────────
@@ -313,6 +316,15 @@ export default function UsersListPage() {
           const bVal = (b.membership_status || '').toLowerCase();
           return aVal.localeCompare(bVal) * dir;
         }
+        case 'hotels': {
+          return ((a.hotel_count ?? 0) - (b.hotel_count ?? 0)) * dir;
+        }
+        case 'flights': {
+          return ((a.flight_count ?? 0) - (b.flight_count ?? 0)) * dir;
+        }
+        case 'emails': {
+          return ((a.email_count ?? 0) - (b.email_count ?? 0)) * dir;
+        }
         case 'created_at': {
           const aTime = new Date(a.created_at).getTime();
           const bTime = new Date(b.created_at).getTime();
@@ -406,14 +418,17 @@ export default function UsersListPage() {
                     <th
                       key={col.key}
                       style={{ width: colWidths[i] }}
-                      className="relative px-4 py-2 text-left text-xs font-medium text-muted-foreground cursor-pointer select-none hover:text-foreground transition-colors group"
-                      onClick={() => col.key !== 'phone' && handleSort(col.key as SortKey)}
+                      className={cn(
+                        "relative px-4 py-2 text-left text-xs font-medium text-muted-foreground select-none transition-colors group",
+                        col.sortable && "cursor-pointer hover:text-foreground"
+                      )}
+                      onClick={() => col.sortable && handleSort(col.key as SortKey)}
                     >
                       <span className="inline-flex items-center gap-1">
                         {col.label}
-                        {col.key !== 'phone' && sortKey === col.key ? (
+                        {col.sortable && sortKey === col.key ? (
                           <span className="text-primary font-bold">{sortDir === 'asc' ? '↑' : '↓'}</span>
-                        ) : col.key !== 'phone' ? (
+                        ) : col.sortable ? (
                           <span className="opacity-0 group-hover:opacity-50 text-muted-foreground">↕</span>
                         ) : null}
                       </span>
@@ -451,7 +466,28 @@ export default function UsersListPage() {
                     <td style={{ width: colWidths[4] }} className="px-4 py-3">
                       <MembershipBadge status={user.membership_status} plan={user.membership_plan} />
                     </td>
-                    <td style={{ width: colWidths[5] }} className="px-4 py-3 text-sm text-muted-foreground truncate">
+                    <td style={{ width: colWidths[5] }} className="px-4 py-3 text-sm text-center tabular-nums">
+                      {user.hotel_count != null ? (
+                        <span className={user.hotel_count > 0 ? 'text-foreground' : 'text-muted-foreground'}>{user.hotel_count}</span>
+                      ) : (
+                        <span className="text-muted-foreground/40">—</span>
+                      )}
+                    </td>
+                    <td style={{ width: colWidths[6] }} className="px-4 py-3 text-sm text-center tabular-nums">
+                      {user.flight_count != null ? (
+                        <span className={user.flight_count > 0 ? 'text-foreground' : 'text-muted-foreground'}>{user.flight_count}</span>
+                      ) : (
+                        <span className="text-muted-foreground/40">—</span>
+                      )}
+                    </td>
+                    <td style={{ width: colWidths[7] }} className="px-4 py-3 text-sm text-center tabular-nums">
+                      {user.email_count != null ? (
+                        <span className={user.email_count > 0 ? 'text-foreground' : 'text-muted-foreground'}>{user.email_count}</span>
+                      ) : (
+                        <span className="text-muted-foreground/40">—</span>
+                      )}
+                    </td>
+                    <td style={{ width: colWidths[8] }} className="px-4 py-3 text-sm text-muted-foreground truncate">
                       <span>{formatDate(user.created_at)}</span>
                       <span className="text-xs text-muted-foreground/60 ml-1.5">({timeAgo(user.created_at)})</span>
                     </td>

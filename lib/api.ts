@@ -444,6 +444,9 @@ export interface UserListItem {
   membership_status: string | null;
   membership_plan: string | null;
   created_at: string;
+  hotel_count?: number;
+  flight_count?: number;
+  email_count?: number;
 }
 
 export interface UserListResponse {
