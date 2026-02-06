@@ -1,9 +1,14 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { api, UserListItem, MemberSummary, MemberContext } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { MemberDetail } from '@/components/member-detail';
+
+// ── Types ────────────────────────────────────────────────
+
+type SortKey = 'name' | 'email' | 'status' | 'membership' | 'created_at';
+type SortDir = 'asc' | 'desc';
 
 // ── Helpers ──────────────────────────────────────────────
 
@@ -19,6 +24,48 @@ function timeAgo(dateString: string): string {
   const days = Math.floor(hours / 24);
   if (days < 7) return `${days}d ago`;
   return date.toLocaleDateString();
+}
+
+function formatDate(dateString: string): string {
+  const date = new Date(dateString);
+  return date.toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  });
+}
+
+// ── Sort Header ──────────────────────────────────────────
+
+function SortHeader({
+  label,
+  sortKey,
+  currentKey,
+  currentDir,
+  onSort,
+}: {
+  label: string;
+  sortKey: SortKey;
+  currentKey: SortKey;
+  currentDir: SortDir;
+  onSort: (key: SortKey) => void;
+}) {
+  const active = currentKey === sortKey;
+  return (
+    <th
+      className="px-4 py-2 text-left text-xs font-medium text-muted-foreground cursor-pointer select-none hover:text-foreground transition-colors"
+      onClick={() => onSort(sortKey)}
+    >
+      <span className="inline-flex items-center gap-1">
+        {label}
+        {active ? (
+          <span className="text-foreground">{currentDir === 'asc' ? '↑' : '↓'}</span>
+        ) : (
+          <span className="opacity-0 group-hover:opacity-30">↕</span>
+        )}
+      </span>
+    </th>
+  );
 }
 
 function StatusBadge({ status }: { status: string }) {
@@ -97,6 +144,10 @@ export default function UsersListPage() {
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
   const debounceTimer = useRef<NodeJS.Timeout | null>(null);
+
+  // Sorting — default to newest first
+  const [sortKey, setSortKey] = useState<SortKey>('created_at');
+  const [sortDir, setSortDir] = useState<SortDir>('desc');
 
   // MemberDetail integration
   const [selectedMember, setSelectedMember] = useState<MemberSummary | null>(null);
@@ -190,6 +241,50 @@ export default function UsersListPage() {
     }
   }
 
+  // Sort handler
+  function handleSort(key: SortKey) {
+    if (sortKey === key) {
+      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortKey(key);
+      setSortDir(key === 'created_at' ? 'desc' : 'asc');
+    }
+  }
+
+  // Sorted users (client-side)
+  const sortedUsers = useMemo(() => {
+    return [...users].sort((a, b) => {
+      const dir = sortDir === 'asc' ? 1 : -1;
+      switch (sortKey) {
+        case 'name': {
+          const aVal = (a.name || '').toLowerCase();
+          const bVal = (b.name || '').toLowerCase();
+          return aVal.localeCompare(bVal) * dir;
+        }
+        case 'email': {
+          const aVal = (a.email || '').toLowerCase();
+          const bVal = (b.email || '').toLowerCase();
+          return aVal.localeCompare(bVal) * dir;
+        }
+        case 'status': {
+          return a.status.localeCompare(b.status) * dir;
+        }
+        case 'membership': {
+          const aVal = (a.membership_status || '').toLowerCase();
+          const bVal = (b.membership_status || '').toLowerCase();
+          return aVal.localeCompare(bVal) * dir;
+        }
+        case 'created_at': {
+          const aTime = new Date(a.created_at).getTime();
+          const bTime = new Date(b.created_at).getTime();
+          return (aTime - bTime) * dir;
+        }
+        default:
+          return 0;
+      }
+    });
+  }, [users, sortKey, sortDir]);
+
   // Full-page MemberDetail view
   if (selectedMember) {
     return (
@@ -267,16 +362,16 @@ export default function UsersListPage() {
           <table className="w-full">
             <thead className="border-b border-border bg-accent/30">
               <tr>
-                <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground">Name</th>
-                <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground">Email</th>
+                <SortHeader label="Name" sortKey="name" currentKey={sortKey} currentDir={sortDir} onSort={handleSort} />
+                <SortHeader label="Email" sortKey="email" currentKey={sortKey} currentDir={sortDir} onSort={handleSort} />
                 <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground">Phone</th>
-                <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground">Status</th>
-                <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground">Membership</th>
-                <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground">Joined</th>
+                <SortHeader label="Status" sortKey="status" currentKey={sortKey} currentDir={sortDir} onSort={handleSort} />
+                <SortHeader label="Membership" sortKey="membership" currentKey={sortKey} currentDir={sortDir} onSort={handleSort} />
+                <SortHeader label="Created" sortKey="created_at" currentKey={sortKey} currentDir={sortDir} onSort={handleSort} />
               </tr>
             </thead>
             <tbody>
-              {users.map((user) => (
+              {sortedUsers.map((user) => (
                 <tr
                   key={user.id}
                   onClick={() => handleSelectUser(user)}
@@ -298,7 +393,8 @@ export default function UsersListPage() {
                     <MembershipBadge status={user.membership_status} plan={user.membership_plan} />
                   </td>
                   <td className="px-4 py-3 text-sm text-muted-foreground">
-                    {timeAgo(user.created_at)}
+                    <span>{formatDate(user.created_at)}</span>
+                    <span className="text-xs text-muted-foreground/60 ml-1.5">({timeAgo(user.created_at)})</span>
                   </td>
                 </tr>
               ))}
