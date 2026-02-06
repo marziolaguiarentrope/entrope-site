@@ -1,5 +1,15 @@
 // Use local proxy to avoid CORS issues
 const API_BASE = '/api/proxy';
+const FETCH_TIMEOUT = 30000; // 30 seconds
+
+export class ApiError extends Error {
+  public status: number;
+  constructor(status: number, message: string) {
+    super(`API error ${status}: ${message}`);
+    this.status = status;
+    this.name = 'ApiError';
+  }
+}
 
 // Types matching the gateway schemas
 
@@ -122,20 +132,43 @@ class ApiClient {
 
   private async fetch<T>(path: string, options?: RequestInit): Promise<T> {
     const url = `${this.baseUrl}${path}`;
-    const response = await fetch(url, {
-      ...options,
-      headers: {
-        'Content-Type': 'application/json',
-        ...options?.headers,
-      },
-    });
 
-    if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`API error ${response.status}: ${error}`);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT);
+
+    try {
+      const response = await fetch(url, {
+        ...options,
+        signal: controller.signal,
+        headers: {
+          'Content-Type': 'application/json',
+          ...options?.headers,
+        },
+      });
+
+      if (response.status === 401) {
+        // Session expired — notify the auth context to redirect to login
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('auth:session-expired'));
+        }
+        throw new ApiError(401, 'Session expired');
+      }
+
+      if (!response.ok) {
+        const error = await response.text();
+        throw new ApiError(response.status, error);
+      }
+
+      return response.json();
+    } catch (error) {
+      if (error instanceof ApiError) throw error;
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        throw new ApiError(0, 'Request timed out after 30 seconds');
+      }
+      throw error;
+    } finally {
+      clearTimeout(timeoutId);
     }
-
-    return response.json();
   }
 
   // Tasks
@@ -317,6 +350,16 @@ class ApiClient {
 
   async getEmailForTask(taskId: string): Promise<RawEmail> {
     return this.fetch<RawEmail>(`/emails/for-task/${taskId}`);
+  }
+
+  // Credit adjustments
+  async adjustCredit(
+    data: CreditAdjustmentRequest
+  ): Promise<CreditAdjustmentResponse> {
+    return this.fetch<CreditAdjustmentResponse>('/credits/axel/adjust', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
   }
 
   // Hotels
@@ -753,6 +796,22 @@ export interface HotelMatchResponse {
   matches: HotelMatchResult[];
   total_matches: number;
   search_id: string;
+}
+
+// Credit adjustment types
+export interface CreditAdjustmentRequest {
+  user_id: string;
+  amount_cents: number; // Delta in cents: positive to add, negative to subtract
+  reason: string; // Min 10 chars, max 500
+  idempotency_key?: string;
+}
+
+export interface CreditAdjustmentResponse {
+  id: string;
+  user_id: string;
+  amount_cents: number;
+  transaction_type: string;
+  description: string | null;
 }
 
 export const api = new ApiClient(API_BASE);

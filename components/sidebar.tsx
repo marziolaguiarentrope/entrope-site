@@ -2,11 +2,12 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { FileText, Plane, Hotel, Users, AlertTriangle, LogOut } from 'lucide-react';
+import { FileText, Plane, Hotel, Users, AlertTriangle, LogOut, ListTodo } from 'lucide-react';
 import { useAuth } from '@/contexts/auth-context';
 import { cn } from '@/lib/utils';
 
 const navItems = [
+  { href: '/tasks', icon: ListTodo, label: 'Tasks' },
   { href: '/manual-import', icon: FileText, label: 'Manual Import' },
   { href: '/complete-repricings', icon: Plane, label: 'Complete Repricings' },
   { href: '/hotel-repricing-tracking', icon: Hotel, label: 'Hotel Repricing Tracking' },
