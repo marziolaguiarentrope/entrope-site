@@ -20,7 +20,7 @@ import { cn } from '@/lib/utils';
 // ── Types ────────────────────────────────────────────────
 
 type DateRange = '7d' | '30d' | '90d' | '6m' | '1y' | 'all' | 'custom';
-type Granularity = 'daily' | 'weekly' | 'monthly';
+type Granularity = 'hourly' | 'daily' | 'weekly' | 'monthly';
 type ChartMode = 'cumulative' | 'new';
 
 interface ChartDataPoint {
@@ -43,6 +43,7 @@ const DATE_RANGE_OPTIONS: { value: DateRange; label: string }[] = [
 ];
 
 const GRANULARITY_OPTIONS: { value: Granularity; label: string }[] = [
+  { value: 'hourly', label: 'Hourly' },
   { value: 'daily', label: 'Daily' },
   { value: 'weekly', label: 'Weekly' },
   { value: 'monthly', label: 'Monthly' },
@@ -103,8 +104,11 @@ function getBucketKey(date: Date, granularity: Granularity): string {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, '0');
   const day = String(date.getDate()).padStart(2, '0');
+  const hour = String(date.getHours()).padStart(2, '0');
 
   switch (granularity) {
+    case 'hourly':
+      return `${year}-${month}-${day}T${hour}`;
     case 'daily':
       return `${year}-${month}-${day}`;
     case 'weekly': {
@@ -124,6 +128,13 @@ function getBucketKey(date: Date, granularity: Granularity): string {
 }
 
 function formatBucketLabel(key: string, granularity: Granularity): string {
+  if (granularity === 'hourly') {
+    // key is like "2026-02-05T14"
+    const date = new Date(key + ':00:00');
+    if (isNaN(date.getTime())) return key;
+    return date.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric' });
+  }
+
   const date = new Date(key + 'T00:00:00');
   if (isNaN(date.getTime())) return key;
 
@@ -239,13 +250,22 @@ export default function MetricsPage() {
 
     // Fill gaps: generate all bucket keys between first and last
     const allKeys: string[] = [];
-    const first = new Date(sortedKeys[0] + 'T00:00:00');
-    const last = new Date(sortedKeys[sortedKeys.length - 1] + 'T00:00:00');
+    const firstKey = sortedKeys[0];
+    const lastKey = sortedKeys[sortedKeys.length - 1];
+    const first = granularity === 'hourly'
+      ? new Date(firstKey + ':00:00')
+      : new Date(firstKey + 'T00:00:00');
+    const last = granularity === 'hourly'
+      ? new Date(lastKey + ':00:00')
+      : new Date(lastKey + 'T00:00:00');
 
     const cursor = new Date(first);
     while (cursor <= last) {
       allKeys.push(getBucketKey(cursor, granularity));
       switch (granularity) {
+        case 'hourly':
+          cursor.setHours(cursor.getHours() + 1);
+          break;
         case 'daily':
           cursor.setDate(cursor.getDate() + 1);
           break;
@@ -292,7 +312,7 @@ export default function MetricsPage() {
       }
     }
 
-    const granLabel = granularity === 'daily' ? 'day' : granularity === 'weekly' ? 'week' : 'month';
+    const granLabel = granularity === 'hourly' ? 'hour' : granularity === 'daily' ? 'day' : granularity === 'weekly' ? 'week' : 'month';
 
     return {
       totalInRange,
