@@ -39,7 +39,6 @@ const DATE_RANGE_OPTIONS: { value: DateRange; label: string }[] = [
   { value: '6m', label: 'Last 6 months' },
   { value: '1y', label: 'Last year' },
   { value: 'all', label: 'All time' },
-  { value: 'custom', label: 'Custom' },
 ];
 
 const GRANULARITY_OPTIONS: { value: Granularity; label: string }[] = [
@@ -460,8 +459,15 @@ function CalendarPicker({
 export default function MetricsPage() {
   // Controls
   const [dateRange, setDateRange] = useState<DateRange>('30d');
-  const [customStart, setCustomStart] = useState('');
-  const [customEnd, setCustomEnd] = useState('');
+  const [customStart, setCustomStart] = useState(() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 30);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  });
+  const [customEnd, setCustomEnd] = useState(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  });
   const [granularity, setGranularity] = useState<Granularity>('daily');
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
   const [chartMode, setChartMode] = useState<ChartMode>('cumulative');
@@ -474,15 +480,28 @@ export default function MetricsPage() {
   const [error, setError] = useState<string | null>(null);
   const [fetchProgress, setFetchProgress] = useState<string | null>(null);
 
-  // Auto-set granularity when date range changes
+  // Helper: format Date to YYYY-MM-DD
+  const toDateKey = useCallback((d: Date) => {
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  }, []);
+
+  // Auto-set granularity when date range changes + sync calendar dates
   const handleDateRangeChange = useCallback((range: DateRange) => {
     setDateRange(range);
     const auto = AUTO_GRANULARITY[range];
     if (auto) setGranularity(auto);
-    if (range === 'custom') {
-      setShowCalendar(true);
+
+    // Sync customStart/customEnd so the calendar always reflects the active range
+    if (range !== 'custom') {
+      const { start, end } = getDateRange(range);
+      if (start) {
+        setCustomStart(toDateKey(start));
+      } else {
+        setCustomStart('');
+      }
+      setCustomEnd(toDateKey(end));
     }
-  }, []);
+  }, [toDateKey]);
 
   // Compute effective date range
   const effectiveDates = useMemo(() => {
@@ -670,8 +689,8 @@ export default function MetricsPage() {
 
       {/* Controls Row 1: Date range, Granularity, Status */}
       <div className="flex flex-wrap gap-3 mb-3">
-        {/* Date Range */}
-        <div className="relative">
+        {/* Date Range Dropdown + Calendar Icon */}
+        <div className="relative flex items-center gap-1.5">
           <select
             value={dateRange}
             onChange={(e) => handleDateRangeChange(e.target.value as DateRange)}
@@ -680,24 +699,53 @@ export default function MetricsPage() {
             {DATE_RANGE_OPTIONS.map(opt => (
               <option key={opt.value} value={opt.value}>{opt.label}</option>
             ))}
+            {dateRange === 'custom' && (
+              <option value="custom">Custom</option>
+            )}
           </select>
 
-          {/* Calendar Picker (shown for custom) */}
-          {dateRange === 'custom' && showCalendar && (
+          {/* Always-visible calendar icon */}
+          <button
+            onClick={() => setShowCalendar(prev => !prev)}
+            className={cn(
+              'p-2 rounded-lg border transition-colors',
+              showCalendar
+                ? 'border-[#00C805] bg-[#00C80515] text-[#00C805]'
+                : 'border-border bg-background text-zinc-400 hover:text-zinc-200 hover:border-zinc-600'
+            )}
+            title="Pick date range"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+              <line x1="16" y1="2" x2="16" y2="6" />
+              <line x1="8" y1="2" x2="8" y2="6" />
+              <line x1="3" y1="10" x2="21" y2="10" />
+            </svg>
+          </button>
+
+          {/* Calendar Picker */}
+          {showCalendar && (
             <CalendarPicker
               startDate={customStart}
               endDate={customEnd}
               onApply={(start, end) => {
                 setCustomStart(start);
                 setCustomEnd(end);
+                setDateRange('custom');
                 setShowCalendar(false);
+                // Auto-pick granularity based on span
+                const span = Math.round((new Date(end + 'T23:59:59').getTime() - new Date(start + 'T00:00:00').getTime()) / (1000 * 60 * 60 * 24));
+                if (span <= 2) setGranularity('hourly');
+                else if (span <= 60) setGranularity('daily');
+                else if (span <= 180) setGranularity('weekly');
+                else setGranularity('monthly');
               }}
               onClose={() => setShowCalendar(false)}
             />
           )}
         </div>
 
-        {/* Custom range display badge */}
+        {/* Custom range badge (shows when custom dates are active) */}
         {dateRange === 'custom' && customStart && customEnd && (
           <button
             onClick={() => setShowCalendar(true)}
