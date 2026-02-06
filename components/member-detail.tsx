@@ -18,12 +18,11 @@ import {
   FlightBookingView,
   HotelBookingView,
   api,
-  FlightBookingPatchRequest,
-  HotelBookingPatchRequest,
-  HotelMatchResult,
+  RawEmail,
   CreditAdjustmentRequest,
 } from '@/lib/api';
 import { useAuth } from '@/contexts/auth-context';
+import { BookingEditInline } from './booking-edit-inline';
 
 // Helper to get price from booking (handles both old and new schema)
 function getBookingPrice(flight: FlightBookingView | null, hotel: HotelBookingView | null): { amount: number | null; currency: string } {
@@ -558,588 +557,45 @@ function TravelerCard({ traveler }: { traveler: TravelerProfile }) {
   );
 }
 
-// Edit Booking Modal
-function EditBookingModal({
-  booking,
-  onClose,
-  onSave,
-}: {
-  booking: BookingView;
-  onClose: () => void;
-  onSave: () => void;
-}) {
-  const isHotel = booking.type?.toLowerCase() === 'hotel';
-  const flightData = booking.flight;
-  const hotelData = booking.hotel;
+// EditBookingModal removed — replaced by BookingEditInline (see booking-edit-inline.tsx)
 
-  const [confirmationCode, setConfirmationCode] = useState(
-    (isHotel
-      ? (hotelData?.confirmation_code ?? hotelData?.confirmation_number)
-      : (flightData?.confirmation_code ?? flightData?.confirmation_number)) || ''
-  );
-  const [bookingProvider, setBookingProvider] = useState(
-    (isHotel
-      ? (hotelData?.booked_with ?? hotelData?.booking_provider)
-      : (flightData?.booked_with ?? flightData?.booking_provider)) || ''
-  );
-
-  // Price fields (stored in cents)
-  const currentPrice = isHotel ? hotelData?.customer_price : flightData?.customer_price;
-  const currentCurrency = isHotel ? hotelData?.currency : flightData?.currency;
-  const [priceAmount, setPriceAmount] = useState(
-    currentPrice !== null && currentPrice !== undefined ? (currentPrice / 100).toFixed(2) : ''
-  );
-  const [priceCurrency, setPriceCurrency] = useState(currentCurrency || 'USD');
-
-  // Hotel-specific fields
-  const [hotelId, setHotelId] = useState(hotelData?.hotel_id || '');
-  const [hotelName, setHotelName] = useState(hotelData?.hotel_name || '');
-  const [checkInDate, setCheckInDate] = useState(hotelData?.check_in || hotelData?.check_in_date || '');
-  const [checkOutDate, setCheckOutDate] = useState(hotelData?.check_out || hotelData?.check_out_date || '');
-  const [roomType, setRoomType] = useState(hotelData?.room_type || '');
-
-  // Hotel lookup state
-  const [showHotelLookup, setShowHotelLookup] = useState(false);
-  const [lookupSearchName, setLookupSearchName] = useState(hotelData?.hotel_name || '');
-  const [lookupSearchAddress, setLookupSearchAddress] = useState('');
-  const [lookupResults, setLookupResults] = useState<HotelMatchResult[]>([]);
-  const [lookupLoading, setLookupLoading] = useState(false);
-  const [lookupError, setLookupError] = useState<string | null>(null);
-
-  // Flight-specific fields - handle both old and new schema
-  // New schema: legs[].segments[].origin/destination/departure
-  // Old schema: legs[].departure_airport/arrival_airport/departure_time
-  const getFlightFields = () => {
-    const legs = flightData?.legs || [];
-    const outboundLeg = legs.find((l: { direction?: string }) => l.direction === 'OUTBOUND') || legs[0];
-    const returnLeg = legs.find((l: { direction?: string }) => l.direction === 'RETURN') || legs[1];
-
-    // Helper to extract from new schema
-    const getFromLeg = (leg: typeof legs[0] | undefined) => {
-      if (!leg) return { dep: '', arr: '', time: '' };
-      // New schema
-      if ('segments' in leg && leg.segments?.length > 0) {
-        const firstSeg = leg.segments[0];
-        const lastSeg = leg.segments[leg.segments.length - 1];
-        return {
-          dep: firstSeg.origin || '',
-          arr: lastSeg.destination || '',
-          time: firstSeg.departure?.slice(0, 16) || '',
-        };
-      }
-      // Old schema
-      return {
-        dep: (leg as { departure_airport?: string }).departure_airport || '',
-        arr: (leg as { arrival_airport?: string }).arrival_airport || '',
-        time: ((leg as { departure_time?: string }).departure_time || '').slice(0, 16),
-      };
-    };
-
-    return {
-      outbound: getFromLeg(outboundLeg),
-      return: getFromLeg(returnLeg),
-      hasReturn: !!returnLeg && legs.length > 1,
-    };
-  };
-
-  const flightFields = getFlightFields();
-  const [outboundDep, setOutboundDep] = useState(flightFields.outbound.dep);
-  const [outboundArr, setOutboundArr] = useState(flightFields.outbound.arr);
-  const [outboundTime, setOutboundTime] = useState(flightFields.outbound.time);
-  const [returnDep, setReturnDep] = useState(flightFields.return.dep);
-  const [returnArr, setReturnArr] = useState(flightFields.return.arr);
-  const [returnTime, setReturnTime] = useState(flightFields.return.time);
-
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  async function handleSave() {
-    setSaving(true);
-    setError(null);
-
-    try {
-      if (isHotel) {
-        const patchData: HotelBookingPatchRequest = {};
-
-        const origConfCode = hotelData?.confirmation_code ?? hotelData?.confirmation_number ?? '';
-        const origProvider = hotelData?.booked_with ?? hotelData?.booking_provider ?? '';
-
-        if (confirmationCode && confirmationCode !== origConfCode) {
-          patchData.confirmation_code = confirmationCode;
-        }
-        if (bookingProvider && bookingProvider !== origProvider) {
-          patchData.booking_provider = bookingProvider;
-        }
-
-        // Price change
-        const newPriceAmount = priceAmount ? Math.round(parseFloat(priceAmount) * 100) : null;
-        if (newPriceAmount !== null && (newPriceAmount !== currentPrice || priceCurrency !== currentCurrency)) {
-          patchData.customer_price = { amount: newPriceAmount, currency: priceCurrency };
-        }
-
-        // Stay changes - build full stay object matching backend schema
-        const origHotelId = hotelData?.hotel_id || '';
-        const origCheckIn = hotelData?.check_in || hotelData?.check_in_date || '';
-        const origCheckOut = hotelData?.check_out || hotelData?.check_out_date || '';
-
-        const hotelIdChanged = hotelId !== origHotelId;
-        const hotelNameChanged = hotelName !== (hotelData?.hotel_name || '');
-        const checkInChanged = checkInDate !== origCheckIn;
-        const checkOutChanged = checkOutDate !== origCheckOut;
-        const roomTypeChanged = roomType !== (hotelData?.room_type || '');
-
-        if (hotelIdChanged || hotelNameChanged || checkInChanged || checkOutChanged || roomTypeChanged) {
-          const stayChanges: HotelBookingPatchRequest['stay'] = {};
-
-          // Hotel object with id and name
-          if (hotelIdChanged || hotelNameChanged) {
-            stayChanges.hotel = {};
-            if (hotelId) stayChanges.hotel.id = hotelId;
-            if (hotelName) stayChanges.hotel.name = hotelName;
-          }
-
-          if (checkInChanged && checkInDate) stayChanges.check_in = checkInDate;
-          if (checkOutChanged && checkOutDate) stayChanges.check_out = checkOutDate;
-          if (roomTypeChanged && roomType) stayChanges.room_type_name = roomType;
-
-          if (Object.keys(stayChanges).length > 0) {
-            patchData.stay = stayChanges;
-          }
-        }
-
-        if (Object.keys(patchData).length === 0) {
-          onClose();
-          return;
-        }
-
-        await api.patchHotelBooking(booking.id, patchData);
-      } else {
-        const patchData: FlightBookingPatchRequest = {};
-
-        const origConfCode = flightData?.confirmation_code ?? flightData?.confirmation_number ?? '';
-        const origProvider = flightData?.booked_with ?? flightData?.booking_provider ?? '';
-
-        if (confirmationCode && confirmationCode !== origConfCode) {
-          patchData.confirmation_code = confirmationCode;
-        }
-        if (bookingProvider && bookingProvider !== origProvider) {
-          patchData.booking_provider = bookingProvider;
-        }
-
-        // Price change
-        const newPriceAmount = priceAmount ? Math.round(parseFloat(priceAmount) * 100) : null;
-        if (newPriceAmount !== null && (newPriceAmount !== currentPrice || priceCurrency !== currentCurrency)) {
-          patchData.customer_price = { amount: newPriceAmount, currency: priceCurrency };
-        }
-
-        // Itinerary changes - outbound and return legs
-        const outboundChanged = outboundDep !== flightFields.outbound.dep ||
-                                outboundArr !== flightFields.outbound.arr ||
-                                outboundTime !== flightFields.outbound.time;
-        const returnChanged = flightFields.hasReturn && (
-                              returnDep !== flightFields.return.dep ||
-                              returnArr !== flightFields.return.arr ||
-                              returnTime !== flightFields.return.time);
-
-        if (outboundChanged || returnChanged) {
-          const legs: FlightBookingPatchRequest['itinerary'] = { legs: [] };
-
-          // Outbound leg
-          if (outboundDep || outboundArr || outboundTime) {
-            legs.legs?.push({
-              departure_airport: outboundDep || undefined,
-              arrival_airport: outboundArr || undefined,
-              departure_time: outboundTime ? outboundTime + ':00' : undefined,
-            });
-          }
-
-          // Return leg
-          if (flightFields.hasReturn && (returnDep || returnArr || returnTime)) {
-            legs.legs?.push({
-              departure_airport: returnDep || undefined,
-              arrival_airport: returnArr || undefined,
-              departure_time: returnTime ? returnTime + ':00' : undefined,
-            });
-          }
-
-          if (legs.legs && legs.legs.length > 0) {
-            patchData.itinerary = legs;
-          }
-        }
-
-        if (Object.keys(patchData).length === 0) {
-          onClose();
-          return;
-        }
-
-        await api.patchFlightBooking(booking.id, patchData);
-      }
-
-      onSave();
-      onClose();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to save');
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function handleHotelLookup() {
-    if (!lookupSearchName.trim()) return;
-
-    setLookupLoading(true);
-    setLookupError(null);
-    setLookupResults([]);
-
-    try {
-      const response = await api.matchHotel({
-        hotel_name: lookupSearchName.trim(),
-        address: lookupSearchAddress.trim() || undefined,
-      });
-      setLookupResults(response.matches);
-      if (response.matches.length === 0) {
-        setLookupError('No matches found. Try adjusting the hotel name or address.');
-      }
-    } catch (err) {
-      setLookupError(err instanceof Error ? err.message : 'Failed to search hotels');
-    } finally {
-      setLookupLoading(false);
-    }
-  }
-
-  function handleSelectHotelMatch(match: HotelMatchResult) {
-    setHotelId(match.hotel_id);
-    setHotelName(match.name);
-    setShowHotelLookup(false);
-    setLookupResults([]);
-  }
-
-  return (
-    <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-[60]">
-      <div className="bg-card border border-border rounded-lg p-4 w-full max-w-lg max-h-[90vh] overflow-y-auto">
-        <h3 className="text-lg font-semibold mb-4">Edit {isHotel ? 'Hotel' : 'Flight'} Booking</h3>
-
-        <div className="space-y-4">
-          {/* Common fields */}
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-sm text-muted-foreground mb-1">Confirmation Code</label>
-              <input
-                type="text"
-                value={confirmationCode}
-                onChange={(e) => setConfirmationCode(e.target.value)}
-                className="w-full px-3 py-2 bg-background border border-border rounded focus:outline-none focus:ring-2 focus:ring-primary text-sm"
-              />
-            </div>
-            <div>
-              <label className="block text-sm text-muted-foreground mb-1">Booking Provider</label>
-              <input
-                type="text"
-                value={bookingProvider}
-                onChange={(e) => setBookingProvider(e.target.value)}
-                className="w-full px-3 py-2 bg-background border border-border rounded focus:outline-none focus:ring-2 focus:ring-primary text-sm"
-              />
-            </div>
-          </div>
-
-          {/* Price */}
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-sm text-muted-foreground mb-1">Price</label>
-              <input
-                type="number"
-                step="0.01"
-                value={priceAmount}
-                onChange={(e) => setPriceAmount(e.target.value)}
-                placeholder="0.00"
-                className="w-full px-3 py-2 bg-background border border-border rounded focus:outline-none focus:ring-2 focus:ring-primary text-sm"
-              />
-            </div>
-            <div>
-              <label className="block text-sm text-muted-foreground mb-1">Currency</label>
-              <select
-                value={priceCurrency}
-                onChange={(e) => setPriceCurrency(e.target.value)}
-                className="w-full px-3 py-2 bg-background border border-border rounded focus:outline-none focus:ring-2 focus:ring-primary text-sm"
-              >
-                <option value="USD">USD</option>
-                <option value="EUR">EUR</option>
-                <option value="GBP">GBP</option>
-                <option value="CAD">CAD</option>
-                <option value="AUD">AUD</option>
-              </select>
-            </div>
-          </div>
-
-          {/* Hotel-specific fields */}
-          {isHotel && (
-            <>
-              <div>
-                <label className="block text-sm text-muted-foreground mb-1">
-                  Hotel ID <span className="text-xs text-yellow-400">(required for repricing)</span>
-                </label>
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={hotelId}
-                    onChange={(e) => setHotelId(e.target.value)}
-                    placeholder="Content service hotel ID"
-                    className="flex-1 px-3 py-2 bg-background border border-border rounded focus:outline-none focus:ring-2 focus:ring-primary text-sm font-mono"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowHotelLookup(true)}
-                    className="px-3 py-2 text-sm bg-accent hover:bg-accent/80 rounded transition-colors"
-                  >
-                    Lookup
-                  </button>
-                </div>
-              </div>
-              <div>
-                <label className="block text-sm text-muted-foreground mb-1">Hotel Name</label>
-                <input
-                  type="text"
-                  value={hotelName}
-                  onChange={(e) => setHotelName(e.target.value)}
-                  className="w-full px-3 py-2 bg-background border border-border rounded focus:outline-none focus:ring-2 focus:ring-primary text-sm"
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-sm text-muted-foreground mb-1">Check-in Date</label>
-                  <input
-                    type="date"
-                    value={checkInDate}
-                    onChange={(e) => setCheckInDate(e.target.value)}
-                    className="w-full px-3 py-2 bg-background border border-border rounded focus:outline-none focus:ring-2 focus:ring-primary text-sm"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm text-muted-foreground mb-1">Check-out Date</label>
-                  <input
-                    type="date"
-                    value={checkOutDate}
-                    onChange={(e) => setCheckOutDate(e.target.value)}
-                    className="w-full px-3 py-2 bg-background border border-border rounded focus:outline-none focus:ring-2 focus:ring-primary text-sm"
-                  />
-                </div>
-              </div>
-              <div>
-                <label className="block text-sm text-muted-foreground mb-1">Room Type</label>
-                <input
-                  type="text"
-                  value={roomType}
-                  onChange={(e) => setRoomType(e.target.value)}
-                  className="w-full px-3 py-2 bg-background border border-border rounded focus:outline-none focus:ring-2 focus:ring-primary text-sm"
-                />
-              </div>
-
-              {/* Hotel Lookup Modal */}
-              {showHotelLookup && (
-                <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-[70]">
-                  <div className="bg-card border border-border rounded-lg p-4 w-full max-w-md max-h-[80vh] overflow-y-auto">
-                    <div className="flex items-center justify-between mb-4">
-                      <h4 className="font-semibold">Find Hotel ID</h4>
-                      <button
-                        onClick={() => {
-                          setShowHotelLookup(false);
-                          setLookupResults([]);
-                          setLookupError(null);
-                        }}
-                        className="text-muted-foreground hover:text-foreground"
-                      >
-                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                        </svg>
-                      </button>
-                    </div>
-
-                    <div className="space-y-3 mb-4">
-                      <div>
-                        <label className="block text-sm text-muted-foreground mb-1">Hotel Name</label>
-                        <input
-                          type="text"
-                          value={lookupSearchName}
-                          onChange={(e) => setLookupSearchName(e.target.value)}
-                          placeholder="e.g. Marriott Downtown"
-                          className="w-full px-3 py-2 bg-background border border-border rounded focus:outline-none focus:ring-2 focus:ring-primary text-sm"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-sm text-muted-foreground mb-1">Address (optional)</label>
-                        <input
-                          type="text"
-                          value={lookupSearchAddress}
-                          onChange={(e) => setLookupSearchAddress(e.target.value)}
-                          placeholder="e.g. 123 Main St, New York, NY"
-                          className="w-full px-3 py-2 bg-background border border-border rounded focus:outline-none focus:ring-2 focus:ring-primary text-sm"
-                        />
-                      </div>
-                      <button
-                        onClick={handleHotelLookup}
-                        disabled={!lookupSearchName.trim() || lookupLoading}
-                        className="w-full px-4 py-2 bg-primary text-primary-foreground rounded hover:bg-primary/90 disabled:opacity-50 transition-colors text-sm"
-                      >
-                        {lookupLoading ? 'Searching...' : 'Search'}
-                      </button>
-                    </div>
-
-                    {lookupError && (
-                      <div className="text-sm text-yellow-400 mb-3">{lookupError}</div>
-                    )}
-
-                    {lookupResults.length > 0 && (
-                      <div className="space-y-2">
-                        <div className="text-sm text-muted-foreground mb-2">
-                          {lookupResults.length} match{lookupResults.length !== 1 ? 'es' : ''} found
-                        </div>
-                        {lookupResults.map((match, idx) => (
-                          <button
-                            key={idx}
-                            onClick={() => handleSelectHotelMatch(match)}
-                            className="w-full text-left p-3 bg-accent/30 hover:bg-accent/50 rounded transition-colors"
-                          >
-                            <div className="flex items-center justify-between">
-                              <span className="font-medium text-sm">{match.name}</span>
-                              <span className={cn(
-                                'text-xs px-2 py-0.5 rounded',
-                                match.confidence_score >= 0.8 ? 'bg-green-500/20 text-green-400' :
-                                match.confidence_score >= 0.5 ? 'bg-yellow-500/20 text-yellow-400' :
-                                'bg-red-500/20 text-red-400'
-                              )}>
-                                {Math.round(match.confidence_score * 100)}%
-                              </span>
-                            </div>
-                            <div className="text-xs text-muted-foreground mt-1">
-                              {match.match_type} match · {match.matched_fields.join(', ')}
-                            </div>
-                            <div className="text-xs text-muted-foreground mt-1 font-mono">
-                              {match.hotel_id}
-                            </div>
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-            </>
-          )}
-
-          {/* Flight-specific fields */}
-          {!isHotel && (
-            <>
-              {/* Outbound leg */}
-              <div className="text-sm font-medium text-muted-foreground">Outbound</div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-sm text-muted-foreground mb-1">From</label>
-                  <input
-                    type="text"
-                    value={outboundDep}
-                    onChange={(e) => setOutboundDep(e.target.value.toUpperCase())}
-                    maxLength={3}
-                    placeholder="JFK"
-                    className="w-full px-3 py-2 bg-background border border-border rounded focus:outline-none focus:ring-2 focus:ring-primary text-sm"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm text-muted-foreground mb-1">To</label>
-                  <input
-                    type="text"
-                    value={outboundArr}
-                    onChange={(e) => setOutboundArr(e.target.value.toUpperCase())}
-                    maxLength={3}
-                    placeholder="LAX"
-                    className="w-full px-3 py-2 bg-background border border-border rounded focus:outline-none focus:ring-2 focus:ring-primary text-sm"
-                  />
-                </div>
-              </div>
-              <div>
-                <label className="block text-sm text-muted-foreground mb-1">Departure Time</label>
-                <input
-                  type="datetime-local"
-                  value={outboundTime}
-                  onChange={(e) => setOutboundTime(e.target.value)}
-                  className="w-full px-3 py-2 bg-background border border-border rounded focus:outline-none focus:ring-2 focus:ring-primary text-sm"
-                />
-              </div>
-
-              {/* Return leg */}
-              {flightFields.hasReturn && (
-                <>
-                  <div className="text-sm font-medium text-muted-foreground mt-2">Return</div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-sm text-muted-foreground mb-1">From</label>
-                      <input
-                        type="text"
-                        value={returnDep}
-                        onChange={(e) => setReturnDep(e.target.value.toUpperCase())}
-                        maxLength={3}
-                        placeholder="LAX"
-                        className="w-full px-3 py-2 bg-background border border-border rounded focus:outline-none focus:ring-2 focus:ring-primary text-sm"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm text-muted-foreground mb-1">To</label>
-                      <input
-                        type="text"
-                        value={returnArr}
-                        onChange={(e) => setReturnArr(e.target.value.toUpperCase())}
-                        maxLength={3}
-                        placeholder="JFK"
-                        className="w-full px-3 py-2 bg-background border border-border rounded focus:outline-none focus:ring-2 focus:ring-primary text-sm"
-                      />
-                    </div>
-                  </div>
-                  <div>
-                    <label className="block text-sm text-muted-foreground mb-1">Departure Time</label>
-                    <input
-                      type="datetime-local"
-                      value={returnTime}
-                      onChange={(e) => setReturnTime(e.target.value)}
-                      className="w-full px-3 py-2 bg-background border border-border rounded focus:outline-none focus:ring-2 focus:ring-primary text-sm"
-                    />
-                  </div>
-                </>
-              )}
-            </>
-          )}
-
-          {error && (
-            <div className="text-red-400 text-sm">{error}</div>
-          )}
-        </div>
-
-        <div className="flex justify-end gap-2 mt-6">
-          <button
-            onClick={onClose}
-            className="px-4 py-2 text-sm border border-border rounded hover:bg-accent transition-colors"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={handleSave}
-            disabled={saving}
-            className="px-4 py-2 text-sm bg-primary text-primary-foreground rounded hover:bg-primary/90 disabled:opacity-50 transition-colors"
-          >
-            {saving ? 'Saving...' : 'Save'}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function BookingCard({ booking, watch, onRefresh }: { booking: BookingView; watch?: WatchView; onRefresh?: () => void }) {
+function BookingCard({ booking, watch, travellers, onRefresh }: { booking: BookingView; watch?: WatchView; travellers?: TravelerProfile[]; onRefresh?: () => void }) {
   const isHotel = booking.type?.toLowerCase() === 'hotel';
   const data = isHotel ? booking.hotel : booking.flight;
 
   const [showActions, setShowActions] = useState(false);
-  const [showEditModal, setShowEditModal] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [showEmail, setShowEmail] = useState(false);
+  const [emailData, setEmailData] = useState<RawEmail | null>(null);
+  const [emailLoading, setEmailLoading] = useState(false);
+  const [emailError, setEmailError] = useState<string | null>(null);
+  const [emailFetched, setEmailFetched] = useState(false);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+
+  async function handleViewEmail() {
+    if (emailFetched) {
+      setShowEmail(!showEmail);
+      return;
+    }
+    setShowEmail(true);
+    setEmailFetched(true);
+    setEmailLoading(true);
+    setEmailError(null);
+    const bookingType = isHotel ? 'hotel' as const : 'flight' as const;
+    try {
+      const data = await api.getEmailForBooking(bookingType, booking.id);
+      setEmailData(data);
+    } catch (err) {
+      if ((err as { status?: number })?.status === 404) {
+        setEmailError(null);
+      } else {
+        setEmailError(err instanceof Error ? err.message : 'Failed to load email');
+      }
+    } finally {
+      setEmailLoading(false);
+    }
+  }
 
   const statusColors: Record<string, string> = {
     CONFIRMED: 'bg-green-500/20 text-green-400',
@@ -1213,12 +669,21 @@ function BookingCard({ booking, watch, onRefresh }: { booking: BookingView; watc
           <div className="absolute top-8 right-2 bg-card border border-border rounded shadow-lg z-10 min-w-[160px]">
             <button
               onClick={() => {
-                setShowEditModal(true);
+                setIsEditing(true);
                 setShowActions(false);
               }}
               className="w-full px-3 py-2 text-left text-sm hover:bg-accent transition-colors"
             >
               Edit Booking
+            </button>
+            <button
+              onClick={() => {
+                handleViewEmail();
+                setShowActions(false);
+              }}
+              className="w-full px-3 py-2 text-left text-sm hover:bg-accent transition-colors"
+            >
+              View Email
             </button>
           </div>
         )}
@@ -1437,18 +902,46 @@ function BookingCard({ booking, watch, onRefresh }: { booking: BookingView; watc
         )}
       </div>
 
-      {showEditModal && (
-        <EditBookingModal
-          booking={booking}
-          onClose={() => setShowEditModal(false)}
-          onSave={() => onRefresh?.()}
-        />
+      {/* Inline email viewer (from dropdown "View Email") */}
+      {showEmail && !isEditing && (
+        <div className="mt-2">
+          {emailLoading && <p className="text-xs text-muted-foreground py-2">Loading email...</p>}
+          {emailError && <div className="bg-red-500/10 rounded p-2 text-xs text-red-400">{emailError}</div>}
+          {!emailLoading && !emailError && !emailData && emailFetched && (
+            <div className="bg-accent/30 rounded p-2 text-xs text-muted-foreground">No source email found.</div>
+          )}
+          {emailData && !emailLoading && (
+            <div className="bg-accent/30 rounded p-2 text-xs space-y-1">
+              <div><span className="text-muted-foreground">From: </span>{emailData.from_address || 'N/A'}</div>
+              <div><span className="text-muted-foreground">Subject: </span><span className="font-medium">{emailData.subject || 'N/A'}</span></div>
+              {emailData.received_at && (
+                <div><span className="text-muted-foreground">Received: </span>{new Date(emailData.received_at).toLocaleString()}</div>
+              )}
+              <div
+                className="bg-background rounded p-2 mt-1 max-h-32 overflow-y-auto whitespace-pre-wrap text-xs"
+                dangerouslySetInnerHTML={{ __html: emailData.body || 'No content' }}
+              />
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Inline edit form */}
+      {isEditing && (
+        <div className="mt-2">
+          <BookingEditInline
+            booking={booking}
+            travellers={travellers}
+            onClose={() => setIsEditing(false)}
+            onSave={() => onRefresh?.()}
+          />
+        </div>
       )}
     </>
   );
 }
 
-function TripCard({ trip, watches, onRefresh }: { trip: TripView; watches?: WatchView[]; onRefresh?: () => void }) {
+function TripCard({ trip, watches, travellers, onRefresh }: { trip: TripView; watches?: WatchView[]; travellers?: TravelerProfile[]; onRefresh?: () => void }) {
   const [expanded, setExpanded] = useState(true); // Default expanded
 
   const statusColors: Record<string, string> = {
@@ -1492,6 +985,7 @@ function TripCard({ trip, watches, onRefresh }: { trip: TripView; watches?: Watc
               key={booking.id}
               booking={booking}
               watch={watchByBookingId.get(booking.id) || (booking.watch_id ? watches?.find(w => w.id === booking.watch_id) : undefined)}
+              travellers={travellers}
               onRefresh={onRefresh}
             />
           ))}
@@ -1896,9 +1390,9 @@ export function MemberDetail({
         </div>
       )}
 
-      {/* Three-column layout for full page */}
+      {/* Two-column layout: sidebar + main content */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        {/* Left column - Member info & settings */}
+        {/* Left column - Member info, settings, comms, payments */}
         <div className="lg:col-span-3 space-y-4">
           {/* Basic Info Card */}
           <div className="bg-card border border-border rounded-lg p-4">
@@ -1989,12 +1483,59 @@ export function MemberDetail({
                   </div>
                 </div>
               )}
+
+              {/* Communications */}
+              <div className="bg-card border border-border rounded-lg p-4">
+                <h3 className="text-sm font-medium mb-3">Communications ({context.communications.length})</h3>
+                {context.communications.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No recent communications</p>
+                ) : (
+                  <div className="space-y-2 max-h-[400px] overflow-y-auto">
+                    {context.communications.map((comm) => (
+                      <CommunicationCard key={comm.id} comm={comm} />
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Payment History */}
+              <div className="bg-card border border-border rounded-lg p-4">
+                <h3 className="text-sm font-medium mb-3">Payments ({context.payment_records.length})</h3>
+                {context.payment_records.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No payment records</p>
+                ) : (
+                  <div className="space-y-2 max-h-[300px] overflow-y-auto">
+                    {context.payment_records.map((pay) => <PaymentCard key={pay.id} payment={pay} />)}
+                  </div>
+                )}
+              </div>
+
+              {/* Airline Credits */}
+              {context.airline_credits.length > 0 && (
+                <div className="bg-card border border-border rounded-lg p-4">
+                  <h3 className="text-sm font-medium mb-3">Airline Credits ({context.airline_credits.length})</h3>
+                  <div className="space-y-2">
+                    {context.airline_credits.map((credit) => (
+                      <div key={credit.id} className="bg-accent/30 rounded p-2 text-sm">
+                        <div className="flex justify-between">
+                          <span className="font-medium">{credit.airline}</span>
+                          <span>{formatMoney(credit.amount * 100, credit.currency)}</span>
+                        </div>
+                        <div className="text-xs text-muted-foreground">
+                          {credit.status}
+                          {credit.expiry_date && ` · Expires ${formatDate(credit.expiry_date)}`}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </>
           )}
         </div>
 
-        {/* Center column - Trips first, then other items */}
-        <div className="lg:col-span-6 space-y-4">
+        {/* Main column - Trips, escalations, tasks, opportunities (wider for edit + email) */}
+        <div className="lg:col-span-9 space-y-4">
           {context && (
             <>
               {/* Trips & Bookings - main focus, always first */}
@@ -2008,6 +1549,7 @@ export function MemberDetail({
                         key={trip.id}
                         trip={trip}
                         watches={context.watches}
+                        travellers={context.travellers}
                         onRefresh={onRefresh}
                       />
                     ))}
@@ -2064,59 +1606,6 @@ export function MemberDetail({
           )}
         </div>
 
-        {/* Right column - Communications, Payments, Credits */}
-        <div className="lg:col-span-3 space-y-4">
-          {context && (
-            <>
-              {/* Communications */}
-              <div className="bg-card border border-border rounded-lg p-4">
-                <h3 className="text-sm font-medium mb-3">Communications ({context.communications.length})</h3>
-                {context.communications.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">No recent communications</p>
-                ) : (
-                  <div className="space-y-2 max-h-[400px] overflow-y-auto">
-                    {context.communications.map((comm) => (
-                      <CommunicationCard key={comm.id} comm={comm} />
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {/* Payment History */}
-              <div className="bg-card border border-border rounded-lg p-4">
-                <h3 className="text-sm font-medium mb-3">Payments ({context.payment_records.length})</h3>
-                {context.payment_records.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">No payment records</p>
-                ) : (
-                  <div className="space-y-2 max-h-[300px] overflow-y-auto">
-                    {context.payment_records.map((pay) => <PaymentCard key={pay.id} payment={pay} />)}
-                  </div>
-                )}
-              </div>
-
-              {/* Airline Credits */}
-              {context.airline_credits.length > 0 && (
-                <div className="bg-card border border-border rounded-lg p-4">
-                  <h3 className="text-sm font-medium mb-3">Airline Credits ({context.airline_credits.length})</h3>
-                  <div className="space-y-2">
-                    {context.airline_credits.map((credit) => (
-                      <div key={credit.id} className="bg-accent/30 rounded p-2 text-sm">
-                        <div className="flex justify-between">
-                          <span className="font-medium">{credit.airline}</span>
-                          <span>{formatMoney(credit.amount * 100, credit.currency)}</span>
-                        </div>
-                        <div className="text-xs text-muted-foreground">
-                          {credit.status}
-                          {credit.expiry_date && ` · Expires ${formatDate(credit.expiry_date)}`}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </>
-          )}
-        </div>
       </div>
     </div>
   );

@@ -324,6 +324,11 @@ class ApiClient {
     });
   }
 
+  // Hotel booking detail (includes hotel_id from content service)
+  async getHotelBookingDetail(bookingId: string): Promise<{ hotel_id: string | null; [key: string]: unknown }> {
+    return this.fetch<{ hotel_id: string | null }>(`/bookings/hotel/${bookingId}`);
+  }
+
   // Watches
   async regenerateWatch(bookingId: string): Promise<WatchRegenerateResponse> {
     return this.fetch<WatchRegenerateResponse>(`/watches/regenerate/${bookingId}`, {
@@ -709,11 +714,47 @@ export interface RawEmail {
   attachments: Array<{ filename: string; content_type: string }> | null;
 }
 
-// Booking edit types
+// Booking edit types — matches backend Pydantic models
+
+export type VerificationStatus = 'UNVERIFIED' | 'VERIFIED' | 'REVIEW_PENDING';
+
+export interface BookingTravelerPatch {
+  first_name?: string;
+  last_name?: string;
+  middle_name?: string;
+  date_of_birth?: string;
+  is_primary?: boolean;
+  is_adult?: boolean;
+  citizenship?: string;
+  traveller_profile_id?: string;
+}
+
+export interface SeatAssignmentPatch {
+  seat: string;
+  segment_index?: number;
+}
+
+export interface BaggageAllowancePatch {
+  carry_on_included?: boolean;
+  checked_bags_included?: number;
+  checked_weight_kg?: number;
+}
+
+export interface FlightTicketPatch {
+  traveler: BookingTravelerPatch;
+  ticket_number?: string;
+  known_traveler_number?: string;
+  redress_number?: string;
+  loyalty_program?: string;
+  loyalty_number?: string;
+  seats?: SeatAssignmentPatch[];
+  baggage?: BaggageAllowancePatch;
+}
+
 export interface FlightBookingPatchRequest {
   confirmation_code?: string;
   booking_provider?: string;
-  verification_status?: 'unverified' | 'functional' | 'complete';
+  verification_status?: VerificationStatus;
   itinerary?: {
     legs?: Array<{
       departure_airport?: string;
@@ -725,6 +766,7 @@ export interface FlightBookingPatchRequest {
       cabin_class?: string;
     }>;
   };
+  tickets?: FlightTicketPatch[];
   customer_price?: {
     amount: number;
     currency: string;
@@ -734,7 +776,7 @@ export interface FlightBookingPatchRequest {
 export interface HotelBookingPatchRequest {
   confirmation_code?: string;
   booking_provider?: string;
-  verification_status?: 'unverified' | 'functional' | 'complete';
+  verification_status?: VerificationStatus;
   stay?: {
     hotel?: {
       id?: string;
@@ -743,7 +785,12 @@ export interface HotelBookingPatchRequest {
     check_in?: string;
     check_out?: string;
     room_type_name?: string;
+    rooms?: number;
+    adults?: number;
+    children?: number;
+    refundable?: boolean;
   };
+  guests?: BookingTravelerPatch[];
   customer_price?: {
     amount: number;
     currency: string;
