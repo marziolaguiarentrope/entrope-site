@@ -57,6 +57,13 @@ const TIMEZONE_OPTIONS: { value: Timezone; label: string }[] = [
   { value: 'America/Los_Angeles', label: 'Pacific' },
 ];
 
+// ── Chart Color Palette (Robinhood-inspired) ────────────
+const CHART_GREEN = '#00C805';        // Robinhood signature green
+const CHART_GREEN_LIGHT = '#00E608';  // Brighter hover/accent
+const CHART_GREEN_DIM = '#00C80540';  // Faded for grid
+const CHART_GRID = '#1a1f2e';         // Subtle dark grid lines
+const CHART_AXIS = '#6b7280';         // Gray-400 for axis text
+
 const STATUS_OPTIONS = [
   { value: null, label: 'All statuses' },
   { value: 'active', label: 'Active' },
@@ -384,9 +391,9 @@ export default function MetricsPage() {
   const CustomTooltip = ({ active, payload, label }: { active?: boolean; payload?: Array<{ value: number }>; label?: string }) => {
     if (!active || !payload?.length) return null;
     return (
-      <div className="bg-card border border-border rounded-lg px-3 py-2 shadow-lg">
-        <p className="text-xs text-muted-foreground mb-1">{label}</p>
-        <p className="text-sm font-medium">
+      <div className="bg-[#0d1117] border border-[#1a1f2e] rounded-lg px-3 py-2 shadow-xl">
+        <p className="text-xs text-zinc-400 mb-1">{label}</p>
+        <p className="text-sm font-semibold" style={{ color: CHART_GREEN }}>
           {chartMode === 'cumulative'
             ? `${payload[0].value.toLocaleString()} total users`
             : `${payload[0].value.toLocaleString()} new users`}
@@ -519,38 +526,37 @@ export default function MetricsPage() {
       {/* Stats Bar */}
       {!loading && !error && filteredUsers.length > 0 && (
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
-          <div className="bg-card border border-border rounded-lg p-4">
-            <p className="text-xs text-muted-foreground mb-1">Total Users</p>
-            <p className="text-2xl font-semibold">{stats.totalInRange.toLocaleString()}</p>
+          <div className="bg-[#0d1117] border border-[#1a1f2e] rounded-lg p-4">
+            <p className="text-xs text-zinc-500 mb-1">Total Users</p>
+            <p className="text-2xl font-semibold" style={{ color: CHART_GREEN }}>{stats.totalInRange.toLocaleString()}</p>
           </div>
-          <div className="bg-card border border-border rounded-lg p-4">
-            <p className="text-xs text-muted-foreground mb-1">Time Periods</p>
-            <p className="text-2xl font-semibold">{chartData.length}</p>
-            <p className="text-xs text-muted-foreground">{stats.granLabel}s</p>
+          <div className="bg-[#0d1117] border border-[#1a1f2e] rounded-lg p-4">
+            <p className="text-xs text-zinc-500 mb-1">Time Periods</p>
+            <p className="text-2xl font-semibold text-zinc-200">{chartData.length}</p>
+            <p className="text-xs text-zinc-500">{stats.granLabel}s</p>
           </div>
-          <div className="bg-card border border-border rounded-lg p-4">
-            <p className="text-xs text-muted-foreground mb-1">Avg per {stats.granLabel}</p>
-            <p className="text-2xl font-semibold">{stats.avgPerPeriod}</p>
+          <div className="bg-[#0d1117] border border-[#1a1f2e] rounded-lg p-4">
+            <p className="text-xs text-zinc-500 mb-1">Avg per {stats.granLabel}</p>
+            <p className="text-2xl font-semibold text-zinc-200">{stats.avgPerPeriod}</p>
           </div>
-          <div className="bg-card border border-border rounded-lg p-4">
-            <p className="text-xs text-muted-foreground mb-1">Growth Rate</p>
+          <div className="bg-[#0d1117] border border-[#1a1f2e] rounded-lg p-4">
+            <p className="text-xs text-zinc-500 mb-1">Growth Rate</p>
             {stats.growthRate !== null ? (
               <p className={cn(
                 'text-2xl font-semibold',
-                stats.growthRate > 0 ? 'text-green-400' : stats.growthRate < 0 ? 'text-red-400' : ''
-              )}>
+              )} style={{ color: stats.growthRate > 0 ? CHART_GREEN : stats.growthRate < 0 ? '#ff5000' : '#9ca3af' }}>
                 {stats.growthRate > 0 ? '+' : ''}{stats.growthRate.toFixed(0)}%
               </p>
             ) : (
-              <p className="text-2xl font-semibold text-muted-foreground">—</p>
+              <p className="text-2xl font-semibold text-zinc-600">—</p>
             )}
-            <p className="text-xs text-muted-foreground">2nd half vs 1st half</p>
+            <p className="text-xs text-zinc-500">2nd half vs 1st half</p>
           </div>
         </div>
       )}
 
       {/* Chart */}
-      <div className="bg-card border border-border rounded-lg p-6">
+      <div className="bg-[#0d1117] border border-[#1a1f2e] rounded-lg p-6">
         {error ? (
           <div className="text-center py-16">
             <p className="text-red-400 mb-2">{error}</p>
@@ -563,11 +569,11 @@ export default function MetricsPage() {
           </div>
         ) : loading ? (
           <div className="text-center py-16">
-            <div className="inline-block animate-spin w-6 h-6 border-2 border-primary border-t-transparent rounded-full mb-3" />
-            <p className="text-muted-foreground text-sm">{fetchProgress || 'Loading...'}</p>
+            <div className="inline-block animate-spin w-6 h-6 border-2 rounded-full mb-3" style={{ borderColor: CHART_GREEN, borderTopColor: 'transparent' }} />
+            <p className="text-zinc-400 text-sm">{fetchProgress || 'Loading...'}</p>
           </div>
         ) : chartData.length === 0 ? (
-          <div className="text-center py-16 text-muted-foreground">
+          <div className="text-center py-16 text-zinc-500">
             <p>No users found in the selected date range</p>
           </div>
         ) : (
@@ -577,56 +583,58 @@ export default function MetricsPage() {
                 <AreaChart data={chartData} margin={{ top: 10, right: 10, left: 10, bottom: 0 }}>
                   <defs>
                     <linearGradient id="colorCumulative" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.3} />
-                      <stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0} />
+                      <stop offset="5%" stopColor={CHART_GREEN} stopOpacity={0.25} />
+                      <stop offset="50%" stopColor={CHART_GREEN} stopOpacity={0.08} />
+                      <stop offset="95%" stopColor={CHART_GREEN} stopOpacity={0} />
                     </linearGradient>
                   </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                  <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID} />
                   <XAxis
                     dataKey="date"
-                    tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }}
+                    tick={{ fontSize: 11, fill: CHART_AXIS }}
                     tickLine={false}
-                    axisLine={{ stroke: 'hsl(var(--border))' }}
+                    axisLine={{ stroke: CHART_GRID }}
                     interval="preserveStartEnd"
                   />
                   <YAxis
-                    tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }}
+                    tick={{ fontSize: 11, fill: CHART_AXIS }}
                     tickLine={false}
-                    axisLine={{ stroke: 'hsl(var(--border))' }}
+                    axisLine={{ stroke: CHART_GRID }}
                     allowDecimals={false}
                   />
-                  <Tooltip content={<CustomTooltip />} />
+                  <Tooltip content={<CustomTooltip />} cursor={{ stroke: CHART_GREEN_DIM }} />
                   <Area
                     type="monotone"
                     dataKey="cumulative"
-                    stroke="hsl(var(--primary))"
-                    strokeWidth={2}
+                    stroke={CHART_GREEN}
+                    strokeWidth={2.5}
                     fill="url(#colorCumulative)"
-                    dot={chartData.length <= 60}
+                    dot={chartData.length <= 60 ? { fill: CHART_GREEN, r: 3, strokeWidth: 0 } : false}
+                    activeDot={{ fill: CHART_GREEN_LIGHT, r: 5, strokeWidth: 2, stroke: '#0d1117' }}
                   />
                 </AreaChart>
               ) : (
                 <BarChart data={chartData} margin={{ top: 10, right: 10, left: 10, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                  <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID} />
                   <XAxis
                     dataKey="date"
-                    tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }}
+                    tick={{ fontSize: 11, fill: CHART_AXIS }}
                     tickLine={false}
-                    axisLine={{ stroke: 'hsl(var(--border))' }}
+                    axisLine={{ stroke: CHART_GRID }}
                     interval="preserveStartEnd"
                   />
                   <YAxis
-                    tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }}
+                    tick={{ fontSize: 11, fill: CHART_AXIS }}
                     tickLine={false}
-                    axisLine={{ stroke: 'hsl(var(--border))' }}
+                    axisLine={{ stroke: CHART_GRID }}
                     allowDecimals={false}
                   />
-                  <Tooltip content={<CustomTooltip />} />
+                  <Tooltip content={<CustomTooltip />} cursor={{ fill: CHART_GREEN_DIM }} />
                   <Bar
                     dataKey="count"
-                    fill="hsl(var(--primary))"
+                    fill={CHART_GREEN}
                     radius={[4, 4, 0, 0]}
-                    opacity={0.8}
+                    opacity={0.85}
                   />
                 </BarChart>
               )}
