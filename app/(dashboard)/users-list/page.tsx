@@ -13,9 +13,12 @@ type SortDir = 'asc' | 'desc';
 // ── Helpers ──────────────────────────────────────────────
 
 function timeAgo(dateString: string): string {
+  if (!dateString) return '—';
   const now = new Date();
   const date = new Date(dateString);
+  if (isNaN(date.getTime())) return '—';
   const seconds = Math.floor((now.getTime() - date.getTime()) / 1000);
+  if (seconds < 0) return 'just now'; // future dates (timezone edge case)
   if (seconds < 60) return 'just now';
   const minutes = Math.floor(seconds / 60);
   if (minutes < 60) return `${minutes}m ago`;
@@ -23,15 +26,23 @@ function timeAgo(dateString: string): string {
   if (hours < 24) return `${hours}h ago`;
   const days = Math.floor(hours / 24);
   if (days < 7) return `${days}d ago`;
-  return date.toLocaleDateString();
+  if (days < 30) return `${days}d ago`;
+  const months = Math.floor(days / 30);
+  if (months < 12) return `${months}mo ago`;
+  const years = Math.floor(months / 12);
+  return `${years}y ago`;
 }
 
 function formatDate(dateString: string): string {
+  if (!dateString) return '—';
   const date = new Date(dateString);
+  if (isNaN(date.getTime())) return dateString; // fallback to raw string
   return date.toLocaleDateString('en-US', {
     month: 'short',
     day: 'numeric',
     year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
   });
 }
 
@@ -53,15 +64,15 @@ function SortHeader({
   const active = currentKey === sortKey;
   return (
     <th
-      className="px-4 py-2 text-left text-xs font-medium text-muted-foreground cursor-pointer select-none hover:text-foreground transition-colors"
+      className="px-4 py-2 text-left text-xs font-medium text-muted-foreground cursor-pointer select-none hover:text-foreground transition-colors group"
       onClick={() => onSort(sortKey)}
     >
       <span className="inline-flex items-center gap-1">
         {label}
         {active ? (
-          <span className="text-foreground">{currentDir === 'asc' ? '↑' : '↓'}</span>
+          <span className="text-primary font-bold">{currentDir === 'asc' ? '↑' : '↓'}</span>
         ) : (
-          <span className="opacity-0 group-hover:opacity-30">↕</span>
+          <span className="opacity-0 group-hover:opacity-50 text-muted-foreground">↕</span>
         )}
       </span>
     </th>
