@@ -393,6 +393,24 @@ class ApiClient {
       body: JSON.stringify(request),
     });
   }
+
+  // Intercom
+  async getIntercomContact(userId: string): Promise<IntercomContact | null> {
+    try {
+      return await this.fetch<IntercomContact>(`/intercom/contacts/${userId}`);
+    } catch {
+      return null; // Endpoint may not exist yet
+    }
+  }
+
+  async getIntercomConversations(userId: string): Promise<IntercomConversation[]> {
+    try {
+      const result = await this.fetch<{ conversations: IntercomConversation[] }>(`/intercom/contacts/${userId}/conversations`);
+      return result.conversations;
+    } catch {
+      return []; // Endpoint may not exist yet
+    }
+  }
 }
 
 export interface HotelOpportunity {
@@ -897,6 +915,31 @@ export interface CreditAdjustmentResponse {
   amount_cents: number;
   transaction_type: string;
   description: string | null;
+}
+
+// Intercom types
+export interface IntercomContact {
+  intercom_id: string;
+  email: string | null;
+  name: string | null;
+  created_at: string | null;
+  last_seen_at: string | null;
+  browser: string | null;
+  os: string | null;
+  location: { city: string | null; country: string | null } | null;
+  tags: string[];
+  custom_attributes: Record<string, unknown>;
+}
+
+export interface IntercomConversation {
+  id: string;
+  state: string; // open, closed, snoozed
+  title: string | null;
+  created_at: string;
+  updated_at: string;
+  waiting_since: string | null;
+  source: { type: string; author: { name: string; type: string } } | null;
+  statistics: { last_contact_reply_at: string | null; last_admin_reply_at: string | null } | null;
 }
 
 export const api = new ApiClient(API_BASE);

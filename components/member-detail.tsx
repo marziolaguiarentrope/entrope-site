@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { cn } from '@/lib/utils';
 import {
   MemberSummary,
@@ -20,6 +20,8 @@ import {
   api,
   RawEmail,
   CreditAdjustmentRequest,
+  IntercomContact,
+  IntercomConversation,
 } from '@/lib/api';
 import { useAuth } from '@/contexts/auth-context';
 import { BookingEditInline } from './booking-edit-inline';
@@ -425,6 +427,137 @@ function CreditAdjustmentModal({
           </>
         )}
       </div>
+    </div>
+  );
+}
+
+// Intercom integration card
+function IntercomCard({ userId, email }: { userId: string; email: string | null }) {
+  const [contact, setContact] = useState<IntercomContact | null>(null);
+  const [conversations, setConversations] = useState<IntercomConversation[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function fetchIntercom() {
+      setLoading(true);
+      setError(null);
+      try {
+        const [contactData, convData] = await Promise.all([
+          api.getIntercomContact(userId),
+          api.getIntercomConversations(userId),
+        ]);
+        if (cancelled) return;
+        setContact(contactData);
+        setConversations(convData);
+      } catch {
+        if (!cancelled) setError('Failed to load Intercom data');
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    fetchIntercom();
+    return () => { cancelled = true; };
+  }, [userId]);
+
+  // Build Intercom deep link — opens the contact search by email in Intercom dashboard
+  const intercomSearchUrl = email
+    ? `https://app.intercom.com/a/apps/_/users/segments/all-users?searchTerm=${encodeURIComponent(email)}`
+    : null;
+
+  const intercomContactUrl = contact?.intercom_id
+    ? `https://app.intercom.com/a/apps/_/users/${contact.intercom_id}`
+    : null;
+
+  const profileUrl = intercomContactUrl || intercomSearchUrl;
+
+  const conversationStateColors: Record<string, string> = {
+    open: 'bg-blue-500/20 text-blue-400',
+    closed: 'bg-zinc-500/20 text-zinc-400',
+    snoozed: 'bg-yellow-500/20 text-yellow-400',
+  };
+
+  return (
+    <div className="space-y-3">
+      {/* Profile link */}
+      {profileUrl && (
+        <a
+          href={profileUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex items-center gap-2 px-3 py-2 bg-accent/50 hover:bg-accent rounded-lg transition-colors text-sm group"
+        >
+          <svg className="w-4 h-4 text-blue-400" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/>
+          </svg>
+          <span className="flex-1">View in Intercom</span>
+          <svg className="w-3.5 h-3.5 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+          </svg>
+        </a>
+      )}
+
+      {/* Contact details */}
+      {loading ? (
+        <p className="text-xs text-muted-foreground">Loading Intercom data...</p>
+      ) : error ? (
+        <p className="text-xs text-muted-foreground">{error}</p>
+      ) : contact ? (
+        <div className="space-y-2 text-sm">
+          {contact.last_seen_at && (
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Last seen</span>
+              <span>{timeAgo(contact.last_seen_at)}</span>
+            </div>
+          )}
+          {contact.location && (contact.location.city || contact.location.country) && (
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Location</span>
+              <span>{[contact.location.city, contact.location.country].filter(Boolean).join(', ')}</span>
+            </div>
+          )}
+          {contact.tags.length > 0 && (
+            <div className="flex flex-wrap gap-1 mt-1">
+              {contact.tags.map((tag) => (
+                <span key={tag} className="px-1.5 py-0.5 text-xs bg-accent rounded">{tag}</span>
+              ))}
+            </div>
+          )}
+        </div>
+      ) : (
+        <p className="text-xs text-muted-foreground">
+          {email ? 'No Intercom contact found' : 'No email to search Intercom'}
+        </p>
+      )}
+
+      {/* Recent conversations */}
+      {conversations.length > 0 && (
+        <div className="space-y-1.5">
+          <span className="text-xs text-muted-foreground font-medium">Recent Conversations</span>
+          {conversations.slice(0, 5).map((conv) => (
+            <a
+              key={conv.id}
+              href={`https://app.intercom.com/a/apps/_/inbox/inbox/all/conversations/${conv.id}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="block bg-accent/30 hover:bg-accent/50 rounded p-2 transition-colors"
+            >
+              <div className="flex items-center gap-2">
+                <span className={cn('px-1.5 py-0.5 text-[10px] rounded', conversationStateColors[conv.state] || 'bg-zinc-500/20 text-zinc-400')}>
+                  {conv.state}
+                </span>
+                <span className="text-xs truncate flex-1">
+                  {conv.title || conv.source?.author?.name || 'Conversation'}
+                </span>
+                <span className="text-[10px] text-muted-foreground shrink-0">{timeAgo(conv.updated_at)}</span>
+              </div>
+            </a>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -1437,6 +1570,12 @@ export function MemberDetail({
                 </div>
               )}
             </div>
+          </div>
+
+          {/* Intercom Card */}
+          <div className="bg-card border border-border rounded-lg p-4">
+            <h3 className="text-sm font-medium mb-3">Intercom</h3>
+            <IntercomCard userId={member.id} email={member.email} />
           </div>
 
           {context && (
