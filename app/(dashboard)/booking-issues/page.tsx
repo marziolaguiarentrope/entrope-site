@@ -13,6 +13,7 @@ import {
   RepricingPipelineIssue,
   RepricingPipelineResponse,
   RepricingIssueTypeInfo,
+  HotelMatchRequest,
   HotelMatchResult,
   MemberContext,
   BookingView,
@@ -659,13 +660,23 @@ function IssueActions({
 
   // --- Hotel match ---
 
+  // Extract hotel city from member context for geocoding
+  const bookingForContext = memberContext && typeof memberContext === 'object'
+    ? findBooking(memberContext, issue.booking_id)
+    : undefined;
+  const hotelCity = bookingForContext?.hotel?.hotel_city;
+
   async function handleMatchHotel() {
     if (!hotelName.trim()) return;
     setActionLoading('match');
     setActionResult(null);
     setMatchResults(null);
     try {
-      const result = await api.matchHotel({ hotel_name: hotelName.trim() });
+      const request: HotelMatchRequest = { hotel_name: hotelName.trim() };
+      if (hotelCity) {
+        request.address = hotelCity;
+      }
+      const result = await api.matchHotel(request);
       if (result.matches.length === 0) {
         setActionResult({ type: 'error', message: 'No matches found. Try a different hotel name.' });
       } else {
