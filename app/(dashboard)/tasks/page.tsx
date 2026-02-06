@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import Link from 'next/link';
 import { cn } from '@/lib/utils';
 import { api, Task, Escalation, HotelOpportunity } from '@/lib/api';
 import { TaskDetail } from '@/components/task-detail';
@@ -378,6 +379,14 @@ export default function TasksPage() {
           </div>
         ) : (
           <div>
+            {activeTab === 'flight_reprice' && (
+              <Link
+                href="/complete-repricings"
+                className="flex items-center justify-between px-4 py-2 bg-accent/30 border-b border-border text-sm text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors"
+              >
+                <span>View full repricings page with search, sort, and history →</span>
+              </Link>
+            )}
             {tasks.map((task) => (
               <TaskRow key={task.id} task={task} onClick={() => handleSelectTask(task)} />
             ))}

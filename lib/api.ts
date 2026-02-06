@@ -176,11 +176,13 @@ class ApiClient {
     status?: string;
     capability?: string;
     limit?: number;
+    skip?: number;
   }): Promise<TaskListResponse> {
     const searchParams = new URLSearchParams();
     if (params?.status) searchParams.set('status', params.status);
     if (params?.capability) searchParams.set('capability', params.capability);
     if (params?.limit) searchParams.set('limit', params.limit.toString());
+    if (params?.skip) searchParams.set('skip', params.skip.toString());
 
     const query = searchParams.toString();
     return this.fetch<TaskListResponse>(`/tasks/${query ? `?${query}` : ''}`);
