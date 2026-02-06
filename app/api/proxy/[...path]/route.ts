@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 
-const API_BASE = process.env.ADMIN_GATEWAY_URL || 'https://staging-admin-gateway.onrender.com';
+const API_BASE = process.env.ADMIN_GATEWAY_URL || 'https://prod-admin-gateway.onrender.com';
 const FETCH_TIMEOUT = 30000; // 30 seconds
 
 async function getIdToken(): Promise<string | null> {
