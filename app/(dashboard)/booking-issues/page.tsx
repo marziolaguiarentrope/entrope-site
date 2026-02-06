@@ -1,11 +1,11 @@
 'use client';
 
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import {
   RefreshCw, ChevronDown, ChevronRight, ExternalLink, Search,
   Mail, Database, Eye, Telescope, MessageSquare, CheckCircle2,
-  Loader2, Check, X,
+  Loader2, Check, X, Hotel, Plane, Clock, DollarSign,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import {
@@ -14,6 +14,13 @@ import {
   RepricingPipelineResponse,
   RepricingIssueTypeInfo,
   HotelMatchResult,
+  MemberContext,
+  BookingView,
+  WatchView,
+  HotelOpportunityView,
+  FlightOpportunityView,
+  FlightBookingView,
+  HotelBookingView,
 } from '@/lib/api';
 
 // ---------------------------------------------------------------------------
@@ -128,6 +135,440 @@ function truncateId(id: string): string {
   return `${id.slice(0, 8)}…`;
 }
 
+function formatMoney(amount: number | null | undefined, currency: string | null | undefined): string {
+  if (amount === null || amount === undefined) return 'N/A';
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: currency || 'USD',
+  }).format(amount / 100);
+}
+
+function formatTimeUntil(dateStr: string | null): string {
+  if (!dateStr) return 'N/A';
+  const now = new Date();
+  const date = new Date(dateStr);
+  const diffMs = date.getTime() - now.getTime();
+  if (diffMs < 0) return 'overdue';
+  const diffMins = Math.floor(diffMs / 60000);
+  if (diffMins < 60) return `in ${diffMins}m`;
+  const diffHours = Math.floor(diffMins / 60);
+  if (diffHours < 24) return `in ${diffHours}h`;
+  const diffDays = Math.floor(diffHours / 24);
+  return `in ${diffDays}d`;
+}
+
+function getBookingPrice(
+  flight: FlightBookingView | null,
+  hotel: HotelBookingView | null
+): { amount: number | null; currency: string } {
+  if (flight) {
+    if (flight.total_price?.amount !== undefined) return { amount: flight.total_price.amount, currency: flight.total_price.currency };
+    if (flight.customer_price !== undefined) return { amount: flight.customer_price, currency: flight.currency || 'USD' };
+  }
+  if (hotel) {
+    if (hotel.total_price?.amount !== undefined) return { amount: hotel.total_price.amount, currency: hotel.total_price.currency };
+    if (hotel.customer_price !== undefined) return { amount: hotel.customer_price, currency: hotel.currency || 'USD' };
+  }
+  return { amount: null, currency: 'USD' };
+}
+
+function getConfirmationCode(flight: FlightBookingView | null, hotel: HotelBookingView | null): string | null {
+  if (flight) return flight.confirmation_code ?? flight.confirmation_number ?? null;
+  if (hotel) return hotel.confirmation_code ?? hotel.confirmation_number ?? null;
+  return null;
+}
+
+function getBookingProvider(flight: FlightBookingView | null, hotel: HotelBookingView | null): string | null {
+  if (flight) return flight.booked_with ?? flight.booking_provider ?? null;
+  if (hotel) return hotel.booked_with ?? hotel.booking_provider ?? null;
+  return null;
+}
+
+function getWatchHealthStatus(watch: WatchView): { color: string; label: string; icon: string } {
+  if (!watch.last_result) {
+    return { color: 'bg-gray-500/20 text-gray-400', label: 'Pending', icon: '⚪' };
+  }
+  switch (watch.last_result) {
+    case 'success':
+      return { color: 'bg-green-500/20 text-green-400', label: 'Healthy', icon: '🟢' };
+    case 'empty':
+      return { color: 'bg-yellow-500/20 text-yellow-400', label: 'No Results', icon: '🟡' };
+    case 'timeout':
+    case 'supplier_error':
+      return { color: 'bg-red-500/20 text-red-400', label: 'Error', icon: '🔴' };
+    default:
+      return { color: 'bg-gray-500/20 text-gray-400', label: 'Unknown', icon: '⚪' };
+  }
+}
+
+// Find matching booking in member context
+function findBooking(ctx: MemberContext, bookingId: string | null): BookingView | undefined {
+  if (!bookingId) return undefined;
+  for (const trip of ctx.trips) {
+    const found = trip.bookings.find((b) => b.id === bookingId);
+    if (found) return found;
+  }
+  return undefined;
+}
+
+// Find matching watch in member context
+function findWatch(ctx: MemberContext, issue: RepricingPipelineIssue, booking?: BookingView): WatchView | undefined {
+  if (issue.watch_id) {
+    return ctx.watches.find((w) => w.id === issue.watch_id);
+  }
+  if (booking?.watch_id) {
+    return ctx.watches.find((w) => w.id === booking.watch_id);
+  }
+  if (issue.booking_id) {
+    return ctx.watches.find((w) => w.booking_id === issue.booking_id);
+  }
+  return undefined;
+}
+
+// Find matching opportunity in member context
+function findOpportunity(ctx: MemberContext, issue: RepricingPipelineIssue): HotelOpportunityView | FlightOpportunityView | undefined {
+  if (issue.opportunity_id) {
+    const ho = ctx.hotel_opportunities.find((o) => o.id === issue.opportunity_id);
+    if (ho) return ho;
+    return ctx.flight_opportunities.find((o) => o.id === issue.opportunity_id);
+  }
+  if (issue.booking_id) {
+    const ho = ctx.hotel_opportunities.find((o) => o.booking_id === issue.booking_id);
+    if (ho) return ho;
+    return ctx.flight_opportunities.find((o) => o.booking_id === issue.booking_id);
+  }
+  return undefined;
+}
+
+// Get a flight route string from booking
+function getFlightRoute(flight: FlightBookingView): string {
+  if (flight.legs?.length > 0) {
+    const first = flight.legs[0];
+    if (first.segments?.length > 0) {
+      const origin = first.segments[0].origin;
+      const dest = first.segments[first.segments.length - 1].destination;
+      return `${origin} → ${dest}`;
+    }
+  }
+  return 'Unknown route';
+}
+
+// Get inline booking summary for collapsed rows
+function getBookingSummary(ctx: MemberContext | undefined, bookingId: string | null): string | null {
+  if (!ctx || typeof ctx !== 'object' || !bookingId) return null;
+  const booking = findBooking(ctx, bookingId);
+  if (!booking) return null;
+  if (booking.hotel?.hotel_name) return booking.hotel.hotel_name;
+  if (booking.flight) return getFlightRoute(booking.flight);
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// Context panel — shows booking, watch, and opportunity details
+// ---------------------------------------------------------------------------
+
+function IssueContextPanel({
+  issue,
+  memberContext,
+}: {
+  issue: RepricingPipelineIssue;
+  memberContext: MemberContext | 'loading' | 'error' | undefined;
+}) {
+  if (!memberContext) return null;
+
+  if (memberContext === 'loading') {
+    return (
+      <div className="mt-3 pt-3 border-t border-border/30">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+          {[1, 2, 3].map((i) => (
+            <div key={i} className="bg-accent/20 rounded-lg p-3 border border-border/50 animate-pulse space-y-2">
+              <div className="h-4 w-24 bg-accent rounded" />
+              <div className="h-3 w-40 bg-accent rounded" />
+              <div className="h-3 w-32 bg-accent rounded" />
+              <div className="h-3 w-36 bg-accent rounded" />
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  if (memberContext === 'error') {
+    return (
+      <div className="mt-3 pt-3 border-t border-border/30">
+        <p className="text-xs text-muted-foreground">Could not load member context.</p>
+      </div>
+    );
+  }
+
+  const booking = findBooking(memberContext, issue.booking_id);
+  const watch = findWatch(memberContext, issue, booking);
+  const opportunity = findOpportunity(memberContext, issue);
+
+  if (!booking && !watch && !opportunity) {
+    return (
+      <div className="mt-3 pt-3 border-t border-border/30">
+        <p className="text-xs text-muted-foreground">No matching booking, watch, or opportunity found in member context.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-3 pt-3 border-t border-border/30">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+        {/* Booking card */}
+        {booking && (
+          <div className="bg-accent/20 rounded-lg p-3 border border-border/50">
+            <div className="flex items-center gap-2 mb-2">
+              {booking.type === 'HOTEL' ? (
+                <Hotel className="size-3.5 text-purple-400" />
+              ) : (
+                <Plane className="size-3.5 text-blue-400" />
+              )}
+              <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Booking</span>
+              <span className={cn(
+                'ml-auto px-1.5 py-0.5 text-[10px] font-medium rounded',
+                booking.status === 'CONFIRMED' ? 'bg-green-500/20 text-green-400' :
+                booking.status === 'CANCELLED' ? 'bg-red-500/20 text-red-400' :
+                'bg-yellow-500/20 text-yellow-400'
+              )}>
+                {booking.status}
+              </span>
+            </div>
+
+            {booking.hotel && (
+              <div className="space-y-1 text-xs">
+                <div className="font-medium text-sm">{booking.hotel.hotel_name || 'Unknown Hotel'}</div>
+                {booking.hotel.hotel_city && (
+                  <div className="text-muted-foreground">{booking.hotel.hotel_city}</div>
+                )}
+                <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 mt-1.5">
+                  <div><span className="text-muted-foreground">Check-in:</span> {booking.hotel.check_in ? new Date(booking.hotel.check_in).toLocaleDateString() : 'N/A'}</div>
+                  <div><span className="text-muted-foreground">Check-out:</span> {booking.hotel.check_out ? new Date(booking.hotel.check_out).toLocaleDateString() : 'N/A'}</div>
+                  {booking.hotel.nights > 0 && <div><span className="text-muted-foreground">Nights:</span> {booking.hotel.nights}</div>}
+                  {booking.hotel.room_type && <div><span className="text-muted-foreground">Room:</span> {booking.hotel.room_type}</div>}
+                </div>
+                <div className="mt-1.5 pt-1.5 border-t border-border/30 grid grid-cols-2 gap-x-3 gap-y-0.5">
+                  <div>
+                    <span className="text-muted-foreground">Price:</span>{' '}
+                    {formatMoney(getBookingPrice(null, booking.hotel).amount, getBookingPrice(null, booking.hotel).currency)}
+                  </div>
+                  {getConfirmationCode(null, booking.hotel) && (
+                    <div><span className="text-muted-foreground">Conf:</span> {getConfirmationCode(null, booking.hotel)}</div>
+                  )}
+                  {getBookingProvider(null, booking.hotel) && (
+                    <div><span className="text-muted-foreground">Via:</span> {getBookingProvider(null, booking.hotel)}</div>
+                  )}
+                  <div>
+                    <span className="text-muted-foreground">Hotel ID:</span>{' '}
+                    {booking.hotel.hotel_id ? (
+                      <span className="font-mono">{truncateId(booking.hotel.hotel_id)}</span>
+                    ) : (
+                      <span className="text-red-400 font-medium">missing</span>
+                    )}
+                  </div>
+                  {booking.hotel.refundability && (
+                    <div>
+                      <span className="text-muted-foreground">Refundable:</span>{' '}
+                      <span className={booking.hotel.refundability === 'REFUNDABLE' ? 'text-green-400' : 'text-yellow-400'}>
+                        {booking.hotel.refundability}
+                      </span>
+                    </div>
+                  )}
+                </div>
+                <div className="mt-1 flex items-center gap-1.5">
+                  <span className="text-muted-foreground">Repriceable:</span>{' '}
+                  {booking.hotel.is_repriceable ? (
+                    <span className="text-green-400 font-medium">Yes</span>
+                  ) : (
+                    <span className="text-red-400">{booking.hotel.reprice_ineligible_reason || 'No'}</span>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {booking.flight && (
+              <div className="space-y-1 text-xs">
+                <div className="font-medium text-sm">{getFlightRoute(booking.flight)}</div>
+                {booking.flight.legs?.length > 0 && booking.flight.legs[0].segments?.length > 0 && (
+                  <div className="text-muted-foreground">
+                    {booking.flight.legs[0].segments[0].airline_name || booking.flight.legs[0].segments[0].airline}
+                    {booking.flight.legs[0].segments[0].departure && (
+                      <> · {new Date(booking.flight.legs[0].segments[0].departure).toLocaleDateString()}</>
+                    )}
+                    {booking.flight.legs[0].segments[0].cabin && (
+                      <> · {booking.flight.legs[0].segments[0].cabin}</>
+                    )}
+                  </div>
+                )}
+                <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 mt-1.5">
+                  <div>
+                    <span className="text-muted-foreground">Price:</span>{' '}
+                    {formatMoney(getBookingPrice(booking.flight, null).amount, getBookingPrice(booking.flight, null).currency)}
+                  </div>
+                  {getConfirmationCode(booking.flight, null) && (
+                    <div><span className="text-muted-foreground">Conf:</span> {getConfirmationCode(booking.flight, null)}</div>
+                  )}
+                  {getBookingProvider(booking.flight, null) && (
+                    <div><span className="text-muted-foreground">Via:</span> {getBookingProvider(booking.flight, null)}</div>
+                  )}
+                </div>
+                <div className="mt-1 flex items-center gap-1.5">
+                  <span className="text-muted-foreground">Repriceable:</span>{' '}
+                  {booking.flight.is_repriceable ? (
+                    <span className="text-green-400 font-medium">Yes</span>
+                  ) : (
+                    <span className="text-red-400">{booking.flight.reprice_ineligible_reason || 'No'}</span>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Watch card */}
+        {watch && (
+          <div className="bg-accent/20 rounded-lg p-3 border border-border/50">
+            <div className="flex items-center gap-2 mb-2">
+              <Eye className="size-3.5 text-cyan-400" />
+              <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Watch</span>
+              <span className={cn('ml-auto px-1.5 py-0.5 text-[10px] font-medium rounded', {
+                'bg-green-500/20 text-green-400': watch.status?.toLowerCase() === 'active',
+                'bg-yellow-500/20 text-yellow-400': watch.status?.toLowerCase() === 'paused',
+                'bg-gray-500/20 text-gray-400': watch.status?.toLowerCase() === 'ended',
+              })}>
+                {watch.status}
+              </span>
+            </div>
+
+            {(() => {
+              const health = getWatchHealthStatus(watch);
+              return (
+                <div className={cn('inline-flex items-center gap-1.5 px-2 py-1 rounded text-xs font-medium mb-2', health.color)}>
+                  <span>{health.icon}</span>
+                  {health.label}
+                </div>
+              );
+            })()}
+
+            <div className="space-y-1 text-xs">
+              {watch.latest_observed_price && (
+                <div className="flex items-center gap-1.5">
+                  <DollarSign className="size-3 text-muted-foreground" />
+                  <span className="text-muted-foreground">Last price:</span>
+                  <span className="font-medium">{formatMoney(watch.latest_observed_price.amount, watch.latest_observed_price.currency)}</span>
+                  {watch.latest_observed_at && <span className="text-muted-foreground">({timeAgo(watch.latest_observed_at)})</span>}
+                </div>
+              )}
+              {watch.last_executed_at && (
+                <div className="flex items-center gap-1.5">
+                  <Clock className="size-3 text-muted-foreground" />
+                  <span className="text-muted-foreground">Last check:</span>
+                  <span>{timeAgo(watch.last_executed_at)}</span>
+                  {watch.last_result && watch.last_result !== 'success' && (
+                    <span className="text-red-400">({watch.last_result})</span>
+                  )}
+                </div>
+              )}
+              {watch.next_due_at && watch.status?.toLowerCase() === 'active' && (
+                <div className="flex items-center gap-1.5">
+                  <Clock className="size-3 text-muted-foreground" />
+                  <span className="text-muted-foreground">Next:</span>
+                  <span>{formatTimeUntil(watch.next_due_at)}</span>
+                </div>
+              )}
+              {watch.threshold_amount != null && watch.threshold_currency && (
+                <div className="flex items-center gap-1.5">
+                  <DollarSign className="size-3 text-muted-foreground" />
+                  <span className="text-muted-foreground">Threshold:</span>
+                  <span>{formatMoney(watch.threshold_amount, watch.threshold_currency)}</span>
+                </div>
+              )}
+              {watch.watch_type && (
+                <div className="text-muted-foreground mt-1">Type: {watch.watch_type}</div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Opportunity card */}
+        {opportunity && (
+          <div className="bg-accent/20 rounded-lg p-3 border border-border/50">
+            <div className="flex items-center gap-2 mb-2">
+              <MessageSquare className="size-3.5 text-orange-400" />
+              <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Opportunity</span>
+              <span className="ml-auto px-1.5 py-0.5 text-[10px] font-medium rounded bg-orange-500/20 text-orange-400">
+                {opportunity.status}
+              </span>
+            </div>
+
+            <div className="space-y-1.5 text-xs">
+              {/* Price comparison */}
+              {(opportunity.old_price != null || opportunity.new_price != null) && (
+                <div className="flex items-center gap-2">
+                  {opportunity.old_price != null && (
+                    <span className="line-through text-muted-foreground">
+                      {formatMoney(opportunity.old_price, opportunity.savings_currency || 'USD')}
+                    </span>
+                  )}
+                  {opportunity.new_price != null && (
+                    <span className="text-green-400 font-medium">
+                      {formatMoney(opportunity.new_price, opportunity.savings_currency || 'USD')}
+                    </span>
+                  )}
+                </div>
+              )}
+
+              {/* Savings badge */}
+              {opportunity.savings_amount != null && (
+                <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-green-500/15 text-green-400 text-xs font-medium">
+                  Save {formatMoney(opportunity.savings_amount, opportunity.savings_currency || 'USD')}
+                </div>
+              )}
+
+              {/* Hotel-specific fields */}
+              {'hotel_name' in opportunity && (opportunity as HotelOpportunityView).hotel_name && (
+                <div className="text-muted-foreground">
+                  {(opportunity as HotelOpportunityView).hotel_name}
+                </div>
+              )}
+              {'payment_status' in opportunity && (
+                <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 mt-1">
+                  {(opportunity as HotelOpportunityView).payment_status && (
+                    <div>
+                      <span className="text-muted-foreground">Payment:</span>{' '}
+                      {(opportunity as HotelOpportunityView).payment_status}
+                    </div>
+                  )}
+                  {(opportunity as HotelOpportunityView).payment_amount != null && (
+                    <div>
+                      <span className="text-muted-foreground">Amount:</span>{' '}
+                      {formatMoney(
+                        (opportunity as HotelOpportunityView).payment_amount,
+                        (opportunity as HotelOpportunityView).payment_currency || 'USD'
+                      )}
+                    </div>
+                  )}
+                  {(opportunity as HotelOpportunityView).cancellation_capability && (
+                    <div>
+                      <span className="text-muted-foreground">Cancel:</span>{' '}
+                      {(opportunity as HotelOpportunityView).cancellation_capability}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {opportunity.created_at && (
+                <div className="text-muted-foreground mt-1">{timeAgo(opportunity.created_at)}</div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Action bar — contextual actions per issue type
 // ---------------------------------------------------------------------------
@@ -135,9 +576,11 @@ function truncateId(id: string): string {
 function IssueActions({
   issue,
   onActionComplete,
+  memberContext,
 }: {
   issue: RepricingPipelineIssue;
   onActionComplete: () => void;
+  memberContext?: MemberContext | 'loading' | 'error';
 }) {
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [actionResult, setActionResult] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
@@ -151,6 +594,16 @@ function IssueActions({
   const [showAirlineForm, setShowAirlineForm] = useState(false);
   const [refundableInput, setRefundableInput] = useState<boolean | null>(null);
   const [showRefundForm, setShowRefundForm] = useState(false);
+
+  // Pre-populate hotel name from member context
+  useEffect(() => {
+    if (showMatchForm && issue.reason === 'No hotel ID' && !hotelName && memberContext && typeof memberContext === 'object') {
+      const booking = findBooking(memberContext, issue.booking_id);
+      if (booking?.hotel?.hotel_name) {
+        setHotelName(booking.hotel.hotel_name);
+      }
+    }
+  }, [showMatchForm, memberContext, issue.booking_id, issue.reason, hotelName]);
 
   const clearResult = () => setTimeout(() => setActionResult(null), 4000);
 
@@ -619,13 +1072,29 @@ function IssueRow({
   isExpanded,
   onToggle,
   onActionComplete,
+  memberContext,
+  onRequestContext,
 }: {
   issue: RepricingPipelineIssue;
   stage: PipelineStage | undefined;
   isExpanded: boolean;
   onToggle: () => void;
   onActionComplete: () => void;
+  memberContext: MemberContext | 'loading' | 'error' | undefined;
+  onRequestContext: (userId: string) => void;
 }) {
+  // Fetch member context when row is expanded
+  useEffect(() => {
+    if (isExpanded) {
+      onRequestContext(issue.user_id);
+    }
+  }, [isExpanded, issue.user_id, onRequestContext]);
+
+  const bookingSummary = useMemo(() => {
+    if (!memberContext || typeof memberContext !== 'object') return null;
+    return getBookingSummary(memberContext, issue.booking_id);
+  }, [memberContext, issue.booking_id]);
+
   return (
     <>
       <tr
@@ -653,12 +1122,17 @@ function IssueRow({
         </td>
         <td className="py-3 px-4">
           {issue.booking_id ? (
-            <span className="text-sm font-mono">
-              <span className="text-muted-foreground">
-                {issue.booking_type === 'hotel' ? 'H' : issue.booking_type === 'flight' ? 'F' : '?'}-
+            <div>
+              <span className="text-sm font-mono">
+                <span className="text-muted-foreground">
+                  {issue.booking_type === 'hotel' ? 'H' : issue.booking_type === 'flight' ? 'F' : '?'}-
+                </span>
+                {truncateId(issue.booking_id)}
               </span>
-              {truncateId(issue.booking_id)}
-            </span>
+              {bookingSummary && (
+                <div className="text-xs text-muted-foreground truncate max-w-48">{bookingSummary}</div>
+              )}
+            </div>
           ) : (
             <span className="text-sm text-muted-foreground">—</span>
           )}
@@ -762,8 +1236,11 @@ function IssueRow({
               )}
             </div>
 
+            {/* Rich member context */}
+            <IssueContextPanel issue={issue} memberContext={memberContext} />
+
             {/* Contextual actions */}
-            <IssueActions issue={issue} onActionComplete={onActionComplete} />
+            <IssueActions issue={issue} onActionComplete={onActionComplete} memberContext={memberContext} />
           </td>
         </tr>
       )}
@@ -782,6 +1259,8 @@ function StageSection({
   setExpandedId,
   getRowKey,
   onActionComplete,
+  getMemberContext,
+  onRequestContext,
 }: {
   stage: PipelineStage;
   issues: RepricingPipelineIssue[];
@@ -789,6 +1268,8 @@ function StageSection({
   setExpandedId: (id: string | null) => void;
   getRowKey: (issue: RepricingPipelineIssue, index: number) => string;
   onActionComplete: () => void;
+  getMemberContext: (userId: string) => MemberContext | 'loading' | 'error' | undefined;
+  onRequestContext: (userId: string) => void;
 }) {
   const [collapsed, setCollapsed] = useState(false);
   const Icon = stage.icon;
@@ -839,6 +1320,8 @@ function StageSection({
                     isExpanded={expandedId === key}
                     onToggle={() => setExpandedId(expandedId === key ? null : key)}
                     onActionComplete={onActionComplete}
+                    memberContext={getMemberContext(issue.user_id)}
+                    onRequestContext={onRequestContext}
                   />
                 );
               })}
@@ -863,9 +1346,34 @@ export default function BookingIssuesPage() {
   const [userIdInput, setUserIdInput] = useState('');
   const [activeUserId, setActiveUserId] = useState<string | undefined>(undefined);
 
+  // Member context cache — keyed by user_id
+  const memberContextCache = useRef<Map<string, MemberContext | 'loading' | 'error'>>(new Map());
+  const [, forceUpdate] = useState(0);
+
+  const fetchMemberContext = useCallback(async (userId: string) => {
+    const cache = memberContextCache.current;
+    if (cache.has(userId)) return;
+
+    cache.set(userId, 'loading');
+    forceUpdate((n) => n + 1);
+
+    try {
+      const ctx = await api.getMember(userId);
+      cache.set(userId, ctx);
+    } catch {
+      cache.set(userId, 'error');
+    }
+    forceUpdate((n) => n + 1);
+  }, []);
+
+  const getMemberContext = useCallback((userId: string): MemberContext | 'loading' | 'error' | undefined => {
+    return memberContextCache.current.get(userId);
+  }, []);
+
   const fetchData = useCallback(async (userId?: string) => {
     setLoading(true);
     setError(null);
+    memberContextCache.current.clear();
     try {
       const response = await api.getRepricingPipelineIssues(userId);
       setData(response);
@@ -1106,6 +1614,8 @@ export default function BookingIssuesPage() {
           setExpandedId={setExpandedId}
           getRowKey={getRowKey}
           onActionComplete={handleRefresh}
+          getMemberContext={getMemberContext}
+          onRequestContext={fetchMemberContext}
         />
       ))}
     </div>
