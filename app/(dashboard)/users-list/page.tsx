@@ -92,33 +92,34 @@ function toMemberSummary(user: UserListItem): MemberSummary {
 function MembershipBadge({ status, plan }: { status: string | null; plan: string | null }) {
   if (!status) return <span className="text-xs text-muted-foreground">—</span>;
 
-  // Detect free vs paid: if no plan name, or plan name contains "free", treat as free
+  // Determine membership tier from plan name
   const planLower = (plan || '').toLowerCase();
-  const isFree = !plan || planLower === 'free' || planLower.includes('free');
-  const isPaid = !isFree && status === 'active';
+  const hasPaidPlan = !!plan && !planLower.includes('free');
 
   let label: string;
   let colorClass: string;
 
-  if (isPaid) {
-    label = plan!;
-    colorClass = 'bg-green-500/20 text-green-400 border border-green-500/30';
-  } else if (isFree && status === 'active') {
-    label = 'Free';
-    colorClass = 'bg-zinc-500/10 text-zinc-500 border border-zinc-500/20';
-  } else if (status === 'cancelled') {
+  if (status === 'cancelled') {
     label = plan || 'Cancelled';
     colorClass = 'bg-red-500/20 text-red-400 border border-red-500/30';
   } else if (status === 'trialing') {
     label = plan || 'Trial';
     colorClass = 'bg-blue-500/20 text-blue-400 border border-blue-500/30';
+  } else if (hasPaidPlan) {
+    // Paid member with a real plan name
+    label = plan!;
+    colorClass = 'bg-green-500/20 text-green-400 border border-green-500/30';
   } else {
-    label = plan || status;
+    // No plan or free plan — show "Free"
+    label = 'Free';
     colorClass = 'bg-zinc-500/10 text-zinc-500 border border-zinc-500/20';
   }
 
   return (
-    <span className={cn('inline-block px-2 py-0.5 text-xs rounded font-medium', colorClass)}>
+    <span
+      className={cn('inline-block px-2 py-0.5 text-xs rounded font-medium', colorClass)}
+      title={`status: ${status}, plan: ${plan ?? 'null'}`}
+    >
       {label}
     </span>
   );
@@ -357,11 +358,23 @@ export default function UsersListPage() {
 
   return (
     <div>
-      <div className="mb-6">
-        <h1 className="text-2xl font-semibold">Users List</h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          Browse all users with pagination, filtering, and search
-        </p>
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h1 className="text-2xl font-semibold">Users List</h1>
+          <p className="text-sm text-muted-foreground mt-1">
+            Browse all users with pagination, filtering, and search
+          </p>
+        </div>
+        <button
+          onClick={fetchUsers}
+          disabled={loading}
+          className="px-3 py-2 text-sm font-medium bg-accent/50 rounded-lg hover:bg-accent disabled:opacity-30 transition-colors flex items-center gap-1.5"
+        >
+          <svg className={cn("w-4 h-4", loading && "animate-spin")} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M21 12a9 9 0 1 1-9-9" strokeLinecap="round" />
+          </svg>
+          Refresh
+        </button>
       </div>
 
       {/* Search + Status Filters */}
