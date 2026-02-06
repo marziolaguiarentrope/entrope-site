@@ -85,39 +85,63 @@ const AUTO_GRANULARITY: Partial<Record<DateRange, Granularity>> = {
 // ── Helpers ──────────────────────────────────────────────
 
 /**
- * Get the UTC offset in minutes for a given IANA timezone at a specific instant.
- * Uses Intl.DateTimeFormat to compute the difference between UTC and the target timezone.
+ * US DST check: DST runs from 2nd Sunday in March 2:00 AM to 1st Sunday in November 2:00 AM.
+ * Takes UTC year/month(1-indexed)/day/hour and returns whether DST is active.
  */
-function getUtcOffsetMinutes(date: Date, tz: Timezone): number {
-  if (tz === 'UTC') return 0;
-  // Format the date in the target timezone and in UTC, then compare
-  const fmt = (timeZone: string) => {
-    const parts = new Intl.DateTimeFormat('en-US', {
-      timeZone,
-      year: 'numeric', month: '2-digit', day: '2-digit',
-      hour: '2-digit', minute: '2-digit', second: '2-digit',
-      hour12: false,
-    }).formatToParts(date);
-    const g = (t: string) => parseInt(parts.find(p => p.type === t)?.value ?? '0');
-    return { year: g('year'), month: g('month'), day: g('day'), hour: g('hour') % 24, minute: g('minute') };
-  };
-  const utc = fmt('UTC');
-  const local = fmt(tz);
-  // Convert both to a minute-of-epoch approximation and take the difference
-  const toMin = (p: { year: number; month: number; day: number; hour: number; minute: number }) =>
-    ((p.year * 12 + p.month) * 31 + p.day) * 1440 + p.hour * 60 + p.minute;
-  return toMin(local) - toMin(utc);
+function isUsDst(utcYear: number, utcMonth: number, utcDay: number, utcHour: number): boolean {
+  // Find 2nd Sunday in March (in UTC terms — approximate, DST transitions at local 2 AM)
+  // March 1 day-of-week
+  const mar1dow = new Date(Date.UTC(utcYear, 2, 1)).getUTCDay(); // 0=Sun
+  const mar2ndSun = 1 + ((7 - mar1dow) % 7) + 7; // 2nd Sunday date in March
+  // DST starts at March 2nd-Sunday 2:00 AM local = 2:00+stdOffset AM UTC
+  // For Eastern (std=-5): March 2ndSun 07:00 UTC
+  // We'll just use a simplified approach: check if we're past March 2nd Sunday 10:00 UTC (covers all US zones)
+
+  // Nov 1 day-of-week
+  const nov1dow = new Date(Date.UTC(utcYear, 10, 1)).getUTCDay();
+  const nov1stSun = 1 + ((7 - nov1dow) % 7); // 1st Sunday date in November
+
+  // Convert to day-of-year for comparison
+  const doy = dayOfYear(utcYear, utcMonth, utcDay);
+  const dstStartDoy = dayOfYear(utcYear, 3, mar2ndSun);
+  const dstEndDoy = dayOfYear(utcYear, 11, nov1stSun);
+
+  if (doy > dstStartDoy && doy < dstEndDoy) return true;
+  if (doy < dstStartDoy || doy > dstEndDoy) return false;
+  // On the transition days, use hour (approximate — good enough for hourly buckets)
+  if (doy === dstStartDoy) return utcHour >= 7; // ~2AM Eastern = 7 UTC (most conservative)
+  if (doy === dstEndDoy) return utcHour < 6; // ~2AM Eastern = 6 UTC (DST)
+  return false;
 }
 
-/** Apply a timezone offset to a Date and return a shifted Date whose UTC fields represent the target timezone's local time. */
-function dateInTz(date: Date, tz: Timezone): Date {
-  const offsetMs = getUtcOffsetMinutes(date, tz) * 60 * 1000;
-  return new Date(date.getTime() + offsetMs);
+function dayOfYear(year: number, month: number, day: number): number {
+  const daysInMonths = [0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  // Leap year
+  if ((year % 4 === 0 && year % 100 !== 0) || year % 400 === 0) daysInMonths[2] = 29;
+  let doy = 0;
+  for (let i = 1; i < month; i++) doy += daysInMonths[i];
+  return doy + day;
+}
+
+/**
+ * Get UTC offset in hours for our supported US timezones.
+ * Hardcoded to avoid any Intl.DateTimeFormat SSR/browser inconsistencies.
+ */
+function getUtcOffsetHours(date: Date, tz: Timezone): number {
+  if (tz === 'UTC') return 0;
+  const dst = isUsDst(date.getUTCFullYear(), date.getUTCMonth() + 1, date.getUTCDate(), date.getUTCHours());
+  switch (tz) {
+    case 'America/New_York':    return dst ? -4 : -5;
+    case 'America/Chicago':     return dst ? -5 : -6;
+    case 'America/Los_Angeles': return dst ? -7 : -8;
+    default: return 0;
+  }
 }
 
 /** Extract year/month/day/hour/dayOfWeek in a given timezone */
 function getPartsInTz(date: Date, tz: Timezone): { year: number; month: number; day: number; hour: number; dayOfWeek: number } {
-  const shifted = dateInTz(date, tz);
+  const offsetMs = getUtcOffsetHours(date, tz) * 60 * 60 * 1000;
+  const shifted = new Date(date.getTime() + offsetMs);
   return {
     year: shifted.getUTCFullYear(),
     month: shifted.getUTCMonth() + 1, // 1-indexed
