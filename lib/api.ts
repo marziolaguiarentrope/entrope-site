@@ -394,6 +394,12 @@ class ApiClient {
     });
   }
 
+  // Repricing pipeline health
+  async getRepricingPipelineIssues(userId?: string): Promise<RepricingPipelineResponse> {
+    const params = userId ? `?user_id=${userId}` : '';
+    return this.fetch<RepricingPipelineResponse>(`/repricing-pipeline/issues/${params}`);
+  }
+
   // Intercom
   async getIntercomContact(userId: string): Promise<IntercomContact | null> {
     try {
@@ -958,6 +964,33 @@ export interface IntercomConversation {
   waiting_since: string | null;
   source: { type: string; author: { name: string; type: string } } | null;
   statistics: { last_contact_reply_at: string | null; last_admin_reply_at: string | null } | null;
+}
+
+// Repricing pipeline health types
+export interface RepricingIssueTypeInfo {
+  type: string;
+  label: string;
+  priority: number;
+}
+
+export interface RepricingPipelineIssue {
+  issue_type: string;
+  label: string;
+  user_id: string;
+  booking_id: string | null;
+  booking_type: string | null;
+  opportunity_id: string | null;
+  watch_id: string | null;
+  reason: string | null;
+  status: string | null;
+  parsed_result: Record<string, unknown> | null;
+  approved_at: string | null;
+  created_at: string | null;
+}
+
+export interface RepricingPipelineResponse {
+  issue_types: RepricingIssueTypeInfo[];
+  issues: RepricingPipelineIssue[];
 }
 
 // Customer.io types
