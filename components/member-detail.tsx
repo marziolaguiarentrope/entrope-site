@@ -164,7 +164,7 @@ function CreditAdjustmentModal({
   currentCurrency: string;
   operatorEmail: string;
   onClose: () => void;
-  onSuccess: (deltaDollars: number) => void;
+  onSuccess: () => void;
 }) {
   // Ensure currentBalance is always a number (API may return string)
   const safeBalance = Number(currentBalance) || 0;
@@ -224,7 +224,7 @@ function CreditAdjustmentModal({
       };
 
       await api.adjustCredit(requestData);
-      onSuccess(deltaDollars);
+      onSuccess();
       onClose();
     } catch (err) {
       console.error('Credit adjustment failed:', err);
@@ -436,13 +436,10 @@ function UserSettingsCard({ context, userId, onRefresh }: { context: MemberConte
   const user = context.user;
   const { user: authUser } = useAuth();
   const [showCreditModal, setShowCreditModal] = useState(false);
-  // Track cumulative local adjustments since the backend balance endpoint
-  // doesn't reflect credit ledger changes immediately
-  const [localAdjustment, setLocalAdjustment] = useState(0);
 
   if (!user) return <p className="text-sm text-muted-foreground">No user settings available</p>;
 
-  const displayBalance = (Number(user.credit_balance) || 0) + localAdjustment;
+  const displayBalance = Number(user.credit_balance) || 0;
 
   return (
     <>
@@ -457,11 +454,6 @@ function UserSettingsCard({ context, userId, onRefresh }: { context: MemberConte
         <span className="text-muted-foreground">Credit Balance</span>
         <div className="flex items-center gap-2">
           <span>{formatMoney(displayBalance * 100, user.credit_currency)}</span>
-          {localAdjustment !== 0 && (
-            <span className="text-xs text-yellow-400" title="Balance includes local adjustments not yet synced to backend">
-              (adjusted)
-            </span>
-          )}
           <button
             onClick={() => setShowCreditModal(true)}
             className="px-2 py-0.5 text-xs bg-accent hover:bg-accent/80 rounded transition-colors"
@@ -505,8 +497,7 @@ function UserSettingsCard({ context, userId, onRefresh }: { context: MemberConte
         currentCurrency={user.credit_currency}
         operatorEmail={authUser?.email || 'unknown'}
         onClose={() => setShowCreditModal(false)}
-        onSuccess={(deltaDollars) => {
-          setLocalAdjustment(prev => prev + deltaDollars);
+        onSuccess={() => {
           onRefresh?.();
         }}
       />
