@@ -3,7 +3,7 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 
 const API_BASE = process.env.ADMIN_GATEWAY_URL || 'https://prod-admin-gateway.onrender.com';
-const FETCH_TIMEOUT = 30000; // 30 seconds
+const FETCH_TIMEOUT = 60000; // 60 seconds — Render cold starts can take 30-45s
 
 async function getIdToken(): Promise<string | null> {
   const session = await getServerSession(authOptions);

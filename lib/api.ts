@@ -1,6 +1,6 @@
 // Use local proxy to avoid CORS issues
 const API_BASE = '/api/proxy';
-const FETCH_TIMEOUT = 30000; // 30 seconds
+const FETCH_TIMEOUT = 60000; // 60 seconds — Render cold starts can take 30-45s
 
 export class ApiError extends Error {
   public status: number;
@@ -163,7 +163,7 @@ class ApiClient {
     } catch (error) {
       if (error instanceof ApiError) throw error;
       if (error instanceof DOMException && error.name === 'AbortError') {
-        throw new ApiError(0, 'Request timed out after 30 seconds');
+        throw new ApiError(0, 'Request timed out after 60 seconds — the backend may be waking up, please retry');
       }
       throw error;
     } finally {

@@ -1,9 +1,9 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
-import { api, Task, Escalation, HotelOpportunity } from '@/lib/api';
+import { api, Task, Escalation, HotelOpportunity, RawEmail } from '@/lib/api';
 import { TaskDetail } from '@/components/task-detail';
 import { EscalationDetail } from '@/components/escalation-detail';
 import { HotelOpportunityDetail } from '@/components/hotel-opportunity-detail';
@@ -245,20 +245,132 @@ export default function TasksPage() {
   const [taskDetailLoading, setTaskDetailLoading] = useState(false);
   const [selectedHotelOpportunity, setSelectedHotelOpportunity] = useState<HotelOpportunity | null>(null);
 
-  // Fetch full task details (with hydrated booking) when selecting a task
+  // Auto-claim email state (complete_booking optimization)
+  const [autoEmail, setAutoEmail] = useState<RawEmail | null>(null);
+  const [autoEmailLoading, setAutoEmailLoading] = useState(false);
+  const [autoEmailError, setAutoEmailError] = useState<string | null>(null);
+  const advanceTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  function resetEmailState() {
+    setAutoEmail(null);
+    setAutoEmailLoading(false);
+    setAutoEmailError(null);
+  }
+
+  // Auto-claim + fetch email for complete_booking tasks
+  async function handleSelectCompleteBooking(task: Task) {
+    resetEmailState();
+    setTaskDetailLoading(true);
+
+    if (task.status === 'pending') {
+      // Auto-claim + getTask in parallel
+      try {
+        const [claimedTask, fullTask] = await Promise.all([
+          api.claimTask(task.id),
+          api.getTask(task.id),
+        ]);
+        // Merge: hydrated booking from fullTask, claimed status from claimedTask
+        const merged = { ...fullTask, status: claimedTask.status, claimed_by: claimedTask.claimed_by, claimed_at: claimedTask.claimed_at };
+        setSelectedTask(merged);
+        // Update list to show claimed status
+        setTasks(prev => prev.map(t => t.id === task.id ? merged : t));
+        setTaskDetailLoading(false);
+
+        // Now fetch email in background (requires claimed status)
+        setAutoEmailLoading(true);
+        try {
+          const email = await api.getEmailForTask(task.id);
+          setAutoEmail(email);
+        } catch (emailErr) {
+          setAutoEmailError(emailErr instanceof Error ? emailErr.message : 'Failed to load email');
+        } finally {
+          setAutoEmailLoading(false);
+        }
+      } catch (err) {
+        // Auto-claim failed — try to show task anyway
+        console.error('Auto-claim failed:', err);
+        try {
+          const fullTask = await api.getTask(task.id);
+          setSelectedTask(fullTask);
+        } catch {
+          setSelectedTask(task);
+        }
+        setTaskDetailLoading(false);
+      }
+    } else {
+      // Already claimed — just fetch details + email
+      try {
+        const fullTask = await api.getTask(task.id);
+        setSelectedTask(fullTask);
+        setTaskDetailLoading(false);
+
+        // Fetch email in background
+        setAutoEmailLoading(true);
+        try {
+          const email = await api.getEmailForTask(task.id);
+          setAutoEmail(email);
+        } catch (emailErr) {
+          setAutoEmailError(emailErr instanceof Error ? emailErr.message : 'Failed to load email');
+        } finally {
+          setAutoEmailLoading(false);
+        }
+      } catch (err) {
+        console.error('Failed to fetch task details:', err);
+        setSelectedTask(task);
+        setTaskDetailLoading(false);
+      }
+    }
+  }
+
+  // Standard task selection (non-booking tasks)
   async function handleSelectTask(task: Task) {
+    // Cancel any pending auto-advance
+    if (advanceTimeoutRef.current) {
+      clearTimeout(advanceTimeoutRef.current);
+      advanceTimeoutRef.current = null;
+    }
+
+    if (activeTab === 'complete_booking') {
+      return handleSelectCompleteBooking(task);
+    }
+
     setTaskDetailLoading(true);
     try {
       const fullTask = await api.getTask(task.id);
       setSelectedTask(fullTask);
     } catch (err) {
-      // Fall back to the list task if fetch fails
       console.error('Failed to fetch task details:', err);
       setSelectedTask(task);
     } finally {
       setTaskDetailLoading(false);
     }
   }
+
+  // Queue position for complete_booking tab
+  const queuePosition = useMemo(() => {
+    if (activeTab !== 'complete_booking' || !selectedTask) return null;
+    const idx = tasks.findIndex(t => t.id === selectedTask.id);
+    return { current: idx + 1, total: tasks.length };
+  }, [activeTab, selectedTask, tasks]);
+
+  // Auto-advance to next task in queue
+  const handleAdvanceToNext = useCallback(() => {
+    const currentIdx = tasks.findIndex(t => t.id === selectedTask?.id);
+    // Find next task (any status — pending will be auto-claimed)
+    const remaining = tasks.filter((t, i) => i > currentIdx && t.id !== selectedTask?.id);
+
+    if (remaining.length > 0) {
+      advanceTimeoutRef.current = setTimeout(() => {
+        advanceTimeoutRef.current = null;
+        handleSelectCompleteBooking(remaining[0]);
+      }, 500);
+    } else {
+      // No more tasks
+      setSelectedTask(null);
+      resetEmailState();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tasks, selectedTask]);
 
   useEffect(() => {
     async function fetchData() {
@@ -398,17 +510,29 @@ export default function TasksPage() {
       {selectedTask && (
         <TaskDetail
           task={selectedTask}
-          onClose={() => setSelectedTask(null)}
+          onClose={() => { setSelectedTask(null); resetEmailState(); }}
           onUpdate={(updated) => {
             // Remove completed/failed/blocked tasks from list, update others
             if (updated.status === 'completed' || updated.status === 'failed' || updated.status === 'blocked') {
               setTasks(prev => prev.filter(t => t.id !== updated.id));
-              setSelectedTask(null);
+              // Auto-advance for complete_booking queue
+              if (activeTab === 'complete_booking') {
+                handleAdvanceToNext();
+              } else {
+                setSelectedTask(null);
+              }
             } else {
               setTasks(prev => prev.map(t => t.id === updated.id ? updated : t));
               setSelectedTask(updated);
             }
           }}
+          // Queue optimization props for complete_booking
+          autoClaimedEmail={activeTab === 'complete_booking' ? autoEmail : undefined}
+          autoClaimedEmailLoading={activeTab === 'complete_booking' ? autoEmailLoading : undefined}
+          autoClaimedEmailError={activeTab === 'complete_booking' ? autoEmailError : undefined}
+          onAdvanceToNext={activeTab === 'complete_booking' ? handleAdvanceToNext : undefined}
+          queuePosition={queuePosition}
+          defaultFullscreen={activeTab === 'complete_booking'}
         />
       )}
 

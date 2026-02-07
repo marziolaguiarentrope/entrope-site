@@ -349,6 +349,13 @@ interface TaskDetailProps {
   task: Task;
   onClose: () => void;
   onUpdate: (task: Task) => void;
+  // Queue optimization props (optional — other consumers ignore them)
+  autoClaimedEmail?: RawEmail | null;
+  autoClaimedEmailLoading?: boolean;
+  autoClaimedEmailError?: string | null;
+  onAdvanceToNext?: () => void;
+  queuePosition?: { current: number; total: number } | null;
+  defaultFullscreen?: boolean;
 }
 
 function formatMoney(amount: number, currency: string): string {
@@ -1120,21 +1127,33 @@ function MissingFieldForm({ fields, fieldValues, currency, onFieldChange, onCurr
 
 // ── CompleteBookingDetail ─────────────────────────────────
 
-function CompleteBookingDetail({ task, onClose, onUpdate }: TaskDetailProps) {
+function CompleteBookingDetail({ task, onClose, onUpdate, autoClaimedEmail, autoClaimedEmailLoading, autoClaimedEmailError, onAdvanceToNext, queuePosition, defaultFullscreen }: TaskDetailProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [failReason, setFailReason] = useState('');
   const [failReasonOther, setFailReasonOther] = useState('');
   const [showFailForm, setShowFailForm] = useState(false);
+  const [completionFlash, setCompletionFlash] = useState<'success' | 'fail' | null>(null);
 
-  // Email viewer state
-  const [showEmail, setShowEmail] = useState(false);
-  const [email, setEmail] = useState<RawEmail | null>(null);
-  const [emailLoading, setEmailLoading] = useState(false);
-  const [emailError, setEmailError] = useState<string | null>(null);
+  // Email viewer state — use pre-fetched if available
+  const [showEmail, setShowEmail] = useState(!!autoClaimedEmail || !!autoClaimedEmailLoading);
+  const [email, setEmail] = useState<RawEmail | null>(autoClaimedEmail || null);
+  const [emailLoading, setEmailLoading] = useState(!!autoClaimedEmailLoading);
+  const [emailError, setEmailError] = useState<string | null>(autoClaimedEmailError || null);
 
-  // Fullscreen split-pane state
-  const [isEmailFullscreen, setIsEmailFullscreen] = useState(false);
+  // Sync pre-fetched email from parent
+  useEffect(() => {
+    if (autoClaimedEmail) { setEmail(autoClaimedEmail); setEmailLoading(false); setShowEmail(true); }
+  }, [autoClaimedEmail]);
+  useEffect(() => {
+    if (autoClaimedEmailLoading !== undefined) { setEmailLoading(autoClaimedEmailLoading); if (autoClaimedEmailLoading) setShowEmail(true); }
+  }, [autoClaimedEmailLoading]);
+  useEffect(() => {
+    if (autoClaimedEmailError) { setEmailError(autoClaimedEmailError); setEmailLoading(false); }
+  }, [autoClaimedEmailError]);
+
+  // Fullscreen split-pane state — default to fullscreen for queue mode
+  const [isEmailFullscreen, setIsEmailFullscreen] = useState(defaultFullscreen || false);
   const [showEmailSearch, setShowEmailSearch] = useState(false);
   const [emailSearchQuery, setEmailSearchQuery] = useState('');
   const [emailSearchMatch, setEmailSearchMatch] = useState(0);
@@ -1216,7 +1235,7 @@ function CompleteBookingDetail({ task, onClose, onUpdate }: TaskDetailProps) {
     }
   }
 
-  async function handleComplete() {
+  const handleComplete = useCallback(async () => {
     const emptyFields = data.missing_fields.filter(f => !fieldValues[f]?.trim());
     if (emptyFields.length > 0) {
       setError(`Missing values for: ${emptyFields.join(', ')}`);
@@ -1235,13 +1254,14 @@ function CompleteBookingDetail({ task, onClose, onUpdate }: TaskDetailProps) {
         }
       });
       const updated = await api.completeTask(task.id, 'success', responseData);
+      setCompletionFlash('success');
       onUpdate(updated);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to complete');
     } finally {
       setLoading(false);
     }
-  }
+  }, [data.missing_fields, fieldValues, currency, task.id, onUpdate]);
 
   function getFailReasonText(): string {
     if (failReason === 'other') return failReasonOther.trim();
@@ -1249,7 +1269,7 @@ function CompleteBookingDetail({ task, onClose, onUpdate }: TaskDetailProps) {
     return selected?.label || failReason;
   }
 
-  async function handleFail() {
+  const handleFail = useCallback(async () => {
     if (!failReason) {
       setError('Please select a failure reason');
       return;
@@ -1262,13 +1282,47 @@ function CompleteBookingDetail({ task, onClose, onUpdate }: TaskDetailProps) {
     setError(null);
     try {
       const updated = await api.completeTask(task.id, 'denied', { failure_reason: getFailReasonText() });
+      setCompletionFlash('fail');
       onUpdate(updated);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to mark as failed');
     } finally {
       setLoading(false);
     }
-  }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [failReason, failReasonOther, task.id, onUpdate]);
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      // Cmd/Ctrl+Enter: submit
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+        e.preventDefault();
+        if (isClaimed && !showFailForm && !loading) {
+          handleComplete();
+        }
+      }
+      // Escape: exit fullscreen or close panel
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        if (showEmailSearch) {
+          setShowEmailSearch(false);
+          setEmailSearchQuery('');
+        } else if (isEmailFullscreen) {
+          onClose();
+        } else {
+          onClose();
+        }
+      }
+      // Cmd/Ctrl+F: search in email
+      if ((e.ctrlKey || e.metaKey) && e.key === 'f' && isEmailFullscreen) {
+        e.preventDefault();
+        setShowEmailSearch(true);
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isClaimed, showFailForm, loading, isEmailFullscreen, showEmailSearch, handleComplete, onClose]);
 
   // Count email search matches
   useEffect(() => {
@@ -1283,9 +1337,21 @@ function CompleteBookingDetail({ task, onClose, onUpdate }: TaskDetailProps) {
 
   // ── Fullscreen Split-Pane ──────────────────────────────
 
-  if (isEmailFullscreen && email) {
+  if (isEmailFullscreen && (email || emailLoading || emailError)) {
     return (
-      <div className="fixed inset-0 z-50 bg-background flex">
+      <div className="fixed inset-0 z-50 bg-background flex relative">
+        {/* Completion flash overlay */}
+        {completionFlash && (
+          <div className={cn(
+            "absolute inset-0 z-10 flex items-center justify-center bg-background/80",
+            completionFlash === 'success' ? 'text-green-400' : 'text-red-400'
+          )}>
+            <div className="text-center">
+              <div className="text-3xl font-semibold mb-1">{completionFlash === 'success' ? '✓ Done' : '✗ Failed'}</div>
+              {onAdvanceToNext && <div className="text-sm text-muted-foreground">Loading next task...</div>}
+            </div>
+          </div>
+        )}
         {/* Left: Email */}
         <div className="w-3/5 border-r border-border flex flex-col">
           <div className="p-3 border-b border-border flex items-center justify-between">
@@ -1333,16 +1399,48 @@ function CompleteBookingDetail({ task, onClose, onUpdate }: TaskDetailProps) {
               />
             </div>
           )}
-          <div className="flex-1 overflow-y-auto p-4 space-y-3">
-            <EmailContent email={email} searchQuery={emailSearchQuery} currentMatch={emailSearchMatch} maxHeight="flex-1" />
-          </div>
+          {emailLoading ? (
+            <div className="flex-1 flex items-center justify-center">
+              <div className="text-center space-y-2">
+                <div className="w-8 h-8 border-2 border-muted-foreground/30 border-t-foreground rounded-full animate-spin mx-auto" />
+                <p className="text-sm text-muted-foreground">Loading email...</p>
+              </div>
+            </div>
+          ) : emailError ? (
+            <div className="flex-1 flex items-center justify-center p-4">
+              <div className="text-center space-y-2">
+                <p className="text-sm text-red-400">{emailError}</p>
+                <button
+                  onClick={handleViewEmail}
+                  className="text-xs text-muted-foreground hover:text-foreground underline"
+                >
+                  Retry
+                </button>
+              </div>
+            </div>
+          ) : email ? (
+            <div className="flex-1 overflow-y-auto p-4 space-y-3">
+              <EmailContent email={email} searchQuery={emailSearchQuery} currentMatch={emailSearchMatch} maxHeight="flex-1" />
+            </div>
+          ) : (
+            <div className="flex-1 flex items-center justify-center">
+              <p className="text-sm text-muted-foreground">No email available for this task</p>
+            </div>
+          )}
         </div>
 
         {/* Right: Form */}
         <div className="w-2/5 flex flex-col">
-          <div className="p-3 border-b border-border">
-            <h4 className="text-sm font-medium">Complete Missing Fields</h4>
-            <p className="text-xs text-muted-foreground capitalize">{data.booking_type} · {data.booking_id.slice(0, 8)}</p>
+          <div className="p-3 border-b border-border flex items-center justify-between">
+            <div>
+              <h4 className="text-sm font-medium">Complete Missing Fields</h4>
+              <p className="text-xs text-muted-foreground capitalize">{data.booking_type} · {data.booking_id.slice(0, 8)}</p>
+            </div>
+            {queuePosition && (
+              <span className="text-xs text-muted-foreground bg-accent/50 px-2 py-1 rounded">
+                {queuePosition.current} of {queuePosition.total}
+              </span>
+            )}
           </div>
           <div className="flex-1 overflow-y-auto p-4 space-y-4">
             {/* Compact known data in fullscreen */}
@@ -1365,8 +1463,10 @@ function CompleteBookingDetail({ task, onClose, onUpdate }: TaskDetailProps) {
                 />
                 <div className="flex gap-2 pt-2">
                   <button onClick={handleComplete} disabled={loading}
-                    className="flex-1 py-2 px-4 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 disabled:opacity-50 transition-colors text-sm">
-                    {loading ? 'Completing...' : 'Complete'}
+                    className="flex-1 py-2 px-4 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 disabled:opacity-50 transition-colors text-sm flex items-center justify-center gap-2">
+                    {loading ? 'Completing...' : (
+                      <>Complete <kbd className="text-[10px] bg-green-700/50 px-1 py-0.5 rounded">⌘↵</kbd></>
+                    )}
                   </button>
                   <button onClick={() => setShowFailForm(true)}
                     className="py-2 px-4 bg-red-600/20 text-red-400 rounded-lg font-medium hover:bg-red-600/30 transition-colors text-sm">
@@ -1580,14 +1680,24 @@ function CompleteBookingDetail({ task, onClose, onUpdate }: TaskDetailProps) {
   );
 }
 
-export function TaskDetail({ task, onClose, onUpdate }: TaskDetailProps) {
+export function TaskDetail({ task, onClose, onUpdate, autoClaimedEmail, autoClaimedEmailLoading, autoClaimedEmailError, onAdvanceToNext, queuePosition, defaultFullscreen }: TaskDetailProps) {
   // Route to capability-specific detail view
   if (task.capability === 'flight_reprice') {
     return <FlightRepriceDetail task={task} onClose={onClose} onUpdate={onUpdate} />;
   }
 
   if (task.capability === 'complete_booking_data') {
-    return <CompleteBookingDetail task={task} onClose={onClose} onUpdate={onUpdate} />;
+    return <CompleteBookingDetail
+      task={task}
+      onClose={onClose}
+      onUpdate={onUpdate}
+      autoClaimedEmail={autoClaimedEmail}
+      autoClaimedEmailLoading={autoClaimedEmailLoading}
+      autoClaimedEmailError={autoClaimedEmailError}
+      onAdvanceToNext={onAdvanceToNext}
+      queuePosition={queuePosition}
+      defaultFullscreen={defaultFullscreen}
+    />;
   }
 
   // Generic fallback for other capabilities
