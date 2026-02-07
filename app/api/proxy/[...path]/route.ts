@@ -5,6 +5,10 @@ import { authOptions } from '@/lib/auth';
 const API_BASE = process.env.ADMIN_GATEWAY_URL || 'https://prod-admin-gateway.onrender.com';
 const FETCH_TIMEOUT = 60000; // 60 seconds — Render cold starts can take 30-45s
 
+// Tell Vercel to allow this serverless function to run up to 60s
+// (default is ~30s which kills the function before our fetch timeout fires)
+export const maxDuration = 60;
+
 async function getIdToken(): Promise<string | null> {
   const session = await getServerSession(authOptions);
   return session?.idToken ?? null;
@@ -56,9 +60,9 @@ export async function GET(
 
     const data = await response.json();
     return NextResponse.json(data, { status: response.status });
-  } catch (error) {
-    if (error instanceof DOMException && error.name === 'AbortError') {
-      return NextResponse.json({ error: 'Gateway timeout' }, { status: 504 });
+  } catch (error: unknown) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      return NextResponse.json({ error: 'Gateway timeout — backend did not respond in time' }, { status: 504 });
     }
     console.error('Proxy GET error:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
@@ -90,9 +94,9 @@ export async function POST(
 
     const data = await response.json();
     return NextResponse.json(data, { status: response.status });
-  } catch (error) {
-    if (error instanceof DOMException && error.name === 'AbortError') {
-      return NextResponse.json({ error: 'Gateway timeout' }, { status: 504 });
+  } catch (error: unknown) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      return NextResponse.json({ error: 'Gateway timeout — backend did not respond in time' }, { status: 504 });
     }
     console.error('Proxy POST error:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
@@ -124,9 +128,9 @@ export async function PATCH(
 
     const data = await response.json();
     return NextResponse.json(data, { status: response.status });
-  } catch (error) {
-    if (error instanceof DOMException && error.name === 'AbortError') {
-      return NextResponse.json({ error: 'Gateway timeout' }, { status: 504 });
+  } catch (error: unknown) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      return NextResponse.json({ error: 'Gateway timeout — backend did not respond in time' }, { status: 504 });
     }
     console.error('Proxy PATCH error:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
