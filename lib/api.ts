@@ -435,6 +435,10 @@ class ApiClient {
       return []; // Endpoint may not exist yet
     }
   }
+
+  async getBusinessDashboard(): Promise<BusinessDashboardResponse> {
+    return this.fetch<BusinessDashboardResponse>('/metrics/dashboard');
+  }
 }
 
 export interface HotelOpportunity {
@@ -1013,6 +1017,50 @@ export interface CustomerIoActivity {
   campaign_id: number | null;
   subject: string | null;
   recipient: string | null;
+}
+
+// Business dashboard types
+export interface MetricPoint {
+  current: number;
+  last_7: number;
+  prev_7: number;
+}
+
+export interface PeriodOnly {
+  last_7: number;
+  prev_7: number;
+}
+
+export interface BusinessDashboardResponse {
+  users: {
+    total: MetricPoint;
+    paid: MetricPoint;
+    referred: MetricPoint;
+    free: MetricPoint;
+  } | null;
+  bookings: {
+    total: MetricPoint;
+    flights: MetricPoint;
+    hotels: MetricPoint;
+    monitored: MetricPoint;
+  } | null;
+  opportunities: {
+    total: MetricPoint;
+    flights: MetricPoint;
+    hotels: MetricPoint;
+    completed: PeriodOnly;
+  } | null;
+  value: {
+    mrr_usd_cents: MetricPoint;
+    money_rescued_usd_cents: PeriodOnly;
+    hotel_revenue_usd_cents: PeriodOnly;
+  } | null;
+  pipeline_issues: Array<{
+    type: string;
+    label: string;
+    count: number;
+    priority: number;
+  }> | null;
 }
 
 export const api = new ApiClient(API_BASE);

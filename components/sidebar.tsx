@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { FileText, Plane, Hotel, AlertTriangle, LogOut, ListTodo, Search, Contact, BarChart3, Wrench } from 'lucide-react';
+import { FileText, Plane, Hotel, AlertTriangle, LogOut, ListTodo, Search, Contact, BarChart3, TrendingUp, Wrench } from 'lucide-react';
 import { useAuth } from '@/contexts/auth-context';
 import { cn } from '@/lib/utils';
 
@@ -13,6 +13,7 @@ const navItems = [
   { href: '/hotel-repricing-tracking', icon: Hotel, label: 'Hotel Repricing Tracking' },
   { href: '/user-search', icon: Search, label: 'User Search' },
   { href: '/users-list', icon: Contact, label: 'Users List' },
+  { href: '/business', icon: TrendingUp, label: 'Business' },
   { href: '/metrics', icon: BarChart3, label: 'Metrics' },
   { href: '/booking-issues', icon: Wrench, label: 'Booking Issues' },
   { href: '/escalations', icon: AlertTriangle, label: 'Escalations' },
