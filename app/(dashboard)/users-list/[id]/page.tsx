@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams } from 'next/navigation';
 import { api, MemberSummary, MemberContext } from '@/lib/api';
 import { MemberDetail } from '@/components/member-detail';
@@ -13,6 +13,19 @@ export default function UserDetailPage() {
   const [context, setContext] = useState<MemberContext | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [elapsed, setElapsed] = useState(0);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Elapsed timer while loading
+  useEffect(() => {
+    if (loading && !member) {
+      setElapsed(0);
+      intervalRef.current = setInterval(() => setElapsed(s => s + 1), 1000);
+    } else {
+      if (intervalRef.current) { clearInterval(intervalRef.current); intervalRef.current = null; }
+    }
+    return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
+  }, [loading, member]);
 
   const loadUser = useCallback(async () => {
     setLoading(true);
@@ -49,8 +62,13 @@ export default function UserDetailPage() {
   if (loading && !member) {
     return (
       <div className="animate-in fade-in duration-200">
-        <div className="mb-4">
+        <div className="mb-4 flex items-center gap-3">
           <div className="h-8 w-20 bg-accent/50 rounded-lg animate-pulse" />
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <div className="w-4 h-4 border-2 border-muted-foreground/30 border-t-foreground rounded-full animate-spin" />
+            <span>Loading user profile{elapsed > 0 ? `... ${elapsed}s` : '...'}</span>
+            {elapsed >= 10 && <span className="text-xs text-muted-foreground/60">(backend may be waking up)</span>}
+          </div>
         </div>
         <div className="grid grid-cols-[320px_1fr] gap-6">
           <div className="space-y-4">
