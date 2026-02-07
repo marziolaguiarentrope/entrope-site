@@ -1282,7 +1282,7 @@ function StageSection({
   getMemberContext: (userId: string) => MemberContext | 'loading' | 'error' | undefined;
   onRequestContext: (userId: string) => void;
 }) {
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(true);
   const Icon = stage.icon;
 
   return (
@@ -1310,34 +1310,41 @@ function StageSection({
 
       {!collapsed && (
         <div className="border border-t-0 border-border rounded-b-lg overflow-hidden">
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-border bg-card/50">
-                <th className="py-2 px-4 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">Issue</th>
-                <th className="py-2 px-4 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">User</th>
-                <th className="py-2 px-4 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">Booking</th>
-                <th className="py-2 px-4 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">Reason</th>
-                <th className="py-2 px-4 text-right text-xs font-medium text-muted-foreground uppercase tracking-wider">Created</th>
-              </tr>
-            </thead>
-            <tbody>
-              {issues.map((issue, idx) => {
-                const key = getRowKey(issue, idx);
-                return (
-                  <IssueRow
-                    key={key}
-                    issue={issue}
-                    stage={stage}
-                    isExpanded={expandedId === key}
-                    onToggle={() => setExpandedId(expandedId === key ? null : key)}
-                    onActionComplete={onActionComplete}
-                    memberContext={getMemberContext(issue.user_id)}
-                    onRequestContext={onRequestContext}
-                  />
-                );
-              })}
-            </tbody>
-          </table>
+          {issues.length === 0 ? (
+            <div className="px-4 py-6 text-center">
+              <CheckCircle2 className="size-5 text-green-500/60 mx-auto mb-1.5" />
+              <p className="text-xs text-muted-foreground">No issues — this stage is healthy</p>
+            </div>
+          ) : (
+            <table className="w-full">
+              <thead>
+                <tr className="border-b border-border bg-card/50">
+                  <th className="py-2 px-4 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">Issue</th>
+                  <th className="py-2 px-4 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">User</th>
+                  <th className="py-2 px-4 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">Booking</th>
+                  <th className="py-2 px-4 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">Reason</th>
+                  <th className="py-2 px-4 text-right text-xs font-medium text-muted-foreground uppercase tracking-wider">Created</th>
+                </tr>
+              </thead>
+              <tbody>
+                {issues.map((issue, idx) => {
+                  const key = getRowKey(issue, idx);
+                  return (
+                    <IssueRow
+                      key={key}
+                      issue={issue}
+                      stage={stage}
+                      isExpanded={expandedId === key}
+                      onToggle={() => setExpandedId(expandedId === key ? null : key)}
+                      onActionComplete={onActionComplete}
+                      memberContext={getMemberContext(issue.user_id)}
+                      onRequestContext={onRequestContext}
+                    />
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
         </div>
       )}
     </div>
@@ -1431,9 +1438,9 @@ export default function BookingIssuesPage() {
         const issues = data.issues.filter((i) => stage.issueTypes.includes(i.issue_type));
         return { stage, issues };
       })
-      .filter(({ stage, issues }) => {
-        if (filterStage === 'all') return issues.length > 0;
-        return stage.key === filterStage && issues.length > 0;
+      .filter(({ stage }) => {
+        if (filterStage === 'all') return true;
+        return stage.key === filterStage;
       });
   }, [data, filterStage]);
 
@@ -1441,8 +1448,7 @@ export default function BookingIssuesPage() {
     if (!data) return {};
     const counts: Record<string, number> = {};
     for (const stage of PIPELINE_STAGES) {
-      const count = data.issues.filter((i) => stage.issueTypes.includes(i.issue_type)).length;
-      if (count > 0) counts[stage.key] = count;
+      counts[stage.key] = data.issues.filter((i) => stage.issueTypes.includes(i.issue_type)).length;
     }
     return counts;
   }, [data]);
@@ -1486,7 +1492,6 @@ export default function BookingIssuesPage() {
           <option value="all">All Stages ({totalIssues})</option>
           {PIPELINE_STAGES.map((stage) => {
             const count = stageCounts[stage.key] ?? 0;
-            if (count === 0 && !data) return null;
             return (
               <option key={stage.key} value={stage.key}>
                 {stage.label} ({count})
@@ -1539,11 +1544,10 @@ export default function BookingIssuesPage() {
       )}
 
       {/* Stage summary pills */}
-      {!loading && data && totalIssues > 0 && (
+      {!loading && data && (
         <div className="flex items-center gap-2 mb-5 flex-wrap">
           {PIPELINE_STAGES.map((stage) => {
             const count = stageCounts[stage.key] ?? 0;
-            if (count === 0) return null;
             const StageIcon = stage.icon;
             return (
               <button
@@ -1553,12 +1557,14 @@ export default function BookingIssuesPage() {
                   'flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-md border transition-colors',
                   filterStage === stage.key
                     ? cn(stage.color, stage.bgColor, 'ring-1 ring-current/20')
-                    : 'border-border text-muted-foreground hover:text-foreground hover:bg-accent'
+                    : count > 0
+                      ? 'border-border text-muted-foreground hover:text-foreground hover:bg-accent'
+                      : 'border-border/50 text-muted-foreground/50 hover:text-muted-foreground hover:bg-accent/50'
                 )}
               >
                 <StageIcon className="size-3" />
                 {stage.label}
-                <span className="font-semibold">{count}</span>
+                <span className={cn('font-semibold', count === 0 && 'text-green-500/60')}>{count}</span>
               </button>
             );
           })}
@@ -1598,20 +1604,6 @@ export default function BookingIssuesPage() {
           <button onClick={handleRefresh} className="mt-2 text-sm text-primary hover:underline">
             Try again
           </button>
-        </div>
-      )}
-
-      {/* Empty */}
-      {!loading && !error && totalIssues === 0 && (
-        <div className="border border-border rounded-lg p-8 text-center">
-          <CheckCircle2 className="size-8 text-green-400 mx-auto mb-3" />
-          <p className="text-muted-foreground">No pipeline issues found. Everything looks healthy!</p>
-        </div>
-      )}
-
-      {!loading && !error && totalIssues > 0 && stagesWithIssues.length === 0 && (
-        <div className="border border-border rounded-lg p-8 text-center">
-          <p className="text-muted-foreground">No issues match the selected filter.</p>
         </div>
       )}
 
