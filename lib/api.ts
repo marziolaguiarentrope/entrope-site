@@ -788,6 +788,8 @@ export interface RawEmail {
   id: string;
   subject: string | null;
   body: string | null;
+  body_text?: string | null;
+  body_html?: string | null;
   from_address: string | null;
   to_address: string | null;
   received_at: string | null;

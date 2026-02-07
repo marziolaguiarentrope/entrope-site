@@ -55,6 +55,11 @@ function highlightSearchInHtml(html: string, query: string, currentIdx: number):
 
 // ── Email Content Renderer ────────────────────────────────
 
+/** Detect whether a string contains HTML tags */
+function isHtml(str: string): boolean {
+  return /<[a-z][\s\S]*>/i.test(str);
+}
+
 interface EmailContentProps {
   email: RawEmail;
   searchQuery: string;
@@ -64,9 +69,24 @@ interface EmailContentProps {
 }
 
 function EmailContent({ email, searchQuery, currentMatch, maxHeight, bodyRef }: EmailContentProps) {
+  // Determine available body versions
+  // Backend may return body_text + body_html (new), or just body (legacy)
+  const hasExplicitVersions = !!(email.body_text || email.body_html);
+  const textBody = hasExplicitVersions ? email.body_text : (!isHtml(email.body || '') ? email.body : null);
+  const htmlBody = hasExplicitVersions ? email.body_html : (isHtml(email.body || '') ? email.body : null);
+  const hasBothVersions = !!(textBody && htmlBody);
+
+  // If only one version available via legacy body field, detect what it is
+  // and show both toggle options only when backend provides both
+  const canToggle = hasBothVersions;
+
+  const [viewMode, setViewMode] = useState<'html' | 'text'>(htmlBody ? 'html' : 'text');
+
+  const activeBody = viewMode === 'html' ? (htmlBody || email.body || '') : (textBody || email.body || '');
+
   const { html: bodyHtml, total } = useMemo(
-    () => highlightSearchInHtml(email.body || 'No content', searchQuery, currentMatch),
-    [email.body, searchQuery, currentMatch]
+    () => highlightSearchInHtml(activeBody || 'No content', searchQuery, currentMatch),
+    [activeBody, searchQuery, currentMatch]
   );
 
   // Scroll current match into view
@@ -82,6 +102,9 @@ function EmailContent({ email, searchQuery, currentMatch, maxHeight, bodyRef }: 
       <style>{`
         .search-highlight { background: rgba(250, 204, 21, 0.4); padding: 1px 0; border-radius: 2px; }
         .search-highlight-current { background: rgba(249, 115, 22, 0.6); padding: 1px 0; border-radius: 2px; }
+        .email-html-render img { max-width: 100%; height: auto; }
+        .email-html-render table { border-collapse: collapse; max-width: 100%; }
+        .email-html-render a { color: oklch(0.7 0.15 250); text-decoration: underline; }
       `}</style>
       <div className="space-y-2 text-sm">
         <div>
@@ -101,14 +124,58 @@ function EmailContent({ email, searchQuery, currentMatch, maxHeight, bodyRef }: 
       </div>
 
       <div className="border-t border-border pt-3">
-        <div
-          ref={bodyRef}
-          className={cn(
-            "text-sm bg-background rounded p-3 overflow-y-auto whitespace-pre-wrap",
-            maxHeight || "max-h-64"
+        {/* View mode toggle */}
+        <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center gap-1 rounded-lg bg-accent/30 p-0.5">
+            <button
+              onClick={() => setViewMode('html')}
+              className={cn(
+                "px-2.5 py-1 text-xs rounded-md transition-colors",
+                viewMode === 'html'
+                  ? "bg-background text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
+              )}
+            >
+              HTML
+            </button>
+            <button
+              onClick={() => setViewMode('text')}
+              className={cn(
+                "px-2.5 py-1 text-xs rounded-md transition-colors",
+                viewMode === 'text'
+                  ? "bg-background text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
+              )}
+            >
+              Plain Text
+            </button>
+          </div>
+          {!canToggle && (
+            <span className="text-[10px] text-muted-foreground">
+              {viewMode === 'html' ? 'HTML only' : 'Text only'} — {viewMode === 'html' ? 'no plain text' : 'no HTML'} available
+            </span>
           )}
-          dangerouslySetInnerHTML={{ __html: bodyHtml }}
-        />
+        </div>
+
+        {viewMode === 'html' && htmlBody ? (
+          <div
+            ref={bodyRef}
+            className={cn(
+              "text-sm bg-white rounded p-3 overflow-y-auto email-html-render",
+              maxHeight || "max-h-64"
+            )}
+            dangerouslySetInnerHTML={{ __html: bodyHtml }}
+          />
+        ) : (
+          <div
+            ref={bodyRef}
+            className={cn(
+              "text-sm bg-background rounded p-3 overflow-y-auto whitespace-pre-wrap",
+              maxHeight || "max-h-64"
+            )}
+            dangerouslySetInnerHTML={{ __html: bodyHtml }}
+          />
+        )}
       </div>
 
       {email.attachments && email.attachments.length > 0 && (
