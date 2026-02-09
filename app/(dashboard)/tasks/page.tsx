@@ -48,7 +48,7 @@ function sortByPriority<T extends { priority: string }>(items: T[]): T[] {
 
 type TabId = typeof tabs[number]['id'];
 
-function TaskRow({ task, onClick }: { task: Task; onClick: () => void }) {
+function TaskRow({ task, onClick, isSelected, isLoading }: { task: Task; onClick: () => void; isSelected?: boolean; isLoading?: boolean }) {
   const priorityColors: Record<string, string> = {
     urgent: 'text-red-400',
     high: 'text-orange-400',
@@ -93,7 +93,12 @@ function TaskRow({ task, onClick }: { task: Task; onClick: () => void }) {
   return (
     <div
       onClick={onClick}
-      className="flex items-center justify-between py-3 px-4 border-b border-border last:border-0 hover:bg-accent/50 transition-colors cursor-pointer"
+      className={cn(
+        "flex items-center justify-between py-3 px-4 border-b border-border last:border-0 transition-colors cursor-pointer",
+        isSelected
+          ? 'bg-accent border-l-2 border-l-primary'
+          : 'hover:bg-accent/50'
+      )}
     >
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-3">
@@ -108,6 +113,12 @@ function TaskRow({ task, onClick }: { task: Task; onClick: () => void }) {
           )}
           {severity === 'enrichment' && (
             <span className="px-1.5 py-0.5 text-[10px] bg-yellow-500/20 text-yellow-400 rounded font-medium">ENRICHMENT</span>
+          )}
+          {isLoading && (
+            <svg className="animate-spin h-3.5 w-3.5 text-muted-foreground" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+            </svg>
           )}
         </div>
         <div className="text-xs text-muted-foreground mt-1 truncate">
@@ -244,6 +255,7 @@ export default function TasksPage() {
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [selectedEscalation, setSelectedEscalation] = useState<Escalation | null>(null);
   const [taskDetailLoading, setTaskDetailLoading] = useState(false);
+  const [loadingTaskId, setLoadingTaskId] = useState<string | null>(null);
   const [selectedHotelOpportunity, setSelectedHotelOpportunity] = useState<HotelOpportunity | null>(null);
 
   // Auto-claim email state (complete_booking optimization)
@@ -261,6 +273,7 @@ export default function TasksPage() {
   // Auto-claim + fetch email for complete_booking tasks
   async function handleSelectCompleteBooking(task: Task) {
     resetEmailState();
+    setLoadingTaskId(task.id);
     setTaskDetailLoading(true);
 
     if (task.status === 'pending') {
@@ -276,6 +289,7 @@ export default function TasksPage() {
         // Update list to show claimed status
         setTasks(prev => prev.map(t => t.id === task.id ? merged : t));
         setTaskDetailLoading(false);
+        setLoadingTaskId(null);
 
         // Now fetch email in background (requires claimed status)
         setAutoEmailLoading(true);
@@ -297,6 +311,7 @@ export default function TasksPage() {
           setSelectedTask(task);
         }
         setTaskDetailLoading(false);
+        setLoadingTaskId(null);
       }
     } else {
       // Already claimed — just fetch details + email
@@ -304,6 +319,7 @@ export default function TasksPage() {
         const fullTask = await api.getTask(task.id);
         setSelectedTask(fullTask);
         setTaskDetailLoading(false);
+        setLoadingTaskId(null);
 
         // Fetch email in background
         setAutoEmailLoading(true);
@@ -319,6 +335,7 @@ export default function TasksPage() {
         console.error('Failed to fetch task details:', err);
         setSelectedTask(task);
         setTaskDetailLoading(false);
+        setLoadingTaskId(null);
       }
     }
   }
@@ -335,6 +352,7 @@ export default function TasksPage() {
       return handleSelectCompleteBooking(task);
     }
 
+    setLoadingTaskId(task.id);
     setTaskDetailLoading(true);
     try {
       const fullTask = await api.getTask(task.id);
@@ -344,6 +362,7 @@ export default function TasksPage() {
       setSelectedTask(task);
     } finally {
       setTaskDetailLoading(false);
+      setLoadingTaskId(null);
     }
   }
 
@@ -508,7 +527,13 @@ export default function TasksPage() {
               </Link>
             )}
             {tasks.map((task) => (
-              <TaskRow key={task.id} task={task} onClick={() => handleSelectTask(task)} />
+              <TaskRow
+                key={task.id}
+                task={task}
+                onClick={() => handleSelectTask(task)}
+                isSelected={selectedTask?.id === task.id || loadingTaskId === task.id}
+                isLoading={loadingTaskId === task.id}
+              />
             ))}
           </div>
         )}
