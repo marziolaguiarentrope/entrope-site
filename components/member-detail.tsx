@@ -1253,7 +1253,7 @@ function BookingCard({ booking, watch, travellers, onRefresh }: { booking: Booki
 }
 
 function TripCard({ trip, watches, travellers, onRefresh }: { trip: TripView; watches?: WatchView[]; travellers?: TravelerProfile[]; onRefresh?: () => void }) {
-  const [expanded, setExpanded] = useState(true); // Default expanded
+  const [expanded, setExpanded] = useState(false); // Default collapsed — click to expand
 
   const statusColors: Record<string, string> = {
     FUTURE: 'bg-blue-500/20 text-blue-400',
@@ -1276,9 +1276,17 @@ function TripCard({ trip, watches, travellers, onRefresh }: { trip: TripView; wa
         className="w-full p-2 text-left hover:bg-accent/50 transition-colors"
       >
         <div className="flex items-center justify-between">
-          <div>
+          <div className="flex items-center gap-1.5">
+            <svg
+              className={cn('w-3.5 h-3.5 text-muted-foreground transition-transform', expanded && 'rotate-90')}
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+            </svg>
             <span className="font-medium text-sm">{trip.name || trip.destination || 'Unnamed Trip'}</span>
-            <span className={cn('ml-2 px-1.5 py-0.5 text-xs rounded', statusColors[trip.status])}>
+            <span className={cn('ml-1 px-1.5 py-0.5 text-xs rounded', statusColors[trip.status])}>
               {trip.status}
             </span>
           </div>
@@ -1868,7 +1876,7 @@ export function MemberDetail({
           {context && (
             <>
               {/* Trips & Bookings - main focus, always first */}
-              <Section title="Trips" count={context.trips.length} defaultOpen>
+              <Section title="Trips" count={context.trips.length} defaultOpen={false}>
                 {context.trips.length === 0 ? (
                   <p className="text-sm text-muted-foreground">No trips</p>
                 ) : (
