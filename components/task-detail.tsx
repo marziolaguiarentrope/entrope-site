@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
-import { Task, api, RawEmail } from '@/lib/api';
+import Link from 'next/link';
+import { Task, api, RawEmail, UserBasicInfo } from '@/lib/api';
 import { cn } from '@/lib/utils';
 
 // ── Email Search Utilities ────────────────────────────────
@@ -365,6 +366,68 @@ function formatMoney(amount: number, currency: string): string {
   }).format(amount / 100);
 }
 
+// ── Customer Info Section (shared by all detail views) ────
+
+function CustomerInfoSection({ userId }: { userId: string }) {
+  const [info, setInfo] = useState<UserBasicInfo | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    api.getUserBasicInfo(userId)
+      .then(data => { if (!cancelled) setInfo(data); })
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [userId]);
+
+  return (
+    <section>
+      <h3 className="text-sm font-medium text-muted-foreground mb-2">Customer</h3>
+      <div className="bg-accent/50 rounded-lg p-3 space-y-1">
+        {loading ? (
+          <p className="text-sm text-muted-foreground">Loading customer info...</p>
+        ) : info ? (
+          <>
+            {info.name && <p className="font-medium">{info.name}</p>}
+            {info.email && (
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">Email</span>
+                <span>{info.email}</span>
+              </div>
+            )}
+            {info.phone && (
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">Phone</span>
+                <span>{info.phone}</span>
+              </div>
+            )}
+            <div className="pt-1">
+              <Link
+                href={`/users-list/${userId}`}
+                className="text-xs text-primary hover:underline"
+              >
+                View Full Profile →
+              </Link>
+            </div>
+          </>
+        ) : (
+          <div className="flex justify-between items-center">
+            <p className="text-sm text-muted-foreground">Could not load customer info</p>
+            <Link
+              href={`/users-list/${userId}`}
+              className="text-xs text-primary hover:underline"
+            >
+              View Profile →
+            </Link>
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
 function FlightRepriceDetail({ task, onClose, onUpdate }: TaskDetailProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -573,6 +636,9 @@ function FlightRepriceDetail({ task, onClose, onUpdate }: TaskDetailProps) {
               </button>
             )}
           </div>
+
+          {/* Customer Info */}
+          <CustomerInfoSection userId={task.user_id} />
 
           {/* Passenger Info */}
           <section>
@@ -1555,6 +1621,9 @@ function CompleteBookingDetail({ task, onClose, onUpdate, autoClaimedEmail, auto
             )}
           </div>
 
+          {/* Customer Info */}
+          <CustomerInfoSection userId={task.user_id} />
+
           {/* Instructions */}
           <section>
             <h3 className="text-sm font-medium text-muted-foreground mb-2">Instructions</h3>
@@ -1718,7 +1787,8 @@ export function TaskDetail({ task, onClose, onUpdate, autoClaimedEmail, autoClai
             </svg>
           </button>
         </div>
-        <div className="p-4">
+        <div className="p-4 space-y-4">
+          <CustomerInfoSection userId={task.user_id} />
           <pre className="text-xs overflow-x-auto">
             {JSON.stringify(task, null, 2)}
           </pre>
