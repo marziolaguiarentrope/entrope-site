@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
-import { api, Task, Escalation, HotelOpportunity, RawEmail } from '@/lib/api';
+import { api, Task, Escalation, HotelOpportunity, RawEmail, UserBasicInfo } from '@/lib/api';
 import { TaskDetail } from '@/components/task-detail';
 import { EscalationDetail } from '@/components/escalation-detail';
 import { HotelOpportunityDetail } from '@/components/hotel-opportunity-detail';
@@ -48,7 +48,7 @@ function sortByPriority<T extends { priority: string }>(items: T[]): T[] {
 
 type TabId = typeof tabs[number]['id'];
 
-function TaskRow({ task, onClick, isSelected, isLoading }: { task: Task; onClick: () => void; isSelected?: boolean; isLoading?: boolean }) {
+function TaskRow({ task, onClick, isSelected, isLoading, userInfo }: { task: Task; onClick: () => void; isSelected?: boolean; isLoading?: boolean; userInfo?: UserBasicInfo }) {
   const priorityColors: Record<string, string> = {
     urgent: 'text-red-400',
     high: 'text-orange-400',
@@ -123,10 +123,25 @@ function TaskRow({ task, onClick, isSelected, isLoading }: { task: Task; onClick
         </div>
         <div className="text-xs text-muted-foreground mt-1 truncate">
           {subtitle} · {task.status} · {timeAgo(task.created_at)}
+          {userInfo && (
+            <>
+              {userInfo.email && <> · {userInfo.email}</>}
+              {userInfo.phone && <> · {userInfo.phone}</>}
+            </>
+          )}
         </div>
       </div>
-      <div className="text-xs text-muted-foreground">
-        {task.claimed_by ? `Claimed by ${task.claimed_by}` : 'Unclaimed'}
+      <div className="flex items-center gap-3">
+        <Link
+          href={`/users-list/${task.user_id}`}
+          onClick={(e) => e.stopPropagation()}
+          className="text-xs text-primary hover:underline whitespace-nowrap"
+        >
+          Profile →
+        </Link>
+        <div className="text-xs text-muted-foreground whitespace-nowrap">
+          {task.claimed_by ? `Claimed by ${task.claimed_by}` : 'Unclaimed'}
+        </div>
       </div>
     </div>
   );
@@ -257,6 +272,9 @@ export default function TasksPage() {
   const [taskDetailLoading, setTaskDetailLoading] = useState(false);
   const [loadingTaskId, setLoadingTaskId] = useState<string | null>(null);
   const [selectedHotelOpportunity, setSelectedHotelOpportunity] = useState<HotelOpportunity | null>(null);
+
+  // User info lookup for customer contact details
+  const [userInfoMap, setUserInfoMap] = useState<Map<string, UserBasicInfo>>(new Map());
 
   // Auto-claim email state (complete_booking optimization)
   const [autoEmail, setAutoEmail] = useState<RawEmail | null>(null);
@@ -424,6 +442,9 @@ export default function TasksPage() {
           setTasks(sortByPriority(response.tasks));
           setEscalations([]);
           setHotelOpportunities([]);
+          // Fetch user info for customer contact details (non-blocking)
+          const userIds = response.tasks.map(t => t.user_id);
+          api.batchGetUserBasicInfo(userIds).then(setUserInfoMap).catch(() => {});
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to fetch data');
@@ -533,6 +554,7 @@ export default function TasksPage() {
                 onClick={() => handleSelectTask(task)}
                 isSelected={selectedTask?.id === task.id || loadingTaskId === task.id}
                 isLoading={loadingTaskId === task.id}
+                userInfo={userInfoMap.get(task.user_id)}
               />
             ))}
           </div>

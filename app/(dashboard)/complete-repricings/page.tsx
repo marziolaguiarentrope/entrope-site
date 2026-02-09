@@ -1,8 +1,9 @@
 'use client';
 
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import Link from 'next/link';
 import { cn } from '@/lib/utils';
-import { api, Task } from '@/lib/api';
+import { api, Task, UserBasicInfo } from '@/lib/api';
 import { TaskDetail } from '@/components/task-detail';
 
 // ── Helpers ──────────────────────────────────────────────
@@ -103,16 +104,18 @@ function sortTasks(tasks: Task[], key: SortKey, dir: SortDir): Task[] {
 
 // ── Search Logic ─────────────────────────────────────────
 
-function matchesSearch(task: Task, query: string): boolean {
+function matchesSearch(task: Task, query: string, userInfoMap?: Map<string, UserBasicInfo>): boolean {
   if (!query) return true;
   const q = query.toLowerCase();
   const d = getRequestData(task);
-  if (!d) return false;
+  const u = userInfoMap?.get(task.user_id);
   return !!(
-    d.pnr?.toLowerCase().includes(q) ||
-    d.airline_code?.toLowerCase().includes(q) ||
-    d.airline_name?.toLowerCase().includes(q) ||
-    d.passenger_name?.toLowerCase().includes(q)
+    d?.pnr?.toLowerCase().includes(q) ||
+    d?.airline_code?.toLowerCase().includes(q) ||
+    d?.airline_name?.toLowerCase().includes(q) ||
+    d?.passenger_name?.toLowerCase().includes(q) ||
+    u?.email?.toLowerCase().includes(q) ||
+    u?.phone?.toLowerCase().includes(q)
   );
 }
 
@@ -161,7 +164,7 @@ function SortHeader({ label, sortKey, currentKey, dir, onSort }: {
 
 // ── Queue Task Row ───────────────────────────────────────
 
-function QueueRow({ task, onClick }: { task: Task; onClick: () => void }) {
+function QueueRow({ task, onClick, userInfo }: { task: Task; onClick: () => void; userInfo?: UserBasicInfo }) {
   const data = getRequestData(task);
   const priorityColors: Record<string, string> = {
     urgent: 'text-red-400', high: 'text-orange-400', normal: 'text-foreground', low: 'text-muted-foreground',
@@ -180,6 +183,26 @@ function QueueRow({ task, onClick }: { task: Task; onClick: () => void }) {
         <span className="text-sm font-mono">{data?.pnr || '—'}</span>
       </td>
       <td className="px-4 py-3 text-sm">{data?.passenger_name || '—'}</td>
+      <td className="px-4 py-3">
+        {userInfo ? (
+          <div className="space-y-0.5">
+            {userInfo.email && <div className="text-xs text-muted-foreground truncate max-w-[200px]">{userInfo.email}</div>}
+            {userInfo.phone && <div className="text-xs text-muted-foreground">{userInfo.phone}</div>}
+            {!userInfo.email && !userInfo.phone && <span className="text-xs text-muted-foreground">—</span>}
+          </div>
+        ) : (
+          <span className="text-xs text-muted-foreground">—</span>
+        )}
+      </td>
+      <td className="px-4 py-3">
+        <Link
+          href={`/users-list/${task.user_id}`}
+          onClick={(e) => e.stopPropagation()}
+          className="text-xs text-primary hover:underline whitespace-nowrap"
+        >
+          View Profile →
+        </Link>
+      </td>
       <td className="px-4 py-3 text-sm text-right font-mono">
         {data?.expected_credit
           ? formatMoney(data.expected_credit.amount, data.expected_credit.currency)
@@ -196,7 +219,7 @@ function QueueRow({ task, onClick }: { task: Task; onClick: () => void }) {
 
 // ── History Task Row ─────────────────────────────────────
 
-function HistoryRow({ task, onClick }: { task: Task; onClick: () => void }) {
+function HistoryRow({ task, onClick, userInfo }: { task: Task; onClick: () => void; userInfo?: UserBasicInfo }) {
   const data = getRequestData(task);
   const response = task.response_data as { credit_amount?: number; credit_currency?: string; failure_reason?: string } | null;
 
@@ -208,6 +231,26 @@ function HistoryRow({ task, onClick }: { task: Task; onClick: () => void }) {
         <span className="text-sm font-mono">{data?.pnr || '—'}</span>
       </td>
       <td className="px-4 py-3 text-sm">{data?.passenger_name || '—'}</td>
+      <td className="px-4 py-3">
+        {userInfo ? (
+          <div className="space-y-0.5">
+            {userInfo.email && <div className="text-xs text-muted-foreground truncate max-w-[200px]">{userInfo.email}</div>}
+            {userInfo.phone && <div className="text-xs text-muted-foreground">{userInfo.phone}</div>}
+            {!userInfo.email && !userInfo.phone && <span className="text-xs text-muted-foreground">—</span>}
+          </div>
+        ) : (
+          <span className="text-xs text-muted-foreground">—</span>
+        )}
+      </td>
+      <td className="px-4 py-3">
+        <Link
+          href={`/users-list/${task.user_id}`}
+          onClick={(e) => e.stopPropagation()}
+          className="text-xs text-primary hover:underline whitespace-nowrap"
+        >
+          View Profile →
+        </Link>
+      </td>
       <td className="px-4 py-3"><OutcomeBadge outcome={task.outcome} /></td>
       <td className="px-4 py-3 text-sm">
         {task.outcome === 'success' && response?.credit_amount != null ? (
@@ -247,6 +290,9 @@ export default function CompleteRepricingsPage() {
   // Detail panel
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
 
+  // User info lookup
+  const [userInfoMap, setUserInfoMap] = useState<Map<string, UserBasicInfo>>(new Map());
+
   // Auto-refresh
   const refreshTimer = useRef<NodeJS.Timeout | null>(null);
 
@@ -282,6 +328,10 @@ export default function CompleteRepricingsPage() {
       // Merge tasks from all status results
       const allTasks = results.flatMap(r => r.tasks);
       setTasks(allTasks);
+
+      // Fetch user info for all unique user_ids (non-blocking)
+      const userIds = allTasks.map(t => t.user_id);
+      api.batchGetUserBasicInfo(userIds).then(setUserInfoMap).catch(() => {});
 
       // Update counts from results
       const newCounts = { ...counts };
@@ -335,7 +385,7 @@ export default function CompleteRepricingsPage() {
   }, [mode]);
 
   // Search + sort
-  const filtered = useMemo(() => tasks.filter(t => matchesSearch(t, search)), [tasks, search]);
+  const filtered = useMemo(() => tasks.filter(t => matchesSearch(t, search, userInfoMap)), [tasks, search, userInfoMap]);
   const sorted = useMemo(() => sortTasks(filtered, sortKey, sortDir), [filtered, sortKey, sortDir]);
 
   // Sort handler
@@ -455,7 +505,7 @@ export default function CompleteRepricingsPage() {
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search PNR, airline, passenger..."
+            placeholder="Search PNR, airline, passenger, email, phone..."
             className="w-full px-3 py-1.5 text-sm bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
           />
         </div>
@@ -496,6 +546,8 @@ export default function CompleteRepricingsPage() {
                   <SortHeader label="Priority" sortKey="priority" currentKey={sortKey} dir={sortDir} onSort={handleSort} />
                   <SortHeader label="Airline · PNR" sortKey="airline" currentKey={sortKey} dir={sortDir} onSort={handleSort} />
                   <SortHeader label="Passenger" sortKey="passenger" currentKey={sortKey} dir={sortDir} onSort={handleSort} />
+                  <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground">Customer Contact</th>
+                  <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground">Profile</th>
                   <SortHeader label="Expected Credit" sortKey="credit" currentKey={sortKey} dir={sortDir} onSort={handleSort} />
                   <SortHeader label="Status" sortKey="status" currentKey={sortKey} dir={sortDir} onSort={handleSort} />
                   <SortHeader label="Created" sortKey="created" currentKey={sortKey} dir={sortDir} onSort={handleSort} />
@@ -504,7 +556,7 @@ export default function CompleteRepricingsPage() {
               </thead>
               <tbody>
                 {sorted.map(task => (
-                  <QueueRow key={task.id} task={task} onClick={() => handleSelectTask(task)} />
+                  <QueueRow key={task.id} task={task} onClick={() => handleSelectTask(task)} userInfo={userInfoMap.get(task.user_id)} />
                 ))}
               </tbody>
             </table>
@@ -516,6 +568,8 @@ export default function CompleteRepricingsPage() {
                 <tr>
                   <SortHeader label="Airline · PNR" sortKey="airline" currentKey={sortKey} dir={sortDir} onSort={handleSort} />
                   <SortHeader label="Passenger" sortKey="passenger" currentKey={sortKey} dir={sortDir} onSort={handleSort} />
+                  <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground">Customer Contact</th>
+                  <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground">Profile</th>
                   <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground">Outcome</th>
                   <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground">Details</th>
                   <SortHeader label="Status" sortKey="status" currentKey={sortKey} dir={sortDir} onSort={handleSort} />
@@ -524,7 +578,7 @@ export default function CompleteRepricingsPage() {
               </thead>
               <tbody>
                 {sorted.map(task => (
-                  <HistoryRow key={task.id} task={task} onClick={() => handleSelectTask(task)} />
+                  <HistoryRow key={task.id} task={task} onClick={() => handleSelectTask(task)} userInfo={userInfoMap.get(task.user_id)} />
                 ))}
               </tbody>
             </table>

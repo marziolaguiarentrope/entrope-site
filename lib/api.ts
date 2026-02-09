@@ -301,6 +301,32 @@ class ApiClient {
     return this.fetch<MemberContext>(`/members/${userId}`);
   }
 
+  /** Lightweight user info (email, phone, name) extracted from full member context */
+  async getUserBasicInfo(userId: string): Promise<UserBasicInfo> {
+    const ctx = await this.getMember(userId);
+    return {
+      id: userId,
+      email: ctx.user_extras?.email ?? null,
+      phone: ctx.user_extras?.phone ?? null,
+      name: ctx.user?.first_name ?? ctx.user_extras?.email ?? null,
+    };
+  }
+
+  /** Batch-fetch basic user info for multiple user IDs (deduped, parallel) */
+  async batchGetUserBasicInfo(userIds: string[]): Promise<Map<string, UserBasicInfo>> {
+    const unique = [...new Set(userIds.filter(Boolean))];
+    const results = await Promise.allSettled(
+      unique.map(id => this.getUserBasicInfo(id))
+    );
+    const map = new Map<string, UserBasicInfo>();
+    results.forEach((r, i) => {
+      if (r.status === 'fulfilled') {
+        map.set(unique[i], r.value);
+      }
+    });
+    return map;
+  }
+
   async listUsers(params?: {
     offset?: number;
     limit?: number;
@@ -499,6 +525,13 @@ export interface HotelOpportunityListResponse {
   total: number;
   limit: number;
   offset: number;
+}
+
+export interface UserBasicInfo {
+  id: string;
+  email: string | null;
+  phone: string | null;
+  name: string | null;
 }
 
 export interface MemberSummary {
