@@ -13,7 +13,7 @@ import {
   Tooltip,
 } from 'recharts';
 import { api, UserListItem } from '@/lib/api';
-import { cn } from '@/lib/utils';
+import { cn, exportCSV, exportJSON } from '@/lib/utils';
 
 // ── Types ────────────────────────────────────────────────
 
@@ -479,6 +479,19 @@ export default function MetricsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [fetchProgress, setFetchProgress] = useState<string | null>(null);
+  const [showExportMenu, setShowExportMenu] = useState(false);
+  const exportRef = useRef<HTMLDivElement>(null);
+
+  // Close export menu on outside click
+  useEffect(() => {
+    function handler(e: MouseEvent) {
+      if (exportRef.current && !exportRef.current.contains(e.target as Node)) {
+        setShowExportMenu(false);
+      }
+    }
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
 
   // Helper: format Date to YYYY-MM-DD
   const toDateKey = useCallback((d: Date) => {
@@ -641,6 +654,51 @@ export default function MetricsPage() {
     };
   }, [filteredUsers, chartData, granularity]);
 
+  // Export handlers
+  function handleExport(type: 'chart_csv' | 'users_csv' | 'json') {
+    setShowExportMenu(false);
+    const date = new Date().toISOString().slice(0, 10);
+    const rangeSuffix = dateRange === 'custom' ? `${customStart}_${customEnd}` : dateRange;
+
+    if (type === 'chart_csv') {
+      const rows = chartData.map(d => ({
+        period: d.date,
+        period_key: d.dateRaw,
+        new_users: d.count,
+        cumulative_users: d.cumulative,
+        granularity,
+        timezone,
+      }));
+      exportCSV(rows, `user-growth-${rangeSuffix}-${date}.csv`);
+    } else if (type === 'users_csv') {
+      const rows = filteredUsers.map(u => ({
+        id: u.id,
+        email: u.email ?? '',
+        phone: u.phone_number ?? '',
+        name: u.name ?? '',
+        status: u.status,
+        membership_status: u.membership_status ?? '',
+        membership_plan: u.membership_plan ?? '',
+        created_at: u.created_at,
+        hotel_count: u.hotel_count ?? '',
+        flight_count: u.flight_count ?? '',
+        email_count: u.email_count ?? '',
+      }));
+      exportCSV(rows, `users-${rangeSuffix}-${date}.csv`);
+    } else {
+      exportJSON({
+        exported_at: new Date().toISOString(),
+        date_range: dateRange === 'custom' ? `${customStart} to ${customEnd}` : dateRange,
+        granularity,
+        timezone,
+        status_filter: statusFilter,
+        stats,
+        chart_data: chartData,
+        users: filteredUsers,
+      }, `metrics-full-${rangeSuffix}-${date}.json`);
+    }
+  }
+
   // Date range display string
   const dateRangeLabel = useMemo(() => {
     const fmt = (d: Date) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
@@ -675,16 +733,42 @@ export default function MetricsPage() {
             User growth and registration trends
           </p>
         </div>
-        <button
-          onClick={fetchData}
-          disabled={loading}
-          className="px-3 py-2 text-sm font-medium bg-accent/50 rounded-lg hover:bg-accent disabled:opacity-30 transition-colors flex items-center gap-1.5"
-        >
-          <svg className={cn("w-4 h-4", loading && "animate-spin")} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M21 12a9 9 0 1 1-9-9" strokeLinecap="round" />
-          </svg>
-          Refresh
-        </button>
+        <div className="flex items-center gap-2">
+          {!loading && filteredUsers.length > 0 && (
+            <div ref={exportRef} className="relative">
+              <button
+                onClick={() => setShowExportMenu(v => !v)}
+                className="px-3 py-2 text-sm font-medium bg-accent/50 rounded-lg hover:bg-accent transition-colors flex items-center gap-1.5"
+              >
+                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></svg>
+                Export
+              </button>
+              {showExportMenu && (
+                <div className="absolute right-0 top-full mt-1 z-50 bg-[#0d1117] border border-[#1a1f2e] rounded-lg shadow-xl overflow-hidden min-w-[200px]">
+                  <button onClick={() => handleExport('chart_csv')} className="w-full text-left px-4 py-2.5 text-sm text-zinc-300 hover:bg-accent/50 transition-colors">
+                    Chart data (CSV)
+                  </button>
+                  <button onClick={() => handleExport('users_csv')} className="w-full text-left px-4 py-2.5 text-sm text-zinc-300 hover:bg-accent/50 transition-colors border-t border-[#1a1f2e]">
+                    User list (CSV)
+                  </button>
+                  <button onClick={() => handleExport('json')} className="w-full text-left px-4 py-2.5 text-sm text-zinc-300 hover:bg-accent/50 transition-colors border-t border-[#1a1f2e]">
+                    Full export (JSON)
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+          <button
+            onClick={fetchData}
+            disabled={loading}
+            className="px-3 py-2 text-sm font-medium bg-accent/50 rounded-lg hover:bg-accent disabled:opacity-30 transition-colors flex items-center gap-1.5"
+          >
+            <svg className={cn("w-4 h-4", loading && "animate-spin")} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M21 12a9 9 0 1 1-9-9" strokeLinecap="round" />
+            </svg>
+            Refresh
+          </button>
+        </div>
       </div>
 
       {/* Controls Row 1: Date range, Granularity, Status */}

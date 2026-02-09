@@ -1,10 +1,10 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { api } from '@/lib/api';
 import type { BusinessDashboardResponse, MetricPoint, PeriodOnly } from '@/lib/api';
-import { cn } from '@/lib/utils';
-import { RefreshCw } from 'lucide-react';
+import { cn, exportCSV, exportJSON } from '@/lib/utils';
+import { RefreshCw, Download } from 'lucide-react';
 
 // ── Helpers ──────────────────────────────────────────────
 
@@ -105,10 +105,80 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 // ── Main Page ────────────────────────────────────────────
 
+function flattenBusinessData(data: BusinessDashboardResponse): Record<string, unknown>[] {
+  const ts = new Date().toISOString();
+  const fmtCents = (c: number) => (c / 100).toFixed(2);
+  const mp = (prefix: string, p: MetricPoint) => ({
+    [`${prefix}_current`]: p.current,
+    [`${prefix}_last_7d`]: p.last_7,
+    [`${prefix}_prev_7d`]: p.prev_7,
+  });
+  const pp = (prefix: string, p: PeriodOnly) => ({
+    [`${prefix}_last_7d`]: p.last_7,
+    [`${prefix}_prev_7d`]: p.prev_7,
+  });
+
+  return [{
+    exported_at: ts,
+    ...(data.users ? {
+      ...mp('users_total', data.users.total),
+      ...mp('users_paid', data.users.paid),
+      ...mp('users_referred', data.users.referred),
+      ...mp('users_free', data.users.free),
+    } : {}),
+    ...(data.bookings ? {
+      ...mp('bookings_total', data.bookings.total),
+      ...mp('bookings_flights', data.bookings.flights),
+      ...mp('bookings_hotels', data.bookings.hotels),
+      ...mp('bookings_monitored', data.bookings.monitored),
+    } : {}),
+    ...(data.opportunities ? {
+      ...mp('opportunities_total', data.opportunities.total),
+      ...mp('opportunities_flights', data.opportunities.flights),
+      ...mp('opportunities_hotels', data.opportunities.hotels),
+      ...pp('opportunities_completed', data.opportunities.completed),
+    } : {}),
+    ...(data.value ? {
+      mrr_usd: fmtCents(data.value.mrr_usd_cents.current),
+      mrr_usd_last_7d: fmtCents(data.value.mrr_usd_cents.last_7),
+      mrr_usd_prev_7d: fmtCents(data.value.mrr_usd_cents.prev_7),
+      money_rescued_usd_last_7d: fmtCents(data.value.money_rescued_usd_cents.last_7),
+      money_rescued_usd_prev_7d: fmtCents(data.value.money_rescued_usd_cents.prev_7),
+      hotel_revenue_usd_last_7d: fmtCents(data.value.hotel_revenue_usd_cents.last_7),
+      hotel_revenue_usd_prev_7d: fmtCents(data.value.hotel_revenue_usd_cents.prev_7),
+    } : {}),
+    pipeline_issues_count: data.pipeline_issues?.length ?? 0,
+  }];
+}
+
 export default function BusinessPage() {
   const [data, setData] = useState<BusinessDashboardResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [showExportMenu, setShowExportMenu] = useState(false);
+  const exportRef = useRef<HTMLDivElement>(null);
+
+  // Close export menu on outside click
+  useEffect(() => {
+    function handler(e: MouseEvent) {
+      if (exportRef.current && !exportRef.current.contains(e.target as Node)) {
+        setShowExportMenu(false);
+      }
+    }
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  function handleExport(format: 'csv' | 'json') {
+    if (!data) return;
+    setShowExportMenu(false);
+    const date = new Date().toISOString().slice(0, 10);
+    if (format === 'csv') {
+      exportCSV(flattenBusinessData(data), `business-metrics-${date}.csv`);
+    } else {
+      exportJSON(data, `business-metrics-${date}.json`);
+    }
+  }
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -136,14 +206,37 @@ export default function BusinessPage() {
           <h1 className="text-2xl font-semibold">Business</h1>
           <p className="text-sm text-muted-foreground mt-1">Snapshot of key metrics</p>
         </div>
-        <button
-          onClick={fetchData}
-          disabled={loading}
-          className="px-3 py-2 text-sm font-medium bg-accent/50 rounded-lg hover:bg-accent disabled:opacity-30 transition-colors flex items-center gap-1.5"
-        >
-          <RefreshCw className={cn('w-4 h-4', loading && 'animate-spin')} />
-          Refresh
-        </button>
+        <div className="flex items-center gap-2">
+          {data && !loading && (
+            <div ref={exportRef} className="relative">
+              <button
+                onClick={() => setShowExportMenu(v => !v)}
+                className="px-3 py-2 text-sm font-medium bg-accent/50 rounded-lg hover:bg-accent transition-colors flex items-center gap-1.5"
+              >
+                <Download className="w-4 h-4" />
+                Export
+              </button>
+              {showExportMenu && (
+                <div className="absolute right-0 top-full mt-1 z-50 bg-[#0d1117] border border-[#1a1f2e] rounded-lg shadow-xl overflow-hidden min-w-[140px]">
+                  <button onClick={() => handleExport('csv')} className="w-full text-left px-4 py-2.5 text-sm text-zinc-300 hover:bg-accent/50 transition-colors">
+                    Export as CSV
+                  </button>
+                  <button onClick={() => handleExport('json')} className="w-full text-left px-4 py-2.5 text-sm text-zinc-300 hover:bg-accent/50 transition-colors border-t border-[#1a1f2e]">
+                    Export as JSON
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+          <button
+            onClick={fetchData}
+            disabled={loading}
+            className="px-3 py-2 text-sm font-medium bg-accent/50 rounded-lg hover:bg-accent disabled:opacity-30 transition-colors flex items-center gap-1.5"
+          >
+            <RefreshCw className={cn('w-4 h-4', loading && 'animate-spin')} />
+            Refresh
+          </button>
+        </div>
       </div>
 
       {error ? (
