@@ -130,7 +130,7 @@ class ApiClient {
     this.baseUrl = baseUrl;
   }
 
-  private async fetch<T>(path: string, options?: RequestInit): Promise<T> {
+  private async fetchOnce<T>(path: string, options?: RequestInit): Promise<T> {
     const url = `${this.baseUrl}${path}`;
 
     const controller = new AbortController();
@@ -169,6 +169,39 @@ class ApiClient {
     } finally {
       clearTimeout(timeoutId);
     }
+  }
+
+  /**
+   * Fetch with automatic retry on transient server errors (500/502/503/504).
+   * Uses exponential backoff: 2s → 4s between retries, up to 2 retries.
+   */
+  private async fetch<T>(path: string, options?: RequestInit): Promise<T> {
+    const MAX_RETRIES = 2;
+    const BASE_DELAY = 2000; // 2 seconds
+
+    let lastError: unknown;
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        return await this.fetchOnce<T>(path, options);
+      } catch (error) {
+        lastError = error;
+        const isRetryable =
+          error instanceof ApiError &&
+          [500, 502, 503, 504].includes(error.status);
+
+        if (!isRetryable || attempt === MAX_RETRIES) {
+          throw error;
+        }
+
+        // Exponential backoff: 2s, 4s
+        const delay = BASE_DELAY * Math.pow(2, attempt);
+        console.warn(
+          `[api] Retrying ${options?.method || 'GET'} ${path} (attempt ${attempt + 1}/${MAX_RETRIES}) after ${delay}ms — got ${(error as ApiError).status}`
+        );
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      }
+    }
+    throw lastError;
   }
 
   // Tasks

@@ -240,6 +240,7 @@ export default function TasksPage() {
   const [hotelOpportunities, setHotelOpportunities] = useState<HotelOpportunity[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [refreshKey, setRefreshKey] = useState(0);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [selectedEscalation, setSelectedEscalation] = useState<Escalation | null>(null);
   const [taskDetailLoading, setTaskDetailLoading] = useState(false);
@@ -413,7 +414,7 @@ export default function TasksPage() {
     }
 
     fetchData();
-  }, [activeTab]);
+  }, [activeTab, refreshKey]);
 
   return (
     <div>
@@ -449,8 +450,15 @@ export default function TasksPage() {
             Loading...
           </div>
         ) : error ? (
-          <div className="p-6 text-center text-red-400">
-            {error}
+          <div className="p-6 text-center">
+            <p className="text-red-400 mb-2">{error}</p>
+            <p className="text-muted-foreground text-sm mb-3">The backend may be under heavy load. Retries are automatic, but you can try again manually.</p>
+            <button
+              onClick={() => setRefreshKey(k => k + 1)}
+              className="px-4 py-2 bg-primary text-primary-foreground rounded-md text-sm hover:bg-primary/90 transition-colors"
+            >
+              Retry
+            </button>
           </div>
         ) : activeTab === 'escalations' ? (
           escalations.length === 0 ? (
