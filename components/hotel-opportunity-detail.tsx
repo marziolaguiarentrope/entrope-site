@@ -207,12 +207,12 @@ export function HotelOpportunityDetail({
         fullNotes += `\nCancellation ref: ${confirmationCode.trim()}`;
       }
 
-      // Send the booking's own confirmation code for backend verification (not the operator's input)
+      // Don't send confirmation_code — it's an optional verification field and
+      // the opportunity summary's code may not match the booking record exactly.
       await api.markBookingCancelled(
         'hotel',
         opportunity.old_booking_id,
         fullNotes,
-        opportunity.old_booking_confirmation_code || undefined
       );
       // Update the opportunity status locally
       onUpdate({
