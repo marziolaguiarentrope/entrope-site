@@ -197,25 +197,14 @@ export default function EscalationsPage() {
   // Auto-refresh
   const refreshTimer = useRef<NodeJS.Timeout | null>(null);
 
-  // Fetch data — request escalations based on current tab
-  const fetchData = useCallback(async (forTab?: TabFilter) => {
+  // Fetch ALL escalations once — tab switching is purely client-side filtering
+  const fetchData = useCallback(async () => {
     setLoading(true);
     setError(null);
 
     try {
-      const activeTab = forTab ?? tab;
-      let statuses: string[];
-      if (activeTab === 'resolved') {
-        statuses = ['resolved'];
-      } else if (activeTab === 'all') {
-        statuses = ['open', 'claimed', 'resolved'];
-      } else {
-        // Default fetch: open + claimed (covers the open and claimed tabs)
-        statuses = ['open', 'claimed'];
-      }
-
       const response = await api.listEscalations({
-        status: statuses,
+        status: ['open', 'claimed', 'resolved'],
         limit: 100,
       });
       setEscalations(response.escalations);
@@ -225,18 +214,18 @@ export default function EscalationsPage() {
     } finally {
       setLoading(false);
     }
-  }, [tab]);
+  }, []);
 
-  useEffect(() => { fetchData(tab); }, [tab]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { fetchData(); }, [fetchData]);
 
   // Auto-refresh every 30s
   useEffect(() => {
     if (refreshTimer.current) clearInterval(refreshTimer.current);
-    refreshTimer.current = setInterval(() => fetchData(tab), 30_000);
+    refreshTimer.current = setInterval(() => fetchData(), 30_000);
     return () => {
       if (refreshTimer.current) clearInterval(refreshTimer.current);
     };
-  }, [tab]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [fetchData]);
 
   // Tab filter
   const tabFiltered = useMemo(() => {
@@ -381,7 +370,7 @@ export default function EscalationsPage() {
 
         {/* Refresh */}
         <button
-          onClick={() => fetchData(tab)}
+          onClick={() => fetchData()}
           disabled={loading}
           className="px-3 py-1.5 text-xs font-medium bg-accent/50 text-muted-foreground rounded-lg hover:bg-accent transition-colors disabled:opacity-50"
           title="Refresh"
@@ -395,7 +384,7 @@ export default function EscalationsPage() {
         {error ? (
           <div className="p-6 text-center">
             <p className="text-red-400 mb-2">{error}</p>
-            <button onClick={() => fetchData(tab)} className="px-4 py-2 bg-primary text-primary-foreground rounded-lg text-sm font-medium hover:bg-primary/90 transition-colors">
+            <button onClick={() => fetchData()} className="px-4 py-2 bg-primary text-primary-foreground rounded-lg text-sm font-medium hover:bg-primary/90 transition-colors">
               Retry
             </button>
           </div>
