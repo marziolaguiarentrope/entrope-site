@@ -258,7 +258,10 @@ function HotelOpportunityInfo({
   const bookedWith = hotelBooking?.booked_with;
   const originalPrice = hotelBooking?.total_price || opportunity?.original_price;
   const targetPrice = opportunity?.target_price;
-  const confirmationCode = confCode || hotelBooking?.confirmation_code;
+  // Original hotel confirmation (from the customer's booking)
+  const originalConfirmation = confCode || hotelBooking?.confirmation_code;
+  // Axel's new booking confirmation (from the repriced booking, if it exists)
+  const newBookingId = opportunity?.new_booking_id;
   const oppStatus = opportunity?.status || 'unknown';
   const failureReason = opportunity?.failure_reason;
 
@@ -303,11 +306,11 @@ function HotelOpportunityInfo({
         <p className="text-xs text-red-400 bg-red-500/10 px-2 py-1 rounded">{failureReason}</p>
       )}
 
-      {/* Room + guests */}
-      {(roomType || guests?.length) && (
+      {/* Room + guest count */}
+      {(roomType || (guests && guests.length > 0)) && (
         <div className="text-xs text-muted-foreground space-y-0.5">
           {roomType && <p>{roomType}</p>}
-          {guests && guests.length > 0 && <p>Guests: {guests.join(', ')}</p>}
+          {guests && guests.length > 0 && <p>{guests.length} guest{guests.length !== 1 ? 's' : ''}</p>}
         </div>
       )}
 
@@ -359,10 +362,16 @@ function HotelOpportunityInfo({
             </span>
           </>
         )}
-        {confirmationCode && (
+        {originalConfirmation && (
           <>
-            <span className="text-muted-foreground">Confirmation</span>
-            <span className="text-right font-mono text-xs">{confirmationCode}</span>
+            <span className="text-muted-foreground">Original Conf.</span>
+            <span className="text-right font-mono text-xs">{originalConfirmation}</span>
+          </>
+        )}
+        {newBookingId && (
+          <>
+            <span className="text-muted-foreground">Axel Booking</span>
+            <span className="text-right font-mono text-xs truncate max-w-[160px]" title={newBookingId}>{newBookingId.slice(0, 8)}…</span>
           </>
         )}
         {bookedWith && (
