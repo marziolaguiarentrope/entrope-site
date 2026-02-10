@@ -1713,7 +1713,7 @@ function TripCard({ trip, watches, travellers, hotelOpportunities, onRefresh }: 
 
   // Check if any booking in this trip has repricing activity
   const tripBookingIds = new Set(trip.bookings.map(b => b.id));
-  const tripHasRepricing = hotelOpportunities?.some(o => o.booking_id && tripBookingIds.has(o.booking_id));
+  const tripHasRepricing = hotelOpportunities?.some(o => o.hotel_booking_id && tripBookingIds.has(o.hotel_booking_id));
 
   return (
     <div className="bg-accent/30 rounded overflow-hidden">
@@ -1752,7 +1752,7 @@ function TripCard({ trip, watches, travellers, hotelOpportunities, onRefresh }: 
         <div className="p-2 pt-0 space-y-2">
           {trip.bookings.map((booking) => {
             // Filter opportunities for this specific booking
-            const bookingOpps = hotelOpportunities?.filter(o => o.booking_id === booking.id) || [];
+            const bookingOpps = hotelOpportunities?.filter(o => o.hotel_booking_id === booking.id) || [];
             return (
               <BookingCard
                 key={booking.id}

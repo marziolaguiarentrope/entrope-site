@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { Escalation, api, UserBasicInfo, HotelOpportunityView, HotelBookingView, BookingView, MemberContext } from '@/lib/api';
+import { Escalation, api, UserBasicInfo, HotelOpportunityView, HotelBookingView, BookingView, MemberContext, RawEmail } from '@/lib/api';
 import { cn, formatDate } from '@/lib/utils';
 
 // ── Helpers ──────────────────────────────────────────────
@@ -149,6 +149,12 @@ function HotelOpportunityInfo({
   const [bookingId, setBookingId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // Source email state
+  const [showEmail, setShowEmail] = useState(false);
+  const [emailData, setEmailData] = useState<RawEmail | null>(null);
+  const [emailLoading, setEmailLoading] = useState(false);
+  const [emailFetched, setEmailFetched] = useState(false);
+
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
@@ -162,11 +168,11 @@ function HotelOpportunityInfo({
         );
         setOpportunity(match || null);
 
-        // Find the original hotel booking from trips using the opportunity's booking_id
+        // Find the original hotel booking from trips using the opportunity's hotel_booking_id
         // or from escalation context booking_id / hotel_booking_id
-        const bId = match?.booking_id
-          || (contextData.booking_id as string | undefined)
-          || (contextData.hotel_booking_id as string | undefined);
+        const bId = match?.hotel_booking_id
+          || (contextData.hotel_booking_id as string | undefined)
+          || (contextData.booking_id as string | undefined);
         setBookingId(bId || null);
 
         if (bId) {
@@ -337,12 +343,65 @@ function HotelOpportunityInfo({
         )}
       </div>
 
+      {/* Source Email */}
+      {(opportunity?.hotel_booking_id || bookingId) && (
+        <div className="pt-2 border-t border-purple-500/10">
+          <button
+            onClick={async () => {
+              if (emailFetched) { setShowEmail(!showEmail); return; }
+              setShowEmail(true);
+              setEmailFetched(true);
+              setEmailLoading(true);
+              const bkId = opportunity?.hotel_booking_id || bookingId!;
+              try {
+                const data = await api.getEmailForBooking('hotel', bkId);
+                setEmailData(data);
+              } catch {
+                // 404 = no source email, that's ok
+              } finally {
+                setEmailLoading(false);
+              }
+            }}
+            className="text-xs text-primary hover:underline flex items-center gap-1"
+          >
+            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+            </svg>
+            {showEmail ? 'Hide' : 'View'} Original Email
+          </button>
+          {showEmail && (
+            <div className="mt-2">
+              {emailLoading ? (
+                <p className="text-xs text-muted-foreground">Loading email…</p>
+              ) : emailData ? (
+                <div className="bg-accent/30 rounded-lg p-3 space-y-2">
+                  {emailData.subject && (
+                    <p className="text-xs font-medium">{emailData.subject}</p>
+                  )}
+                  <div className="flex gap-4 text-xs text-muted-foreground">
+                    {emailData.from_address && <span>From: {emailData.from_address}</span>}
+                    {emailData.received_at && <span>{formatDate(emailData.received_at)}</span>}
+                  </div>
+                  {(emailData.body_text || emailData.body) && (
+                    <div className="max-h-48 overflow-y-auto text-xs bg-background/50 rounded p-2 whitespace-pre-wrap font-mono">
+                      {emailData.body_text || emailData.body}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <p className="text-xs text-muted-foreground">No source email found for this booking</p>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Link to user profile (booking view) + compact IDs */}
       <div className="pt-2 border-t border-purple-500/10 flex items-center justify-between">
         <div className="flex flex-wrap gap-3">
           <IdPill label="Opportunity" value={opportunityId} />
-          {(opportunity?.booking_id || bookingId) && (
-            <IdPill label="Booking" value={opportunity?.booking_id || bookingId!} />
+          {(opportunity?.hotel_booking_id || bookingId) && (
+            <IdPill label="Booking" value={opportunity?.hotel_booking_id || bookingId!} />
           )}
         </div>
         <Link

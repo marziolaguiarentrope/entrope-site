@@ -815,7 +815,7 @@ export interface FlightOpportunityView {
 export interface HotelOpportunityView {
   id: string;
   status: string;
-  booking_id: string | null;
+  hotel_booking_id: string | null;
   hotel_name: string | null;
   check_in: string | null;
   check_out: string | null;

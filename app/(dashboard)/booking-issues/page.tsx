@@ -234,7 +234,7 @@ function findOpportunity(ctx: MemberContext, issue: RepricingPipelineIssue): Hot
     return ctx.flight_opportunities.find((o) => o.id === issue.opportunity_id);
   }
   if (issue.booking_id) {
-    const ho = ctx.hotel_opportunities.find((o) => o.booking_id === issue.booking_id);
+    const ho = ctx.hotel_opportunities.find((o) => o.hotel_booking_id === issue.booking_id);
     if (ho) return ho;
     return ctx.flight_opportunities.find((o) => o.booking_id === issue.booking_id);
   }
