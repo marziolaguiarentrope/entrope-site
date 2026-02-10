@@ -229,47 +229,64 @@ export default function EscalationsPage() {
     setError(null);
 
     try {
-      // Fetch open escalations from server
+      // 1. Fetch open escalations from server
       const response = await api.listEscalations({ limit: 100 });
       const openFromServer = response.escalations;
-      const serverIds = new Set(openFromServer.map(e => e.id));
+      const allById = new Map<string, Escalation>();
+      openFromServer.forEach(e => allById.set(e.id, e));
 
-      // Re-fetch claimed escalations by ID from localStorage
-      const storedIds = getStoredClaimedIds();
-      const claimedToFetch = storedIds.filter(id => !serverIds.has(id));
-
-      const claimedResults = await Promise.allSettled(
-        claimedToFetch.map(id => api.getEscalation(id))
+      // 2. Discover claimed escalations by fetching all escalations for each
+      //    unique user_id. The backend returns ALL statuses when user_id is provided,
+      //    so this surfaces claimed escalations that the open-only list misses.
+      const uniqueUserIds = [...new Set(openFromServer.map(e => e.user_id))];
+      const userResults = await Promise.allSettled(
+        uniqueUserIds.map(uid => api.listEscalations({ user_id: uid, limit: 100 }))
       );
-
-      const claimedEscalations: Escalation[] = [];
-      const idsToRemove: string[] = [];
-
-      claimedResults.forEach((result, i) => {
+      userResults.forEach(result => {
         if (result.status === 'fulfilled') {
-          const esc = result.value;
-          // Only keep if still claimed (not resolved/reopened)
-          if (esc.status === 'claimed') {
-            claimedEscalations.push(esc);
-          } else if (esc.status === 'resolved') {
-            idsToRemove.push(claimedToFetch[i]);
-          }
-          // If it's open, it'll be in openFromServer already
-        } else {
-          // Failed to fetch — remove stale ID
-          idsToRemove.push(claimedToFetch[i]);
+          result.value.escalations.forEach(e => {
+            if (!allById.has(e.id) && (e.status === 'claimed' || e.status === 'open')) {
+              allById.set(e.id, e);
+            }
+          });
         }
       });
 
-      // Clean up resolved/stale IDs from storage
-      idsToRemove.forEach(id => removeClaimedId(id));
+      // 3. Also re-fetch any claimed IDs stored in localStorage (catches escalations
+      //    for users who have no open escalations, so weren't discovered above)
+      const storedIds = getStoredClaimedIds();
+      const storedToFetch = storedIds.filter(id => !allById.has(id));
 
-      // Also remove any IDs that are back in the open list (re-opened)
+      if (storedToFetch.length > 0) {
+        const storedResults = await Promise.allSettled(
+          storedToFetch.map(id => api.getEscalation(id))
+        );
+
+        const idsToRemove: string[] = [];
+        storedResults.forEach((result, i) => {
+          if (result.status === 'fulfilled') {
+            const esc = result.value;
+            if (esc.status === 'claimed') {
+              allById.set(esc.id, esc);
+            } else if (esc.status === 'resolved') {
+              idsToRemove.push(storedToFetch[i]);
+            }
+          } else {
+            idsToRemove.push(storedToFetch[i]);
+          }
+        });
+
+        // Clean up resolved/stale IDs from storage
+        idsToRemove.forEach(id => removeClaimedId(id));
+      }
+
+      // Clean up localStorage IDs that are already in the main list
       storedIds.forEach(id => {
-        if (serverIds.has(id)) removeClaimedId(id);
+        const esc = allById.get(id);
+        if (esc && esc.status !== 'claimed') removeClaimedId(id);
       });
 
-      setEscalations([...openFromServer, ...claimedEscalations]);
+      setEscalations([...allById.values()]);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch data');
       setEscalations([]);
