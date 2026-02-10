@@ -258,9 +258,12 @@ function HotelOpportunityInfo({
   const bookedWith = hotelBooking?.booked_with;
   const originalPrice = hotelBooking?.total_price || opportunity?.original_price;
   const targetPrice = opportunity?.target_price;
-  // Original hotel confirmation (from the customer's booking)
-  const originalConfirmation = confCode || hotelBooking?.confirmation_code;
-  // Axel's new booking confirmation (from the repriced booking, if it exists)
+  // Confirmation codes: confCode from escalation context may be the Axel code (AXL- prefix)
+  // hotelBooking?.confirmation_code is the original hotel's confirmation
+  const hotelConfCode = hotelBooking?.confirmation_code;
+  const axelConfCode = confCode?.startsWith('AXL') ? confCode : null;
+  const originalConfirmation = hotelConfCode || (!axelConfCode ? confCode : null);
+  // Axel's new booking ID (from the repriced booking, if it exists)
   const newBookingId = opportunity?.new_booking_id;
   const oppStatus = opportunity?.status || 'unknown';
   const failureReason = opportunity?.failure_reason;
@@ -315,25 +318,30 @@ function HotelOpportunityInfo({
       )}
 
       {/* Pricing row */}
-      {(originalPrice || targetPrice) && (
-        <div className="flex items-center gap-3 text-sm">
-          {originalPrice && (
-            <span className={cn(targetPrice ? 'line-through text-muted-foreground' : 'font-medium')}>
-              {new Intl.NumberFormat('en-US', { style: 'currency', currency: originalPrice.currency || 'USD' }).format(originalPrice.amount / 100)}
-            </span>
-          )}
-          {targetPrice && (
-            <span className="text-green-400 font-medium">
-              {new Intl.NumberFormat('en-US', { style: 'currency', currency: targetPrice.currency || 'USD' }).format(targetPrice.amount / 100)}
-            </span>
-          )}
-          {originalPrice && targetPrice && originalPrice.amount > targetPrice.amount && (
-            <span className="text-green-400 text-xs bg-green-500/10 px-1.5 py-0.5 rounded">
-              Save {new Intl.NumberFormat('en-US', { style: 'currency', currency: originalPrice.currency || 'USD' }).format((originalPrice.amount - targetPrice.amount) / 100)}
-            </span>
-          )}
-        </div>
-      )}
+      {(originalPrice || targetPrice) && (() => {
+        const fmtPrice = (p: { amount: number; currency: string }) =>
+          new Intl.NumberFormat('en-US', { style: 'currency', currency: p.currency || 'USD' }).format(p.amount / 100);
+        const sameCurrency = originalPrice && targetPrice && originalPrice.currency === targetPrice.currency;
+        return (
+          <div className="flex items-center gap-3 text-sm flex-wrap">
+            {originalPrice && (
+              <span className={cn(targetPrice ? 'line-through text-muted-foreground' : 'font-medium')}>
+                {fmtPrice(originalPrice)}
+              </span>
+            )}
+            {targetPrice && (
+              <span className="text-green-400 font-medium">
+                {fmtPrice(targetPrice)}
+              </span>
+            )}
+            {sameCurrency && originalPrice.amount > targetPrice.amount && (
+              <span className="text-green-400 text-xs bg-green-500/10 px-1.5 py-0.5 rounded">
+                Save {fmtPrice({ amount: originalPrice.amount - targetPrice.amount, currency: originalPrice.currency })}
+              </span>
+            )}
+          </div>
+        );
+      })()}
 
       {/* Key details grid */}
       <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
@@ -342,11 +350,11 @@ function HotelOpportunityInfo({
             <span className="text-muted-foreground">Payment</span>
             <span className={cn(
               'text-right font-medium',
-              opportunity.payment_status === 'paid' && 'text-green-400',
+              ['paid', 'card_saved'].includes(opportunity.payment_status) && 'text-green-400',
               opportunity.payment_status === 'pending' && 'text-yellow-400',
               opportunity.payment_status === 'failed' && 'text-red-400',
             )}>
-              {opportunity.payment_status}
+              {opportunity.payment_status.replace(/_/g, ' ')}
               {opportunity.payment_amount ? ` (${formatMoney(opportunity.payment_amount, opportunity.payment_currency || 'USD')})` : ''}
             </span>
           </>
@@ -364,8 +372,14 @@ function HotelOpportunityInfo({
         )}
         {originalConfirmation && (
           <>
-            <span className="text-muted-foreground">Original Conf.</span>
+            <span className="text-muted-foreground">Hotel Conf.</span>
             <span className="text-right font-mono text-xs">{originalConfirmation}</span>
+          </>
+        )}
+        {axelConfCode && (
+          <>
+            <span className="text-muted-foreground">Axel Conf.</span>
+            <span className="text-right font-mono text-xs">{axelConfCode}</span>
           </>
         )}
         {newBookingId && (
