@@ -1714,15 +1714,21 @@ export function MemberDetail({
           <div className="bg-card border border-border rounded-lg p-4">
             <h3 className="text-sm font-medium mb-3">Member Info</h3>
             <div className="space-y-2 text-sm">
-              <div className="flex justify-between items-center">
-                <span className="text-muted-foreground">ID</span>
-                <button
-                  onClick={() => { navigator.clipboard.writeText(member.id); }}
-                  title="Click to copy"
-                  className="font-mono text-xs hover:text-foreground transition-colors cursor-pointer text-right break-all"
-                >
-                  {member.id}
-                </button>
+              <div className="flex justify-between items-center gap-2">
+                <span className="text-muted-foreground shrink-0">ID</span>
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <span className="font-mono text-xs select-all text-right break-all">{member.id}</span>
+                  <button
+                    onClick={() => { navigator.clipboard.writeText(member.id); }}
+                    title="Copy ID"
+                    className="shrink-0 p-1 hover:bg-accent rounded transition-colors text-muted-foreground hover:text-foreground"
+                  >
+                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <rect x="9" y="9" width="13" height="13" rx="2" ry="2" strokeWidth={2} />
+                      <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" strokeWidth={2} />
+                    </svg>
+                  </button>
+                </div>
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Phone</span>
@@ -1909,7 +1915,7 @@ export function MemberDetail({
 
               {/* Pending Tasks */}
               {context.pending_tasks.length > 0 && (
-                <Section title="Pending Tasks" count={context.pending_tasks.length} defaultOpen>
+                <Section title="Pending Tasks" count={context.pending_tasks.length}>
                   <>
                     {context.pending_tasks.map((task, idx) => (
                       <TaskCard key={task.id ?? `task-${idx}`} task={task} />
@@ -1924,7 +1930,6 @@ export function MemberDetail({
                   title="Opportunities"
                   count={context.flight_opportunities.length + context.hotel_opportunities.length}
                   badge={{ text: 'Active', variant: 'success' }}
-                  defaultOpen
                 >
                   {[
                     ...context.flight_opportunities.map((opp) => (
