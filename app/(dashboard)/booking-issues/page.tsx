@@ -1085,14 +1085,16 @@ function IssueRow({
   onActionComplete,
   memberContext,
   onRequestContext,
+  issueKey,
 }: {
   issue: RepricingPipelineIssue;
   stage: PipelineStage | undefined;
   isExpanded: boolean;
   onToggle: () => void;
-  onActionComplete: () => void;
+  onActionComplete: (issueKey: string) => void;
   memberContext: MemberContext | 'loading' | 'error' | undefined;
   onRequestContext: (userId: string) => void;
+  issueKey: string;
 }) {
   // Fetch member context when row is expanded
   useEffect(() => {
@@ -1251,7 +1253,7 @@ function IssueRow({
             <IssueContextPanel issue={issue} memberContext={memberContext} />
 
             {/* Contextual actions */}
-            <IssueActions issue={issue} onActionComplete={onActionComplete} memberContext={memberContext} />
+            <IssueActions issue={issue} onActionComplete={() => onActionComplete(issueKey)} memberContext={memberContext} />
           </td>
         </tr>
       )}
@@ -1272,23 +1274,26 @@ function StageSection({
   onActionComplete,
   getMemberContext,
   onRequestContext,
+  collapsed,
+  onToggleCollapse,
 }: {
   stage: PipelineStage;
   issues: RepricingPipelineIssue[];
   expandedId: string | null;
   setExpandedId: (id: string | null) => void;
   getRowKey: (issue: RepricingPipelineIssue, index: number) => string;
-  onActionComplete: () => void;
+  onActionComplete: (issueKey: string) => void;
   getMemberContext: (userId: string) => MemberContext | 'loading' | 'error' | undefined;
   onRequestContext: (userId: string) => void;
+  collapsed: boolean;
+  onToggleCollapse: () => void;
 }) {
-  const [collapsed, setCollapsed] = useState(true);
   const Icon = stage.icon;
 
   return (
     <div className="mb-6">
       <button
-        onClick={() => setCollapsed(!collapsed)}
+        onClick={onToggleCollapse}
         className={cn(
           'w-full flex items-center gap-3 px-4 py-3 rounded-t-lg border border-border bg-card hover:bg-accent/50 transition-colors border-l-4',
           stage.headerColor,
@@ -1339,6 +1344,7 @@ function StageSection({
                       onActionComplete={onActionComplete}
                       memberContext={getMemberContext(issue.user_id)}
                       onRequestContext={onRequestContext}
+                      issueKey={key}
                     />
                   );
                 })}
@@ -1363,6 +1369,17 @@ export default function BookingIssuesPage() {
   const [filterStage, setFilterStage] = useState<string>('all');
   const [userIdInput, setUserIdInput] = useState('');
   const [activeUserId, setActiveUserId] = useState<string | undefined>(undefined);
+
+  // Track which stages are collapsed — persists across data refreshes
+  const [collapsedStages, setCollapsedStages] = useState<Record<string, boolean>>(() => {
+    const initial: Record<string, boolean> = {};
+    PIPELINE_STAGES.forEach(s => { initial[s.key] = true; });
+    return initial;
+  });
+
+  const toggleStageCollapse = useCallback((stageKey: string) => {
+    setCollapsedStages(prev => ({ ...prev, [stageKey]: !prev[stageKey] }));
+  }, []);
 
   // Member context cache — keyed by user_id
   const memberContextCache = useRef<Map<string, MemberContext | 'loading' | 'error'>>(new Map());
@@ -1409,6 +1426,32 @@ export default function BookingIssuesPage() {
   const handleRefresh = useCallback(() => {
     fetchData(activeUserId);
   }, [fetchData, activeUserId]);
+
+  // After an action, remove the issue from the local list immediately (so the
+  // operator can keep working on the next row without the page collapsing),
+  // then do a quiet background refresh to pick up any new issues.
+  const handleActionComplete = useCallback((issueKey: string) => {
+    setData(prev => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        issues: prev.issues.filter((_issue, idx) => {
+          const key = `${_issue.issue_type}-${_issue.user_id}-${_issue.booking_id ?? ''}-${idx}`;
+          return key !== issueKey;
+        }),
+      };
+    });
+    // Quiet background refresh after a short delay — does NOT set loading=true
+    // so the UI stays stable
+    setTimeout(async () => {
+      try {
+        const response = await api.getRepricingPipelineIssues(activeUserId);
+        setData(response);
+      } catch {
+        // Silently fail — the user already got feedback from the action
+      }
+    }, 3000);
+  }, [activeUserId]);
 
   const handleUserSearch = () => {
     const trimmed = userIdInput.trim();
@@ -1616,9 +1659,11 @@ export default function BookingIssuesPage() {
           expandedId={expandedId}
           setExpandedId={setExpandedId}
           getRowKey={getRowKey}
-          onActionComplete={handleRefresh}
+          onActionComplete={handleActionComplete}
           getMemberContext={getMemberContext}
           onRequestContext={fetchMemberContext}
+          collapsed={collapsedStages[stage.key] ?? true}
+          onToggleCollapse={() => toggleStageCollapse(stage.key)}
         />
       ))}
     </div>
