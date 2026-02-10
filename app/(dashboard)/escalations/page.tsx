@@ -191,109 +191,29 @@ export default function EscalationsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Persist claimed escalation IDs in localStorage so they survive page refresh.
-  // The backend only returns open escalations — claimed ones vanish from the list.
-  // We store their IDs and re-fetch each one individually on load.
-  const CLAIMED_IDS_KEY = 'escalation_claimed_ids';
-
-  function getStoredClaimedIds(): string[] {
-    try {
-      const raw = localStorage.getItem(CLAIMED_IDS_KEY);
-      return raw ? JSON.parse(raw) : [];
-    } catch {
-      return [];
-    }
-  }
-
-  function storeClaimedId(id: string) {
-    const ids = new Set(getStoredClaimedIds());
-    ids.add(id);
-    localStorage.setItem(CLAIMED_IDS_KEY, JSON.stringify([...ids]));
-  }
-
-  function removeClaimedId(id: string) {
-    const ids = new Set(getStoredClaimedIds());
-    ids.delete(id);
-    localStorage.setItem(CLAIMED_IDS_KEY, JSON.stringify([...ids]));
-  }
-
   // Detail panel
   const [selectedEscalation, setSelectedEscalation] = useState<Escalation | null>(null);
 
   // Auto-refresh
   const refreshTimer = useRef<NodeJS.Timeout | null>(null);
 
-  // Fetch data
+  // Fetch data — request both open and claimed escalations from the backend
   const fetchData = useCallback(async () => {
     setLoading(true);
     setError(null);
 
     try {
-      // 1. Fetch open escalations from server
-      const response = await api.listEscalations({ limit: 100 });
-      const openFromServer = response.escalations;
-      const allById = new Map<string, Escalation>();
-      openFromServer.forEach(e => allById.set(e.id, e));
-
-      // 2. Discover claimed escalations by fetching all escalations for each
-      //    unique user_id. The backend returns ALL statuses when user_id is provided,
-      //    so this surfaces claimed escalations that the open-only list misses.
-      const uniqueUserIds = [...new Set(openFromServer.map(e => e.user_id))];
-      const userResults = await Promise.allSettled(
-        uniqueUserIds.map(uid => api.listEscalations({ user_id: uid, limit: 100 }))
-      );
-      userResults.forEach(result => {
-        if (result.status === 'fulfilled') {
-          result.value.escalations.forEach(e => {
-            if (!allById.has(e.id) && (e.status === 'claimed' || e.status === 'open')) {
-              allById.set(e.id, e);
-            }
-          });
-        }
+      const response = await api.listEscalations({
+        status: ['open', 'claimed'],
+        limit: 100,
       });
-
-      // 3. Also re-fetch any claimed IDs stored in localStorage (catches escalations
-      //    for users who have no open escalations, so weren't discovered above)
-      const storedIds = getStoredClaimedIds();
-      const storedToFetch = storedIds.filter(id => !allById.has(id));
-
-      if (storedToFetch.length > 0) {
-        const storedResults = await Promise.allSettled(
-          storedToFetch.map(id => api.getEscalation(id))
-        );
-
-        const idsToRemove: string[] = [];
-        storedResults.forEach((result, i) => {
-          if (result.status === 'fulfilled') {
-            const esc = result.value;
-            if (esc.status === 'claimed') {
-              allById.set(esc.id, esc);
-            } else if (esc.status === 'resolved') {
-              idsToRemove.push(storedToFetch[i]);
-            }
-          } else {
-            idsToRemove.push(storedToFetch[i]);
-          }
-        });
-
-        // Clean up resolved/stale IDs from storage
-        idsToRemove.forEach(id => removeClaimedId(id));
-      }
-
-      // Clean up localStorage IDs that are already in the main list
-      storedIds.forEach(id => {
-        const esc = allById.get(id);
-        if (esc && esc.status !== 'claimed') removeClaimedId(id);
-      });
-
-      setEscalations([...allById.values()]);
+      setEscalations(response.escalations);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch data');
       setEscalations([]);
     } finally {
       setLoading(false);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => { fetchData(); }, [fetchData]);
@@ -340,14 +260,6 @@ export default function EscalationsPage() {
 
   // Handle escalation updates from the detail panel
   function handleUpdate(updated: Escalation) {
-    // Persist claimed IDs to localStorage so they survive page refresh
-    if (updated.status === 'claimed') {
-      storeClaimedId(updated.id);
-    }
-    if (updated.status === 'resolved') {
-      removeClaimedId(updated.id);
-    }
-
     setEscalations(prev => {
       const exists = prev.some(e => e.id === updated.id);
       if (exists) {

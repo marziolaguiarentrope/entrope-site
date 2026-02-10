@@ -255,10 +255,14 @@ class ApiClient {
   // Escalations
   async listEscalations(params?: {
     user_id?: string;
+    status?: string[];
     limit?: number;
   }): Promise<EscalationListResponse> {
     const searchParams = new URLSearchParams();
     if (params?.user_id) searchParams.set('user_id', params.user_id);
+    if (params?.status) {
+      params.status.forEach(s => searchParams.append('status', s));
+    }
     if (params?.limit) searchParams.set('limit', params.limit.toString());
 
     const query = searchParams.toString();
