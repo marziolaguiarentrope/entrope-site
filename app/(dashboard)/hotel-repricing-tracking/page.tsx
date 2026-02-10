@@ -1,8 +1,10 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import Link from 'next/link';
 import { cn } from '@/lib/utils';
-import { api, HotelOpportunity } from '@/lib/api';
+import { api, HotelOpportunity, UserBasicInfo } from '@/lib/api';
+import { HotelOpportunityDetail } from '@/components/hotel-opportunity-detail';
 
 function timeAgo(dateString: string): string {
   const now = new Date();
@@ -21,7 +23,15 @@ function timeAgo(dateString: string): string {
 
 type FilterType = 'all' | 'pending_payment' | 'pending_cancel';
 
-function HotelOpportunityRow({ opportunity }: { opportunity: HotelOpportunity & { filter_type: FilterType } }) {
+function HotelOpportunityRow({
+  opportunity,
+  onClick,
+  userInfo,
+}: {
+  opportunity: HotelOpportunity & { filter_type: FilterType };
+  onClick: () => void;
+  userInfo?: UserBasicInfo;
+}) {
   const formatDate = (dateStr: string | null) => {
     if (!dateStr) return 'N/A';
     return new Date(dateStr).toLocaleDateString();
@@ -38,7 +48,10 @@ function HotelOpportunityRow({ opportunity }: { opportunity: HotelOpportunity & 
   const isPendingPayment = opportunity.filter_type === 'pending_payment';
 
   return (
-    <div className="flex items-center justify-between py-3 px-4 border-b border-border last:border-0 hover:bg-accent/50 transition-colors">
+    <div
+      onClick={onClick}
+      className="flex items-center justify-between py-3 px-4 border-b border-border last:border-0 hover:bg-accent/50 transition-colors cursor-pointer"
+    >
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-3">
           <span className="text-sm font-medium truncate">
@@ -67,13 +80,29 @@ function HotelOpportunityRow({ opportunity }: { opportunity: HotelOpportunity & 
             {opportunity.payment_due_at && ` · Due ${formatDate(opportunity.payment_due_at)}`}
           </div>
         )}
+        {userInfo && (
+          <div className="text-xs text-muted-foreground mt-1">
+            {userInfo.email && <span>{userInfo.email}</span>}
+            {userInfo.email && userInfo.phone && <span> · </span>}
+            {userInfo.phone && <span>{userInfo.phone}</span>}
+          </div>
+        )}
       </div>
-      <div className="text-right">
-        <div className="text-xs text-muted-foreground">
-          {opportunity.status}
-        </div>
-        <div className="text-xs text-muted-foreground mt-1">
-          {timeAgo(opportunity.created_at)}
+      <div className="flex items-center gap-3">
+        <Link
+          href={`/users-list/${opportunity.user_id}`}
+          onClick={(e) => e.stopPropagation()}
+          className="text-xs text-primary hover:underline whitespace-nowrap"
+        >
+          Profile →
+        </Link>
+        <div className="text-right">
+          <div className="text-xs text-muted-foreground">
+            {opportunity.status}
+          </div>
+          <div className="text-xs text-muted-foreground mt-1">
+            {timeAgo(opportunity.created_at)}
+          </div>
         </div>
       </div>
     </div>
@@ -85,6 +114,8 @@ export default function HotelRepricingTrackingPage() {
   const [opportunities, setOpportunities] = useState<(HotelOpportunity & { filter_type: FilterType })[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [selectedOpportunity, setSelectedOpportunity] = useState<(HotelOpportunity & { filter_type: FilterType }) | null>(null);
+  const [userInfoMap, setUserInfoMap] = useState<Map<string, UserBasicInfo>>(new Map());
 
   useEffect(() => {
     async function fetchData() {
@@ -92,25 +123,32 @@ export default function HotelRepricingTrackingPage() {
       setError(null);
 
       try {
+        let opps: (HotelOpportunity & { filter_type: FilterType })[] = [];
+
         if (filter === 'all') {
           const [paymentRes, cancelRes] = await Promise.all([
             api.listHotelOpportunitiesPendingPayment({ limit: 50 }),
             api.listHotelOpportunitiesPendingCancel({ limit: 50 }),
           ]);
-          const combined = [
+          opps = [
             ...paymentRes.opportunities.map(o => ({ ...o, filter_type: 'pending_payment' as FilterType })),
             ...cancelRes.opportunities.map(o => ({ ...o, filter_type: 'pending_cancel' as FilterType })),
           ];
           // Sort by created_at descending
-          combined.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-          setOpportunities(combined);
+          opps.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
         } else if (filter === 'pending_payment') {
           const response = await api.listHotelOpportunitiesPendingPayment({ limit: 50 });
-          setOpportunities(response.opportunities.map(o => ({ ...o, filter_type: 'pending_payment' as FilterType })));
+          opps = response.opportunities.map(o => ({ ...o, filter_type: 'pending_payment' as FilterType }));
         } else {
           const response = await api.listHotelOpportunitiesPendingCancel({ limit: 50 });
-          setOpportunities(response.opportunities.map(o => ({ ...o, filter_type: 'pending_cancel' as FilterType })));
+          opps = response.opportunities.map(o => ({ ...o, filter_type: 'pending_cancel' as FilterType }));
         }
+
+        setOpportunities(opps);
+
+        // Fetch user info for customer contact details (non-blocking)
+        const userIds = opps.map(o => o.user_id);
+        api.batchGetUserBasicInfo(userIds).then(setUserInfoMap).catch(() => {});
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to fetch data');
       } finally {
@@ -170,11 +208,34 @@ export default function HotelRepricingTrackingPage() {
         ) : (
           <div>
             {opportunities.map((opp) => (
-              <HotelOpportunityRow key={opp.id} opportunity={opp} />
+              <HotelOpportunityRow
+                key={opp.id}
+                opportunity={opp}
+                onClick={() => setSelectedOpportunity(opp)}
+                userInfo={userInfoMap.get(opp.user_id)}
+              />
             ))}
           </div>
         )}
       </div>
+
+      {/* Detail Panel */}
+      {selectedOpportunity && (
+        <HotelOpportunityDetail
+          opportunity={selectedOpportunity}
+          variant={selectedOpportunity.filter_type === 'pending_payment' ? 'payment' : 'cancel'}
+          onClose={() => setSelectedOpportunity(null)}
+          onUpdate={(updated) => {
+            if (updated.old_booking_status === 'cancelled') {
+              setOpportunities(prev => prev.filter(o => o.id !== updated.id));
+              setSelectedOpportunity(null);
+            } else {
+              setOpportunities(prev => prev.map(o => o.id === updated.id ? { ...updated, filter_type: o.filter_type } : o));
+              setSelectedOpportunity({ ...updated, filter_type: selectedOpportunity.filter_type });
+            }
+          }}
+        />
+      )}
     </div>
   );
 }

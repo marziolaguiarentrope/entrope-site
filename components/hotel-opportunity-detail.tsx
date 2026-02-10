@@ -1,8 +1,165 @@
 'use client';
 
-import { useState } from 'react';
-import { HotelOpportunity, api } from '@/lib/api';
+import { useState, useEffect } from 'react';
+import Link from 'next/link';
+import { HotelOpportunity, api, RawEmail, UserBasicInfo } from '@/lib/api';
 import { cn } from '@/lib/utils';
+
+// ── Customer Info Section ────────────────────────────────
+
+function CustomerInfoSection({ userId }: { userId: string }) {
+  const [info, setInfo] = useState<UserBasicInfo | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    api.getUserBasicInfo(userId)
+      .then(data => { if (!cancelled) setInfo(data); })
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [userId]);
+
+  return (
+    <section>
+      <h3 className="text-sm font-medium text-muted-foreground mb-2">Customer</h3>
+      <div className="bg-accent/50 rounded-lg p-3 space-y-1">
+        {loading ? (
+          <p className="text-sm text-muted-foreground">Loading customer info...</p>
+        ) : info ? (
+          <>
+            {info.name && <p className="font-medium">{info.name}</p>}
+            {info.email && (
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">Email</span>
+                <span>{info.email}</span>
+              </div>
+            )}
+            {info.phone && (
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">Phone</span>
+                <span>{info.phone}</span>
+              </div>
+            )}
+            <div className="pt-1">
+              <Link
+                href={`/users-list/${userId}`}
+                className="text-xs text-primary hover:underline"
+              >
+                View Full Profile →
+              </Link>
+            </div>
+          </>
+        ) : (
+          <div className="flex justify-between items-center">
+            <p className="text-sm text-muted-foreground">Could not load customer info</p>
+            <Link
+              href={`/users-list/${userId}`}
+              className="text-xs text-primary hover:underline"
+            >
+              View Profile →
+            </Link>
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+// ── Email Viewer ─────────────────────────────────────────
+
+function EmailSection({ bookingId }: { bookingId: string | null }) {
+  const [showEmail, setShowEmail] = useState(false);
+  const [email, setEmail] = useState<RawEmail | null>(null);
+  const [emailLoading, setEmailLoading] = useState(false);
+  const [emailError, setEmailError] = useState<string | null>(null);
+
+  async function handleViewEmail() {
+    if (!bookingId) return;
+    setShowEmail(true);
+    setEmailLoading(true);
+    setEmailError(null);
+    try {
+      const result = await api.getEmailForBooking('hotel', bookingId);
+      setEmail(result);
+    } catch (err) {
+      setEmailError(err instanceof Error ? err.message : 'Failed to load email');
+    } finally {
+      setEmailLoading(false);
+    }
+  }
+
+  if (!bookingId) return null;
+
+  if (!showEmail) {
+    return (
+      <section>
+        <button
+          onClick={handleViewEmail}
+          className="w-full py-2 px-4 bg-accent text-foreground rounded-lg font-medium hover:bg-accent/80 transition-colors flex items-center justify-center gap-2"
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+          </svg>
+          View Original Email
+        </button>
+      </section>
+    );
+  }
+
+  return (
+    <section>
+      <div className="flex items-center justify-between mb-2">
+        <h3 className="text-sm font-medium text-muted-foreground">Email</h3>
+        <button
+          onClick={() => setShowEmail(false)}
+          className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+        >
+          Hide
+        </button>
+      </div>
+      {emailLoading ? (
+        <div className="bg-accent/50 rounded-lg p-4 text-center">
+          <p className="text-sm text-muted-foreground">Loading email...</p>
+        </div>
+      ) : emailError ? (
+        <div className="bg-red-500/10 rounded-lg p-3">
+          <p className="text-sm text-red-400">{emailError}</p>
+        </div>
+      ) : email ? (
+        <div className="bg-accent/50 rounded-lg overflow-hidden">
+          <div className="p-3 border-b border-border space-y-1">
+            <div className="flex justify-between text-xs">
+              <span className="text-muted-foreground">From</span>
+              <span>{email.from_address || 'N/A'}</span>
+            </div>
+            <div className="flex justify-between text-xs">
+              <span className="text-muted-foreground">Subject</span>
+              <span className="font-medium">{email.subject || 'N/A'}</span>
+            </div>
+            {email.received_at && (
+              <div className="flex justify-between text-xs">
+                <span className="text-muted-foreground">Received</span>
+                <span>{new Date(email.received_at).toLocaleString()}</span>
+              </div>
+            )}
+          </div>
+          <div className="p-3 max-h-[400px] overflow-y-auto">
+            {email.body_html || (email.body && email.body.includes('<')) ? (
+              <div
+                className="text-sm prose prose-invert max-w-none [&_img]:max-w-full [&_table]:border-collapse [&_a]:text-primary"
+                dangerouslySetInnerHTML={{ __html: email.body_html || email.body || '' }}
+              />
+            ) : (
+              <pre className="text-sm whitespace-pre-wrap">{email.body_text || email.body || 'No content'}</pre>
+            )}
+          </div>
+        </div>
+      ) : null}
+    </section>
+  );
+}
 
 interface HotelOpportunityDetailProps {
   opportunity: HotelOpportunity;
@@ -109,6 +266,9 @@ export function HotelOpportunityDetail({
             )}
           </div>
 
+          {/* Customer Info */}
+          <CustomerInfoSection userId={opportunity.user_id} />
+
           {/* Stay Details */}
           <section>
             <h3 className="text-sm font-medium text-muted-foreground mb-2">Stay Details</h3>
@@ -181,6 +341,9 @@ export function HotelOpportunityDetail({
               </div>
             </section>
           )}
+
+          {/* Original Email */}
+          <EmailSection bookingId={opportunity.old_booking_id} />
 
           {/* Error */}
           {error && (

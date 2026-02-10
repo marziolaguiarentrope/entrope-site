@@ -183,7 +183,7 @@ function EscalationRow({ escalation, onClick }: { escalation: Escalation; onClic
   );
 }
 
-function HotelOpportunityRow({ opportunity, variant, onClick }: { opportunity: HotelOpportunity; variant: 'payment' | 'cancel'; onClick: () => void }) {
+function HotelOpportunityRow({ opportunity, variant, onClick, userInfo }: { opportunity: HotelOpportunity; variant: 'payment' | 'cancel'; onClick: () => void; userInfo?: UserBasicInfo }) {
   const formatDate = (dateStr: string | null) => {
     if (!dateStr) return 'N/A';
     return new Date(dateStr).toLocaleDateString();
@@ -246,13 +246,29 @@ function HotelOpportunityRow({ opportunity, variant, onClick }: { opportunity: H
             )}
           </div>
         )}
+        {userInfo && (
+          <div className="text-xs text-muted-foreground mt-1">
+            {userInfo.email && <span>{userInfo.email}</span>}
+            {userInfo.email && userInfo.phone && <span> · </span>}
+            {userInfo.phone && <span>{userInfo.phone}</span>}
+          </div>
+        )}
       </div>
-      <div className="text-right">
-        <div className="text-xs text-muted-foreground">
-          {opportunity.status}
-        </div>
-        <div className="text-xs text-muted-foreground mt-1">
-          {timeAgo(opportunity.created_at)}
+      <div className="flex items-center gap-3">
+        <Link
+          href={`/users-list/${opportunity.user_id}`}
+          onClick={(e) => e.stopPropagation()}
+          className="text-xs text-primary hover:underline whitespace-nowrap"
+        >
+          Profile →
+        </Link>
+        <div className="text-right">
+          <div className="text-xs text-muted-foreground">
+            {opportunity.status}
+          </div>
+          <div className="text-xs text-muted-foreground mt-1">
+            {timeAgo(opportunity.created_at)}
+          </div>
         </div>
       </div>
     </div>
@@ -424,15 +440,20 @@ export default function TasksPage() {
           setTasks([]);
           setHotelOpportunities([]);
         } else if (tab?.type === 'hotel_opportunity') {
+          let opps: HotelOpportunity[] = [];
           if (activeTab === 'pending_payment') {
             const response = await api.listHotelOpportunitiesPendingPayment({ limit: 50 });
-            setHotelOpportunities(response.opportunities);
+            opps = response.opportunities;
           } else if (activeTab === 'pending_cancel') {
             const response = await api.listHotelOpportunitiesPendingCancel({ limit: 50 });
-            setHotelOpportunities(response.opportunities);
+            opps = response.opportunities;
           }
+          setHotelOpportunities(opps);
           setTasks([]);
           setEscalations([]);
+          // Fetch user info for customer contact details (non-blocking)
+          const oppUserIds = opps.map(o => o.user_id);
+          api.batchGetUserBasicInfo(oppUserIds).then(setUserInfoMap).catch(() => {});
         } else if (tab?.type === 'task' && tab.capability) {
           // Don't filter by status - show pending and claimed tasks
           const response = await api.listTasks({
@@ -529,6 +550,7 @@ export default function TasksPage() {
                   opportunity={opp}
                   variant={activeTab === 'pending_payment' ? 'payment' : 'cancel'}
                   onClick={() => setSelectedHotelOpportunity(opp)}
+                  userInfo={userInfoMap.get(opp.user_id)}
                 />
               ))}
             </div>
