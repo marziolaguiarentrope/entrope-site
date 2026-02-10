@@ -201,11 +201,18 @@ export function HotelOpportunityDetail({
     setLoading(true);
     setError(null);
     try {
+      // Build full notes: append cancellation ref code if provided
+      let fullNotes = notes.trim();
+      if (confirmationCode.trim()) {
+        fullNotes += `\nCancellation ref: ${confirmationCode.trim()}`;
+      }
+
+      // Send the booking's own confirmation code for backend verification (not the operator's input)
       await api.markBookingCancelled(
         'hotel',
         opportunity.old_booking_id,
-        notes.trim(),
-        confirmationCode.trim() || undefined
+        fullNotes,
+        opportunity.old_booking_confirmation_code || undefined
       );
       // Update the opportunity status locally
       onUpdate({
@@ -364,13 +371,13 @@ export function HotelOpportunityDetail({
               </div>
               <div>
                 <label className="block text-sm font-medium mb-1">
-                  Cancellation Confirmation Code (optional)
+                  Hotel Cancellation Reference (optional)
                 </label>
                 <input
                   type="text"
                   value={confirmationCode}
                   onChange={(e) => setConfirmationCode(e.target.value)}
-                  placeholder="e.g., CANC123456"
+                  placeholder="e.g., cancellation # from the hotel"
                   className="w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
                 />
               </div>
