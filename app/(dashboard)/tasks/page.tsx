@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import Link from 'next/link';
-import { cn } from '@/lib/utils';
+import { cn, formatDate } from '@/lib/utils';
 import { api, Task, Escalation, HotelOpportunity, RawEmail, UserBasicInfo } from '@/lib/api';
 import { TaskDetail } from '@/components/task-detail';
 import { EscalationDetail } from '@/components/escalation-detail';
@@ -184,10 +184,6 @@ function EscalationRow({ escalation, onClick }: { escalation: Escalation; onClic
 }
 
 function HotelOpportunityRow({ opportunity, variant, onClick, userInfo }: { opportunity: HotelOpportunity; variant: 'payment' | 'cancel'; onClick: () => void; userInfo?: UserBasicInfo }) {
-  const formatDate = (dateStr: string | null) => {
-    if (!dateStr) return 'N/A';
-    return new Date(dateStr).toLocaleDateString();
-  };
 
   const formatMoney = (amount: number | null, currency: string | null) => {
     if (amount === null) return 'N/A';

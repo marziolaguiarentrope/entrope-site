@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { HotelOpportunity, api, RawEmail, UserBasicInfo } from '@/lib/api';
-import { cn } from '@/lib/utils';
+import { cn, formatDate } from '@/lib/utils';
 
 // ── Customer Info Section ────────────────────────────────
 
@@ -179,11 +179,6 @@ export function HotelOpportunityDetail({
   const [notes, setNotes] = useState('');
   const [confirmationCode, setConfirmationCode] = useState('');
   const [showConfirm, setShowConfirm] = useState(false);
-
-  const formatDate = (dateStr: string | null) => {
-    if (!dateStr) return 'N/A';
-    return new Date(dateStr).toLocaleDateString();
-  };
 
   const formatMoney = (amount: number | null, currency: string | null) => {
     if (amount === null) return 'N/A';

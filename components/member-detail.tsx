@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { cn } from '@/lib/utils';
+import { cn, formatDate, parseLocalDate } from '@/lib/utils';
 import {
   MemberSummary,
   MemberContext,
@@ -128,10 +128,7 @@ function formatMoney(amount: number | null | undefined, currency: string | null 
   }).format(amount / 100);
 }
 
-function formatDate(dateStr: string | null): string {
-  if (!dateStr) return 'N/A';
-  return new Date(dateStr).toLocaleDateString();
-}
+// formatDate imported from @/lib/utils
 
 function formatDateTime(dateStr: string | null): string {
   if (!dateStr) return 'N/A';

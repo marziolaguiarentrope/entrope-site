@@ -7,7 +7,7 @@ import {
   Mail, Database, Eye, Telescope, MessageSquare, CheckCircle2,
   Loader2, Check, X, Hotel, Plane, Clock, DollarSign,
 } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { cn, parseLocalDate } from '@/lib/utils';
 import {
   api,
   RepricingPipelineIssue,
@@ -344,8 +344,8 @@ function IssueContextPanel({
                   <div className="text-muted-foreground">{booking.hotel.hotel_city}</div>
                 )}
                 <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 mt-1.5">
-                  <div><span className="text-muted-foreground">Check-in:</span> {booking.hotel.check_in ? new Date(booking.hotel.check_in).toLocaleDateString() : 'N/A'}</div>
-                  <div><span className="text-muted-foreground">Check-out:</span> {booking.hotel.check_out ? new Date(booking.hotel.check_out).toLocaleDateString() : 'N/A'}</div>
+                  <div><span className="text-muted-foreground">Check-in:</span> {booking.hotel.check_in ? parseLocalDate(booking.hotel.check_in).toLocaleDateString() : 'N/A'}</div>
+                  <div><span className="text-muted-foreground">Check-out:</span> {booking.hotel.check_out ? parseLocalDate(booking.hotel.check_out).toLocaleDateString() : 'N/A'}</div>
                   {booking.hotel.nights > 0 && <div><span className="text-muted-foreground">Nights:</span> {booking.hotel.nights}</div>}
                   {booking.hotel.room_type && <div><span className="text-muted-foreground">Room:</span> {booking.hotel.room_type}</div>}
                 </div>
@@ -395,7 +395,7 @@ function IssueContextPanel({
                   <div className="text-muted-foreground">
                     {booking.flight.legs[0].segments[0].airline_name || booking.flight.legs[0].segments[0].airline}
                     {booking.flight.legs[0].segments[0].departure && (
-                      <> · {new Date(booking.flight.legs[0].segments[0].departure).toLocaleDateString()}</>
+                      <> · {parseLocalDate(booking.flight.legs[0].segments[0].departure).toLocaleDateString()}</>
                     )}
                     {booking.flight.legs[0].segments[0].cabin && (
                       <> · {booking.flight.legs[0].segments[0].cabin}</>

@@ -5,6 +5,27 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
 
+/**
+ * Safely parse a date string, handling date-only strings (YYYY-MM-DD) correctly.
+ * Date-only strings are parsed as UTC by JavaScript, which causes off-by-one errors
+ * when displayed in local time. This appends T00:00:00 to force local time parsing.
+ */
+export function parseLocalDate(dateStr: string): Date {
+  // Date-only format: YYYY-MM-DD (exactly 10 chars, matches pattern)
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+    return new Date(dateStr + 'T00:00:00');
+  }
+  return new Date(dateStr);
+}
+
+/**
+ * Format a date string for display. Handles date-only strings without timezone shift.
+ */
+export function formatDate(dateStr: string | null): string {
+  if (!dateStr) return 'N/A';
+  return parseLocalDate(dateStr).toLocaleDateString();
+}
+
 // ── Export Utilities ─────────────────────────────────────
 
 /**

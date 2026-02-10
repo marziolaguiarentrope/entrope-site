@@ -3,7 +3,7 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { Task, api, RawEmail, UserBasicInfo } from '@/lib/api';
-import { cn } from '@/lib/utils';
+import { cn, parseLocalDate } from '@/lib/utils';
 
 // ── Email Search Utilities ────────────────────────────────
 
@@ -1019,7 +1019,7 @@ function KnownBookingData({ task, missingFields, bookingType }: { task: Task; mi
     }
     if (field === 'departure_time' || field === 'arrival_time' || field === 'check_in_date' || field === 'check_out_date') {
       const v = b[field] as string | null;
-      return v ? new Date(v).toLocaleDateString() : null;
+      return v ? parseLocalDate(v).toLocaleDateString() : null;
     }
     if (field === 'airline') {
       const code = b.airline_code as string | null;

@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { cn } from '@/lib/utils';
+import { cn, formatDate } from '@/lib/utils';
 import { api, HotelOpportunity, UserBasicInfo } from '@/lib/api';
 import { HotelOpportunityDetail } from '@/components/hotel-opportunity-detail';
 
@@ -32,10 +32,6 @@ function HotelOpportunityRow({
   onClick: () => void;
   userInfo?: UserBasicInfo;
 }) {
-  const formatDate = (dateStr: string | null) => {
-    if (!dateStr) return 'N/A';
-    return new Date(dateStr).toLocaleDateString();
-  };
 
   const formatMoney = (amount: number | null, currency: string | null) => {
     if (amount === null) return 'N/A';
