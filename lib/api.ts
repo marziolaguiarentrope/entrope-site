@@ -284,6 +284,27 @@ class ApiClient {
     });
   }
 
+  // Hotel Opportunity Actions
+  async confirmBooking(
+    opportunityId: string,
+    supplier: string,
+    internalSupplierReference: string,
+    supplierCostAmount?: number,
+    supplierCostCurrency?: string,
+  ): Promise<{ status: string }> {
+    const body: Record<string, unknown> = {
+      supplier,
+      internal_supplier_reference: internalSupplierReference,
+    };
+    if (supplierCostAmount !== undefined) body.supplier_cost_amount = supplierCostAmount;
+    if (supplierCostCurrency) body.supplier_cost_currency = supplierCostCurrency;
+
+    return this.fetch<{ status: string }>(`/hotel-opportunities/${opportunityId}/confirm-booking`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  }
+
   // Members
   async searchMemberByEmail(email: string): Promise<MemberSummary | null> {
     return this.fetch<MemberSummary | null>(`/members/search?email=${encodeURIComponent(email)}`);

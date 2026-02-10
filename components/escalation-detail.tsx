@@ -304,9 +304,24 @@ export function EscalationDetail({ escalation, onClose, onUpdate }: EscalationDe
   const [resolutionNotes, setResolutionNotes] = useState('');
   const [showResolveForm, setShowResolveForm] = useState(false);
 
+  // Confirm Booking state
+  const [showConfirmBookingForm, setShowConfirmBookingForm] = useState(false);
+  const [confirmBookingStep, setConfirmBookingStep] = useState<'input' | 'confirm'>('input');
+  const [supplier, setSupplier] = useState('etg');
+  const [supplierReference, setSupplierReference] = useState('');
+  const [supplierCostAmount, setSupplierCostAmount] = useState('');
+  const [supplierCostCurrency, setSupplierCostCurrency] = useState('USD');
+  const [confirmBookingSuccess, setConfirmBookingSuccess] = useState(false);
+
   const isOpen = escalation.status === 'open';
   const isClaimed = escalation.status === 'claimed';
   const isResolved = escalation.status === 'resolved';
+
+  // Determine if this is a booking_failure with an opportunity that can be confirmed
+  const ctx = escalation.context || {};
+  const opportunityId = (ctx.opportunity_id as string | undefined) || (escalation.source_type === 'opportunity' ? escalation.source_id : null);
+  const isBookingFailure = escalation.type === 'booking_failure';
+  const canConfirmBooking = isBookingFailure && !!opportunityId && (isClaimed || isOpen);
 
   const priorityColors: Record<string, string> = {
     urgent: 'bg-red-500/20 text-red-400',
@@ -346,6 +361,40 @@ export function EscalationDetail({ escalation, onClose, onUpdate }: EscalationDe
       onUpdate(updated);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to resolve');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleConfirmBooking() {
+    if (!opportunityId || !supplierReference.trim()) {
+      setError('Supplier reference (ETG Order ID) is required');
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      const costAmount = supplierCostAmount ? Math.round(parseFloat(supplierCostAmount) * 100) : undefined;
+      await api.confirmBooking(
+        opportunityId,
+        supplier,
+        supplierReference.trim(),
+        costAmount,
+        costAmount ? supplierCostCurrency : undefined,
+      );
+      setConfirmBookingSuccess(true);
+      setShowConfirmBookingForm(false);
+      setConfirmBookingStep('input');
+      // Refresh the escalation (the API auto-resolves it)
+      try {
+        const updated = await api.getEscalation(escalation.id);
+        onUpdate(updated);
+      } catch {
+        // Escalation might already be resolved; just close
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to confirm booking');
+      setConfirmBookingStep('input');
     } finally {
       setLoading(false);
     }
@@ -464,6 +513,211 @@ export function EscalationDetail({ escalation, onClose, onUpdate }: EscalationDe
             </div>
           )}
 
+          {/* Confirm Booking Success Banner */}
+          {confirmBookingSuccess && (
+            <div className="bg-green-500/10 border border-green-500/20 rounded-lg p-3">
+              <div className="flex items-center gap-2">
+                <svg className="w-5 h-5 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+                <div>
+                  <p className="text-sm font-medium text-green-400">Booking Confirmed</p>
+                  <p className="text-xs text-muted-foreground">
+                    Opportunity moved to EXECUTING. The charge cron will process payment automatically (runs hourly).
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Confirm Booking Action (for booking_failure escalations) */}
+          {canConfirmBooking && !showConfirmBookingForm && !confirmBookingSuccess && (
+            <div className="space-y-2">
+              <button
+                onClick={() => setShowConfirmBookingForm(true)}
+                className="w-full py-2 px-4 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors"
+              >
+                Confirm Manual Booking
+              </button>
+              <p className="text-xs text-muted-foreground text-center">
+                Use this after manually booking on RateHawk/ETG. This moves the opportunity to EXECUTING and auto-resolves the escalation.
+              </p>
+            </div>
+          )}
+
+          {canConfirmBooking && showConfirmBookingForm && confirmBookingStep === 'input' && (
+            <div className="space-y-4 bg-blue-500/5 border border-blue-500/20 rounded-lg p-4">
+              <div className="flex items-center gap-2 mb-1">
+                <svg className="w-5 h-5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <h4 className="text-sm font-medium">Confirm Manual Booking</h4>
+              </div>
+
+              {/* Opportunity ID (read-only) */}
+              <div>
+                <label className="block text-xs text-muted-foreground mb-1">Opportunity ID</label>
+                <div className="flex items-center gap-1.5">
+                  <span className="font-mono text-xs bg-accent/50 px-2 py-1.5 rounded flex-1 truncate">{opportunityId}</span>
+                  <button
+                    onClick={() => navigator.clipboard.writeText(opportunityId!)}
+                    className="shrink-0 p-1.5 hover:bg-accent rounded transition-colors text-muted-foreground hover:text-foreground"
+                    title="Copy"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <rect x="9" y="9" width="13" height="13" rx="2" ry="2" strokeWidth={2} />
+                      <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" strokeWidth={2} />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+
+              {/* Supplier */}
+              <div>
+                <label className="block text-xs text-muted-foreground mb-1">Supplier</label>
+                <select
+                  value={supplier}
+                  onChange={(e) => setSupplier(e.target.value)}
+                  className="w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary text-sm"
+                >
+                  <option value="etg">ETG / RateHawk</option>
+                  <option value="booking_com">Booking.com</option>
+                  <option value="expedia">Expedia</option>
+                  <option value="other">Other</option>
+                </select>
+              </div>
+
+              {/* Supplier Reference (ETG Order ID) */}
+              <div>
+                <label className="block text-xs text-muted-foreground mb-1">
+                  Supplier Reference (ETG Order ID) *
+                </label>
+                <input
+                  type="text"
+                  value={supplierReference}
+                  onChange={(e) => setSupplierReference(e.target.value)}
+                  placeholder="e.g. 835283355"
+                  className="w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary text-sm font-mono"
+                />
+              </div>
+
+              {/* Optional: Supplier Cost */}
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-xs text-muted-foreground mb-1">
+                    Supplier Cost (optional)
+                  </label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">$</span>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={supplierCostAmount}
+                      onChange={(e) => setSupplierCostAmount(e.target.value)}
+                      placeholder="0.00"
+                      className="w-full pl-7 pr-3 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary text-sm"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs text-muted-foreground mb-1">Currency</label>
+                  <select
+                    value={supplierCostCurrency}
+                    onChange={(e) => setSupplierCostCurrency(e.target.value)}
+                    className="w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary text-sm"
+                  >
+                    <option value="USD">USD</option>
+                    <option value="EUR">EUR</option>
+                    <option value="GBP">GBP</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="flex gap-2">
+                <button
+                  onClick={() => {
+                    if (!supplierReference.trim()) {
+                      setError('Supplier reference is required');
+                      return;
+                    }
+                    setError(null);
+                    setConfirmBookingStep('confirm');
+                  }}
+                  className="flex-1 py-2 px-4 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors"
+                >
+                  Review & Confirm
+                </button>
+                <button
+                  onClick={() => { setShowConfirmBookingForm(false); setError(null); }}
+                  className="py-2 px-4 bg-accent text-foreground rounded-lg font-medium hover:bg-accent/80 transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Confirm Booking — Confirmation Step */}
+          {canConfirmBooking && showConfirmBookingForm && confirmBookingStep === 'confirm' && (
+            <div className="space-y-4 bg-yellow-500/5 border border-yellow-500/20 rounded-lg p-4">
+              <div className="flex items-center gap-2">
+                <svg className="w-5 h-5 text-yellow-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                </svg>
+                <h4 className="text-sm font-medium">Confirm Booking — Double Check</h4>
+              </div>
+
+              <div className="bg-accent/50 rounded-lg p-3 space-y-1 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Opportunity</span>
+                  <span className="font-mono text-xs">{opportunityId?.slice(0, 12)}...</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Supplier</span>
+                  <span className="font-medium">{supplier === 'etg' ? 'ETG / RateHawk' : supplier}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Reference</span>
+                  <span className="font-mono font-medium">{supplierReference}</span>
+                </div>
+                {supplierCostAmount && (
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Supplier Cost</span>
+                    <span>${parseFloat(supplierCostAmount).toFixed(2)} {supplierCostCurrency}</span>
+                  </div>
+                )}
+              </div>
+
+              <div className="text-xs text-yellow-400 space-y-1">
+                <p>This will:</p>
+                <ul className="list-disc list-inside space-y-0.5 ml-1">
+                  <li>Move the opportunity from NEEDS_INTERVENTION → EXECUTING</li>
+                  <li>Mark the new booking as CONFIRMED with supplier details</li>
+                  <li>Create the Money Rescue record (tracks customer savings)</li>
+                  <li>Auto-resolve this escalation</li>
+                </ul>
+              </div>
+
+              <div className="flex gap-2">
+                <button
+                  onClick={handleConfirmBooking}
+                  disabled={loading}
+                  className="flex-1 py-2 px-4 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                >
+                  {loading ? 'Confirming...' : 'Confirm Booking'}
+                </button>
+                <button
+                  onClick={() => setConfirmBookingStep('input')}
+                  disabled={loading}
+                  className="py-2 px-4 bg-accent text-foreground rounded-lg font-medium hover:bg-accent/80 transition-colors"
+                >
+                  Back
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Actions */}
           {isOpen && (
             <button
@@ -475,7 +729,7 @@ export function EscalationDetail({ escalation, onClose, onUpdate }: EscalationDe
             </button>
           )}
 
-          {isClaimed && !showResolveForm && (
+          {isClaimed && !showResolveForm && !showConfirmBookingForm && (
             <button
               onClick={() => setShowResolveForm(true)}
               className="w-full py-2 px-4 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition-colors"
