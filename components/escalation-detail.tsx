@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { Escalation, api, UserBasicInfo, HotelOpportunityView } from '@/lib/api';
+import { Escalation, api, UserBasicInfo, HotelOpportunityView, HotelBookingView, BookingView, MemberContext } from '@/lib/api';
 import { cn, formatDate } from '@/lib/utils';
 
 // ── Helpers ──────────────────────────────────────────────
@@ -121,6 +121,20 @@ function CustomerInfoSection({ userId }: { userId: string }) {
 
 // ── Hotel Opportunity Info (fetches from member context) ─
 
+/** Find a booking by ID across all trips */
+function findBookingInTrips(
+  memberCtx: MemberContext,
+  bookingId: string | null | undefined,
+): BookingView | null {
+  if (!bookingId) return null;
+  for (const trip of memberCtx.trips || []) {
+    for (const b of trip.bookings || []) {
+      if (b.id === bookingId) return b;
+    }
+  }
+  return null;
+}
+
 function HotelOpportunityInfo({
   userId,
   opportunityId,
@@ -131,6 +145,8 @@ function HotelOpportunityInfo({
   contextData: Record<string, unknown>;
 }) {
   const [opportunity, setOpportunity] = useState<HotelOpportunityView | null>(null);
+  const [hotelBooking, setHotelBooking] = useState<HotelBookingView | null>(null);
+  const [bookingId, setBookingId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -140,16 +156,31 @@ function HotelOpportunityInfo({
     api.getMember(userId)
       .then(ctx => {
         if (cancelled) return;
+        // Find the matching opportunity
         const match = ctx.hotel_opportunities?.find(
           (o: HotelOpportunityView) => o.id === opportunityId
         );
         setOpportunity(match || null);
+
+        // Find the original hotel booking from trips using the opportunity's booking_id
+        // or from escalation context booking_id / hotel_booking_id
+        const bId = match?.booking_id
+          || (contextData.booking_id as string | undefined)
+          || (contextData.hotel_booking_id as string | undefined);
+        setBookingId(bId || null);
+
+        if (bId) {
+          const booking = findBookingInTrips(ctx, bId);
+          if (booking?.hotel) {
+            setHotelBooking(booking.hotel);
+          }
+        }
       })
       .catch(() => {})
       .finally(() => { if (!cancelled) setLoading(false); });
 
     return () => { cancelled = true; };
-  }, [userId, opportunityId]);
+  }, [userId, opportunityId, contextData]);
 
   // Fallback values from escalation context
   const confCode = contextData.confirmation_code as string | undefined;
@@ -162,22 +193,33 @@ function HotelOpportunityInfo({
     );
   }
 
-  if (!opportunity) {
-    // No opportunity found — show what we have from context
+  // No opportunity AND no booking found — minimal fallback
+  if (!opportunity && !hotelBooking) {
     if (!confCode) return null;
     return (
       <div className="bg-purple-500/5 border border-purple-500/20 rounded-lg p-3">
         <p className="text-xs font-medium text-purple-400 mb-2">Hotel Repricing</p>
-        {confCode && (
-          <div className="flex justify-between text-sm">
-            <span className="text-muted-foreground">Confirmation</span>
-            <span className="font-mono">{confCode}</span>
-          </div>
-        )}
+        <div className="flex justify-between text-sm">
+          <span className="text-muted-foreground">Confirmation</span>
+          <span className="font-mono">{confCode}</span>
+        </div>
         <IdPill label="Opportunity" value={opportunityId} />
       </div>
     );
   }
+
+  // Merge data: prefer booking data for hotel details (it has the actual hotel info),
+  // opportunity data for repricing-specific fields (status, pricing, payment)
+  const hotelName = hotelBooking?.hotel_name || opportunity?.hotel_name || 'Hotel';
+  const checkIn = hotelBooking?.check_in || opportunity?.check_in;
+  const checkOut = hotelBooking?.check_out || opportunity?.check_out;
+  const city = hotelBooking?.hotel_city;
+  const roomType = hotelBooking?.room_type;
+  const guests = hotelBooking?.guests;
+  const bookedWith = hotelBooking?.booked_with;
+  const originalPrice = hotelBooking?.total_price;
+  const confirmationCode = confCode || hotelBooking?.confirmation_code;
+  const oppStatus = opportunity?.status || 'unknown';
 
   const statusColors: Record<string, string> = {
     active: 'text-blue-400',
@@ -196,28 +238,35 @@ function HotelOpportunityInfo({
       {/* Header: Hotel name + status */}
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <p className="font-semibold text-sm truncate">
-            {opportunity.hotel_name || 'Hotel'}
-          </p>
-          {(opportunity.check_in || opportunity.check_out) && (
+          <p className="font-semibold truncate">{hotelName}</p>
+          {city && <p className="text-xs text-muted-foreground">{city}</p>}
+          {(checkIn || checkOut) && (
             <p className="text-xs text-muted-foreground mt-0.5">
-              {opportunity.check_in ? formatDate(opportunity.check_in) : '?'}
+              {checkIn ? formatDate(checkIn) : '?'}
               {' → '}
-              {opportunity.check_out ? formatDate(opportunity.check_out) : '?'}
+              {checkOut ? formatDate(checkOut) : '?'}
             </p>
           )}
         </div>
         <span className={cn(
           'text-xs font-medium uppercase shrink-0 px-1.5 py-0.5 rounded',
-          statusColors[opportunity.status] || 'text-gray-400',
+          statusColors[oppStatus] || 'text-gray-400',
           'bg-accent/50',
         )}>
-          {opportunity.status.replace(/_/g, ' ')}
+          {oppStatus.replace(/_/g, ' ')}
         </span>
       </div>
 
-      {/* Pricing row */}
-      {(opportunity.old_price || opportunity.new_price) && (
+      {/* Room + guests */}
+      {(roomType || guests?.length) && (
+        <div className="text-xs text-muted-foreground space-y-0.5">
+          {roomType && <p>{roomType}</p>}
+          {guests && guests.length > 0 && <p>Guests: {guests.join(', ')}</p>}
+        </div>
+      )}
+
+      {/* Pricing row — opportunity pricing (savings) */}
+      {(opportunity?.old_price || opportunity?.new_price) && (
         <div className="flex items-center gap-3 text-sm">
           {opportunity.old_price && (
             <span className="line-through text-muted-foreground">
@@ -237,9 +286,19 @@ function HotelOpportunityInfo({
         </div>
       )}
 
-      {/* Key details */}
+      {/* If no opportunity pricing but we have original booking price */}
+      {!opportunity?.old_price && !opportunity?.new_price && originalPrice && (
+        <div className="text-sm">
+          <span className="text-muted-foreground">Original price: </span>
+          <span className="font-medium">
+            {new Intl.NumberFormat('en-US', { style: 'currency', currency: originalPrice.currency || 'USD' }).format(originalPrice.amount / 100)}
+          </span>
+        </div>
+      )}
+
+      {/* Key details grid */}
       <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
-        {opportunity.payment_status && (
+        {opportunity?.payment_status && (
           <>
             <span className="text-muted-foreground">Payment</span>
             <span className={cn(
@@ -253,7 +312,7 @@ function HotelOpportunityInfo({
             </span>
           </>
         )}
-        {opportunity.cancellation_capability && (
+        {opportunity?.cancellation_capability && (
           <>
             <span className="text-muted-foreground">Cancellation</span>
             <span className={cn(
@@ -264,20 +323,34 @@ function HotelOpportunityInfo({
             </span>
           </>
         )}
-        {confCode && (
+        {confirmationCode && (
           <>
             <span className="text-muted-foreground">Confirmation</span>
-            <span className="text-right font-mono text-xs">{confCode}</span>
+            <span className="text-right font-mono text-xs">{confirmationCode}</span>
+          </>
+        )}
+        {bookedWith && (
+          <>
+            <span className="text-muted-foreground">Booked with</span>
+            <span className="text-right text-xs">{bookedWith}</span>
           </>
         )}
       </div>
 
-      {/* Compact ID row */}
-      <div className="pt-1 border-t border-purple-500/10 flex flex-wrap gap-3">
-        <IdPill label="Opportunity" value={opportunityId} />
-        {opportunity.booking_id && (
-          <IdPill label="Booking" value={opportunity.booking_id} />
-        )}
+      {/* Link to user profile (booking view) + compact IDs */}
+      <div className="pt-2 border-t border-purple-500/10 flex items-center justify-between">
+        <div className="flex flex-wrap gap-3">
+          <IdPill label="Opportunity" value={opportunityId} />
+          {(opportunity?.booking_id || bookingId) && (
+            <IdPill label="Booking" value={opportunity?.booking_id || bookingId!} />
+          )}
+        </div>
+        <Link
+          href={`/users-list/${userId}`}
+          className="text-xs text-primary hover:underline shrink-0 ml-2"
+        >
+          View booking →
+        </Link>
       </div>
     </div>
   );
