@@ -398,7 +398,7 @@ export function HotelOpportunityDetail({
           )}
 
           {/* Confirmation */}
-          {variant === 'cancel' && showConfirm && (
+          {variant === 'cancel' && opportunity.old_booking_status === 'active' && showConfirm && (
             <div className="space-y-4">
               <div className="bg-green-500/10 rounded-lg p-4">
                 <h4 className="font-medium text-green-400 mb-2">Confirm Cancellation</h4>
@@ -432,10 +432,11 @@ export function HotelOpportunityDetail({
             </div>
           )}
 
-          {/* Already cancelled */}
+          {/* Old booking cancelled — step complete */}
           {opportunity.old_booking_status === 'cancelled' && (
             <div className="bg-green-500/10 rounded-lg p-4">
-              <p className="text-green-400 font-medium">This booking has been cancelled.</p>
+              <p className="text-green-400 font-medium">Original booking has been cancelled.</p>
+              <p className="text-sm text-muted-foreground mt-1">This step is complete — the repricing can proceed.</p>
             </div>
           )}
         </div>
