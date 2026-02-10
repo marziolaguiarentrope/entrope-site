@@ -61,6 +61,7 @@ export interface HotelBookingDetail {
   source: string;
   hotel_name: string | null;
   hotel_chain: string | null;
+  hotel_id: string | null;
   city: string | null;
   check_in_date: string | null;
   check_out_date: string | null;
@@ -403,8 +404,34 @@ class ApiClient {
   }
 
   // Hotel booking detail (includes hotel_id from content service)
-  async getHotelBookingDetail(bookingId: string): Promise<{ hotel_id: string | null; [key: string]: unknown }> {
-    return this.fetch<{ hotel_id: string | null }>(`/bookings/hotel/${bookingId}`);
+  async getHotelBookingDetail(bookingId: string): Promise<HotelBookingDetail> {
+    return this.fetch<HotelBookingDetail>(`/bookings/hotel/${bookingId}`);
+  }
+
+  async batchGetHotelBookingDetails(bookingIds: string[]): Promise<Map<string, HotelBookingDetail>> {
+    const unique = [...new Set(bookingIds.filter(Boolean))];
+    const results = await Promise.allSettled(
+      unique.map(id => this.getHotelBookingDetail(id))
+    );
+    const map = new Map<string, HotelBookingDetail>();
+    results.forEach((r, i) => {
+      if (r.status === 'fulfilled') {
+        map.set(unique[i], r.value);
+      }
+    });
+    return map;
+  }
+
+  async listHotelOpportunitiesCompleted(params?: {
+    limit?: number;
+    offset?: number;
+  }): Promise<HotelOpportunityListResponse> {
+    const searchParams = new URLSearchParams();
+    if (params?.limit) searchParams.set('limit', params.limit.toString());
+    if (params?.offset) searchParams.set('offset', params.offset.toString());
+
+    const query = searchParams.toString();
+    return this.fetch<HotelOpportunityListResponse>(`/hotel-opportunities/completed${query ? `?${query}` : ''}`);
   }
 
   // Watches
