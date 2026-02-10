@@ -25,7 +25,7 @@ function timeAgo(dateString: string): string {
 
 // ── Types ────────────────────────────────────────────────
 
-type TabFilter = 'open' | 'claimed' | 'all';
+type TabFilter = 'open' | 'claimed' | 'resolved' | 'all';
 type SortKey = 'priority' | 'created' | 'type' | 'status';
 type SortDir = 'asc' | 'desc';
 
@@ -197,14 +197,25 @@ export default function EscalationsPage() {
   // Auto-refresh
   const refreshTimer = useRef<NodeJS.Timeout | null>(null);
 
-  // Fetch data — request both open and claimed escalations from the backend
-  const fetchData = useCallback(async () => {
+  // Fetch data — request escalations based on current tab
+  const fetchData = useCallback(async (forTab?: TabFilter) => {
     setLoading(true);
     setError(null);
 
     try {
+      const activeTab = forTab ?? tab;
+      let statuses: string[];
+      if (activeTab === 'resolved') {
+        statuses = ['resolved'];
+      } else if (activeTab === 'all') {
+        statuses = ['open', 'claimed', 'resolved'];
+      } else {
+        // Default fetch: open + claimed (covers the open and claimed tabs)
+        statuses = ['open', 'claimed'];
+      }
+
       const response = await api.listEscalations({
-        status: ['open', 'claimed'],
+        status: statuses,
         limit: 100,
       });
       setEscalations(response.escalations);
@@ -214,23 +225,24 @@ export default function EscalationsPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [tab]);
 
-  useEffect(() => { fetchData(); }, [fetchData]);
+  useEffect(() => { fetchData(tab); }, [tab]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Auto-refresh every 30s
   useEffect(() => {
     if (refreshTimer.current) clearInterval(refreshTimer.current);
-    refreshTimer.current = setInterval(fetchData, 30_000);
+    refreshTimer.current = setInterval(() => fetchData(tab), 30_000);
     return () => {
       if (refreshTimer.current) clearInterval(refreshTimer.current);
     };
-  }, [fetchData]);
+  }, [tab]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Tab filter
   const tabFiltered = useMemo(() => {
     if (tab === 'open') return escalations.filter(e => e.status === 'open');
     if (tab === 'claimed') return escalations.filter(e => e.status === 'claimed');
+    if (tab === 'resolved') return escalations.filter(e => e.status === 'resolved');
     return escalations;
   }, [escalations, tab]);
 
@@ -257,6 +269,7 @@ export default function EscalationsPage() {
   // Counts
   const openCount = escalations.filter(e => e.status === 'open').length;
   const claimedCount = escalations.filter(e => e.status === 'claimed').length;
+  const resolvedCount = escalations.filter(e => e.status === 'resolved').length;
 
   // Handle escalation updates from the detail panel
   function handleUpdate(updated: Escalation) {
@@ -312,6 +325,15 @@ export default function EscalationsPage() {
             Claimed {claimedCount > 0 && <span className="ml-1 text-xs opacity-70">({claimedCount})</span>}
           </button>
           <button
+            onClick={() => setTab('resolved')}
+            className={cn(
+              'px-4 py-1.5 text-sm font-medium rounded-md transition-colors',
+              tab === 'resolved' ? 'bg-background shadow-sm text-foreground' : 'text-muted-foreground hover:text-foreground'
+            )}
+          >
+            Resolved {resolvedCount > 0 && <span className="ml-1 text-xs opacity-70">({resolvedCount})</span>}
+          </button>
+          <button
             onClick={() => setTab('all')}
             className={cn(
               'px-4 py-1.5 text-sm font-medium rounded-md transition-colors',
@@ -359,7 +381,7 @@ export default function EscalationsPage() {
 
         {/* Refresh */}
         <button
-          onClick={fetchData}
+          onClick={() => fetchData(tab)}
           disabled={loading}
           className="px-3 py-1.5 text-xs font-medium bg-accent/50 text-muted-foreground rounded-lg hover:bg-accent transition-colors disabled:opacity-50"
           title="Refresh"
@@ -373,7 +395,7 @@ export default function EscalationsPage() {
         {error ? (
           <div className="p-6 text-center">
             <p className="text-red-400 mb-2">{error}</p>
-            <button onClick={fetchData} className="px-4 py-2 bg-primary text-primary-foreground rounded-lg text-sm font-medium hover:bg-primary/90 transition-colors">
+            <button onClick={() => fetchData(tab)} className="px-4 py-2 bg-primary text-primary-foreground rounded-lg text-sm font-medium hover:bg-primary/90 transition-colors">
               Retry
             </button>
           </div>
@@ -381,7 +403,7 @@ export default function EscalationsPage() {
           <div className="p-6 text-center text-muted-foreground">Loading escalations...</div>
         ) : sorted.length === 0 ? (
           <div className="p-6 text-center text-muted-foreground">
-            {search ? 'No escalations match your search' : tab === 'claimed' ? 'No claimed escalations' : 'No open escalations'}
+            {search ? 'No escalations match your search' : tab === 'claimed' ? 'No claimed escalations' : tab === 'resolved' ? 'No resolved escalations' : tab === 'all' ? 'No escalations' : 'No open escalations'}
           </div>
         ) : (
           <div className="overflow-x-auto">
