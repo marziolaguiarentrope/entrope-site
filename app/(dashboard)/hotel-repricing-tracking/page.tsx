@@ -275,6 +275,9 @@ export default function HotelRepricingTrackingPage() {
   // Detail panel
   const [selectedOpportunity, setSelectedOpportunity] = useState<EnrichedOpportunity | null>(null);
 
+  // Track locally-cancelled IDs so they stay hidden across auto-refreshes
+  const cancelledIdsRef = useRef<Set<string>>(new Set());
+
   // Auto-refresh
   const refreshTimer = useRef<NodeJS.Timeout | null>(null);
 
@@ -289,6 +292,8 @@ export default function HotelRepricingTrackingPage() {
     }
     setPaymentStatusFilter('all');
     setSearch('');
+    // Clear locally-cancelled tracking on tab switch (fresh data from server)
+    cancelledIdsRef.current = new Set();
   }, [tab]);
 
   // Fetch data
@@ -331,11 +336,13 @@ export default function HotelRepricingTrackingPage() {
         }
       }
 
-      setOpportunities(opps);
+      // Filter out locally-cancelled items so they don't reappear on auto-refresh
+      const filtered = cancelledIdsRef.current.size > 0 ? opps.filter(o => !cancelledIdsRef.current.has(o.id)) : opps;
+      setOpportunities(filtered);
 
       // Non-blocking enrichment
-      const userIds = opps.map(o => o.user_id);
-      const bookingIds = opps.map(o => o.old_booking_id).filter(Boolean) as string[];
+      const userIds = filtered.map(o => o.user_id);
+      const bookingIds = filtered.map(o => o.old_booking_id).filter(Boolean) as string[];
 
       api.batchGetUserBasicInfo(userIds).then(setUserInfoMap).catch(() => {});
       api.batchGetHotelBookingDetails(bookingIds).then(setBookingDetailMap).catch(() => {});
@@ -622,6 +629,8 @@ export default function HotelRepricingTrackingPage() {
           onClose={() => setSelectedOpportunity(null)}
           onUpdate={(updated) => {
             if (updated.old_booking_status === 'cancelled') {
+              // Track this ID so auto-refresh doesn't bring it back
+              cancelledIdsRef.current.add(updated.id);
               setOpportunities(prev => prev.filter(o => o.id !== updated.id));
               setSelectedOpportunity(null);
             } else {
