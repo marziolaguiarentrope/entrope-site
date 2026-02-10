@@ -65,6 +65,181 @@ function getBookingProvider(flight: FlightBookingView | null, hotel: HotelBookin
   return null;
 }
 
+// Repricing progress bar — shows where a booking is in the hotel repricing pipeline
+function RepricingProgressBar({ opportunity, hasWatch }: { opportunity?: HotelOpportunityView; hasWatch: boolean }) {
+  // Determine stage from opportunity status + payment status
+  const getStage = (): { label: string; percent: number; color: string; failed?: boolean } => {
+    if (!opportunity) {
+      if (hasWatch) return { label: 'Monitoring', percent: 15, color: 'bg-blue-500' };
+      return { label: 'No Watch', percent: 0, color: 'bg-gray-500' };
+    }
+
+    const status = opportunity.status?.toLowerCase();
+    const paymentStatus = opportunity.payment_status?.toLowerCase();
+
+    // Terminal failure states
+    if (['failed', 'needs_intervention'].includes(status)) {
+      return { label: 'Failed', percent: 55, color: 'bg-red-500', failed: true };
+    }
+    if (status === 'declined') {
+      return { label: 'Declined', percent: 30, color: 'bg-red-500', failed: true };
+    }
+    if (status === 'expired') {
+      return { label: 'Expired', percent: 30, color: 'bg-red-500', failed: true };
+    }
+    if (status === 'withdrawn' || status === 'cancelled') {
+      return { label: status.charAt(0).toUpperCase() + status.slice(1), percent: 30, color: 'bg-red-500', failed: true };
+    }
+
+    // Success
+    if (status === 'completed') {
+      return { label: 'Completed', percent: 100, color: 'bg-green-500' };
+    }
+
+    // Executing stage
+    if (status === 'executing') {
+      if (paymentStatus === 'paid') return { label: 'Executing', percent: 85, color: 'bg-blue-500' };
+      if (paymentStatus === 'pending') return { label: 'Payment Processing', percent: 55, color: 'bg-yellow-500' };
+      return { label: 'Executing', percent: 70, color: 'bg-blue-500' };
+    }
+
+    // Payment complete but not executing yet
+    if (paymentStatus === 'paid') {
+      return { label: 'Payment Complete', percent: 70, color: 'bg-blue-500' };
+    }
+
+    // Awaiting customer / accepted
+    if (['accepted', 'awaiting_customer'].includes(status)) {
+      return { label: 'Accepted', percent: 45, color: 'bg-blue-500' };
+    }
+
+    // Active (opportunity found, not yet accepted)
+    if (status === 'active') {
+      return { label: 'Opportunity Found', percent: 30, color: 'bg-blue-500' };
+    }
+
+    // Fallback
+    return { label: status || 'Unknown', percent: 15, color: 'bg-gray-500' };
+  };
+
+  const stage = getStage();
+  if (stage.percent === 0) return null;
+
+  const stages = ['Monitoring', 'Found', 'Accepted', 'Payment', 'Executing', 'Done'];
+
+  return (
+    <div className="mb-2">
+      <div className="flex items-center justify-between mb-1">
+        <span className="text-xs font-medium flex items-center gap-1.5">
+          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+          </svg>
+          Repricing
+        </span>
+        <span className={cn('text-xs font-medium', stage.failed ? 'text-red-400' : stage.percent === 100 ? 'text-green-400' : 'text-blue-400')}>
+          {stage.label} ({stage.percent}%)
+        </span>
+      </div>
+      {/* Progress bar */}
+      <div className="relative h-2 bg-accent/50 rounded-full overflow-hidden">
+        <div
+          className={cn('h-full rounded-full transition-all duration-500', stage.color)}
+          style={{ width: `${stage.percent}%` }}
+        />
+      </div>
+      {/* Stage dots */}
+      <div className="flex justify-between mt-1">
+        {stages.map((s, i) => {
+          const dotPercent = [15, 30, 45, 60, 85, 100][i];
+          const active = stage.percent >= dotPercent;
+          return (
+            <span
+              key={s}
+              className={cn(
+                'text-[9px]',
+                active ? (stage.failed ? 'text-red-400' : 'text-foreground') : 'text-muted-foreground/50'
+              )}
+            >
+              {s}
+            </span>
+          );
+        })}
+      </div>
+      {/* Savings info */}
+      {opportunity?.savings_amount && (
+        <div className="text-xs text-green-400 mt-1">
+          Saving {formatMoney(opportunity.savings_amount, opportunity.savings_currency)}
+          {opportunity.old_price && opportunity.new_price && (
+            <span className="text-muted-foreground">
+              {' '}({formatMoney(opportunity.old_price, opportunity.savings_currency)} → {formatMoney(opportunity.new_price, opportunity.savings_currency)})
+            </span>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Repricing history — timeline of all opportunities for a booking
+function RepricingHistory({ opportunities }: { opportunities: HotelOpportunityView[] }) {
+  const [expanded, setExpanded] = useState(false);
+  if (opportunities.length === 0) return null;
+
+  const statusColors: Record<string, string> = {
+    completed: 'bg-green-500/20 text-green-400',
+    failed: 'bg-red-500/20 text-red-400',
+    needs_intervention: 'bg-red-500/20 text-red-400',
+    declined: 'bg-yellow-500/20 text-yellow-400',
+    expired: 'bg-gray-500/20 text-gray-400',
+    withdrawn: 'bg-gray-500/20 text-gray-400',
+    cancelled: 'bg-gray-500/20 text-gray-400',
+    active: 'bg-blue-500/20 text-blue-400',
+    accepted: 'bg-blue-500/20 text-blue-400',
+    executing: 'bg-blue-500/20 text-blue-400',
+    awaiting_customer: 'bg-yellow-500/20 text-yellow-400',
+  };
+
+  return (
+    <div className="mt-2 pt-2 border-t border-border/50">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+      >
+        <svg
+          className={cn('w-3 h-3 transition-transform', expanded && 'rotate-90')}
+          fill="none" stroke="currentColor" viewBox="0 0 24 24"
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+        </svg>
+        Repricing History ({opportunities.length})
+      </button>
+      {expanded && (
+        <div className="mt-1.5 space-y-1.5 ml-1 border-l border-border/50 pl-3">
+          {opportunities.map((opp) => (
+            <div key={opp.id} className="text-xs">
+              <div className="flex items-center gap-2">
+                <span className={cn('px-1.5 py-0.5 rounded', statusColors[opp.status?.toLowerCase()] || 'bg-gray-500/20')}>
+                  {opp.status}
+                </span>
+                {opp.savings_amount ? (
+                  <span className="text-green-400">Saved {formatMoney(opp.savings_amount, opp.savings_currency)}</span>
+                ) : null}
+                <span className="text-muted-foreground">{timeAgo(opp.created_at)}</span>
+              </div>
+              {opp.payment_status && (
+                <div className="text-muted-foreground mt-0.5">
+                  Payment: {opp.payment_status}
+                  {opp.payment_amount ? ` · ${formatMoney(opp.payment_amount, opp.payment_currency)}` : ''}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Collapsible section component
 function Section({
   title,
@@ -737,6 +912,222 @@ function CustomerIoCard({ email }: { email: string | null }) {
   );
 }
 
+// Consolidated Integrations card (Intercom + Customer.io)
+function IntegrationsCard({ userId, email }: { userId: string; email: string | null }) {
+  const [contact, setContact] = useState<IntercomContact | null>(null);
+  const [conversations, setConversations] = useState<IntercomConversation[]>([]);
+  const [person, setPerson] = useState<CustomerIoPerson | null>(null);
+  const [activities, setActivities] = useState<CustomerIoActivity[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showConversations, setShowConversations] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function fetchAll() {
+      setLoading(true);
+      try {
+        const promises = [
+          api.getIntercomContact(userId).catch(() => null),
+          api.getIntercomConversations(userId).catch(() => []),
+          email ? api.getCustomerIoPerson(email).catch(() => null) : Promise.resolve(null),
+          email ? api.getCustomerIoActivities(email).catch(() => []) : Promise.resolve([]),
+        ];
+        const [contactData, convData, personData, activityData] = await Promise.all(promises);
+        if (cancelled) return;
+        setContact(contactData as IntercomContact | null);
+        setConversations((convData || []) as IntercomConversation[]);
+        setPerson(personData as CustomerIoPerson | null);
+        setActivities((activityData || []) as CustomerIoActivity[]);
+      } catch {
+        // silently fail
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    fetchAll();
+    return () => { cancelled = true; };
+  }, [userId, email]);
+
+  // Intercom URLs
+  const intercomContactUrl = contact?.intercom_id
+    ? `https://app.intercom.com/a/apps/_/users/${contact.intercom_id}`
+    : email
+      ? `https://app.intercom.com/a/apps/_/users/segments/all-users?searchTerm=${encodeURIComponent(email)}`
+      : null;
+
+  // Customer.io URL
+  const cioProfileUrl = email
+    ? `https://fly.customer.io/env/last/people?email=${encodeURIComponent(email)}`
+    : null;
+
+  // Email stats
+  const emailActivities = activities.filter(a =>
+    ['sent_email', 'opened_email', 'clicked_email', 'bounced_email', 'delivered_email'].includes(a.type)
+  );
+  const sent = emailActivities.filter(a => a.type === 'sent_email').length;
+  const delivered = emailActivities.filter(a => a.type === 'delivered_email').length;
+  const opened = emailActivities.filter(a => a.type === 'opened_email').length;
+  const clicked = emailActivities.filter(a => a.type === 'clicked_email').length;
+
+  // Conversation stats
+  const openConvs = conversations.filter(c => c.state === 'open').length;
+  const conversationStateColors: Record<string, string> = {
+    open: 'bg-blue-500/20 text-blue-400',
+    closed: 'bg-zinc-500/20 text-zinc-400',
+    snoozed: 'bg-yellow-500/20 text-yellow-400',
+  };
+
+  return (
+    <div className="space-y-3">
+      {/* Quick-link icons row */}
+      <div className="flex items-center gap-2">
+        {intercomContactUrl && (
+          <a
+            href={intercomContactUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-1.5 px-2.5 py-1.5 bg-accent/50 hover:bg-accent rounded-lg transition-colors text-xs group flex-1"
+            title="Open in Intercom"
+          >
+            <svg className="w-3.5 h-3.5 text-blue-400" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/>
+            </svg>
+            <span>Intercom</span>
+            <svg className="w-3 h-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity ml-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+            </svg>
+          </a>
+        )}
+        {cioProfileUrl && (
+          <a
+            href={cioProfileUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-1.5 px-2.5 py-1.5 bg-accent/50 hover:bg-accent rounded-lg transition-colors text-xs group flex-1"
+            title="Open in Customer.io"
+          >
+            <svg className="w-3.5 h-3.5 text-purple-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" />
+              <polyline points="22,6 12,13 2,6" />
+            </svg>
+            <span>Customer.io</span>
+            <svg className="w-3 h-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity ml-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+            </svg>
+          </a>
+        )}
+      </div>
+
+      {loading ? (
+        <p className="text-xs text-muted-foreground">Loading integrations...</p>
+      ) : (
+        <>
+          {/* Intercom summary */}
+          <div className="space-y-1">
+            <span className="text-xs font-medium text-muted-foreground">Intercom</span>
+            {contact ? (
+              <div className="text-xs space-y-0.5">
+                {contact.last_seen_at && (
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Last seen</span>
+                    <span>{timeAgo(contact.last_seen_at)}</span>
+                  </div>
+                )}
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Conversations</span>
+                  <span>{conversations.length}{openConvs > 0 && <span className="text-blue-400"> ({openConvs} open)</span>}</span>
+                </div>
+                {contact.location && (contact.location.city || contact.location.country) && (
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Location</span>
+                    <span>{[contact.location.city, contact.location.country].filter(Boolean).join(', ')}</span>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <p className="text-xs text-muted-foreground">{email ? 'No contact found' : 'No email'}</p>
+            )}
+
+            {/* Expandable conversations list */}
+            {conversations.length > 0 && (
+              <div>
+                <button
+                  onClick={() => setShowConversations(!showConversations)}
+                  className="text-[10px] text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1"
+                >
+                  <svg className={cn('w-2.5 h-2.5 transition-transform', showConversations && 'rotate-90')} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                  </svg>
+                  {showConversations ? 'Hide' : 'Show'} conversations
+                </button>
+                {showConversations && (
+                  <div className="space-y-1 mt-1">
+                    {conversations.slice(0, 5).map((conv) => (
+                      <a
+                        key={conv.id}
+                        href={`https://app.intercom.com/a/apps/_/inbox/inbox/all/conversations/${conv.id}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="block bg-accent/30 hover:bg-accent/50 rounded p-1.5 transition-colors"
+                      >
+                        <div className="flex items-center gap-1.5">
+                          <span className={cn('px-1 py-0.5 text-[9px] rounded', conversationStateColors[conv.state] || 'bg-zinc-500/20 text-zinc-400')}>
+                            {conv.state}
+                          </span>
+                          <span className="text-[10px] truncate flex-1">
+                            {conv.title || conv.source?.author?.name || 'Conversation'}
+                          </span>
+                          <span className="text-[9px] text-muted-foreground shrink-0">{timeAgo(conv.updated_at)}</span>
+                        </div>
+                      </a>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Divider */}
+          <div className="border-t border-border/50" />
+
+          {/* Customer.io summary */}
+          <div className="space-y-1">
+            <span className="text-xs font-medium text-muted-foreground">Customer.io</span>
+            {sent > 0 ? (
+              <div className="text-xs space-y-0.5">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Emails</span>
+                  <span>{sent} sent · {delivered} delivered</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Engagement</span>
+                  <span>
+                    <span className="text-green-400">{opened}</span> opens · <span className="text-emerald-400">{clicked}</span> clicks
+                  </span>
+                </div>
+                {person && (
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Subscribed</span>
+                    <span className={person.unsubscribed ? 'text-red-400' : 'text-green-400'}>
+                      {person.unsubscribed ? 'No' : 'Yes'}
+                    </span>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                {email ? 'No email activity' : 'No email'}
+              </p>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 // Sub-components for each data type
 
 function UserSettingsCard({ context, userId, onRefresh }: { context: MemberContext; userId: string; onRefresh?: () => void }) {
@@ -867,7 +1258,7 @@ function TravelerCard({ traveler }: { traveler: TravelerProfile }) {
 
 // EditBookingModal removed — replaced by BookingEditInline (see booking-edit-inline.tsx)
 
-function BookingCard({ booking, watch, travellers, onRefresh }: { booking: BookingView; watch?: WatchView; travellers?: TravelerProfile[]; onRefresh?: () => void }) {
+function BookingCard({ booking, watch, travellers, opportunities, onRefresh }: { booking: BookingView; watch?: WatchView; travellers?: TravelerProfile[]; opportunities?: HotelOpportunityView[]; onRefresh?: () => void }) {
   const isHotel = booking.type?.toLowerCase() === 'hotel';
   const data = isHotel ? booking.hotel : booking.flight;
 
@@ -880,6 +1271,15 @@ function BookingCard({ booking, watch, travellers, onRefresh }: { booking: Booki
   const [emailFetched, setEmailFetched] = useState(false);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [showWatchActions, setShowWatchActions] = useState(false);
+
+  // Find the active/latest opportunity for this booking
+  const bookingOpportunities = opportunities || [];
+  const activeOpportunity = bookingOpportunities.find(o =>
+    !['completed', 'failed', 'declined', 'expired', 'withdrawn', 'cancelled'].includes(o.status?.toLowerCase())
+  ) || bookingOpportunities[0];
+
+  const hasRepricingActivity = bookingOpportunities.length > 0;
 
   async function handleViewEmail() {
     if (emailFetched) {
@@ -956,8 +1356,42 @@ function BookingCard({ booking, watch, travellers, onRefresh }: { booking: Booki
 
   const watchHealth = watch ? getWatchHealthStatus(watch) : null;
   const isWatchActive = watch?.status?.toLowerCase() === 'active';
+  const provider = getBookingProvider(booking.flight, booking.hotel);
+  const isRateHawk = provider?.toLowerCase().includes('ratehawk');
 
   if (!data) return null;
+
+  // Email panel content (reused in side-by-side and standalone)
+  const emailPanel = showEmail && !isEditing ? (
+    <div>
+      {emailLoading && <p className="text-xs text-muted-foreground py-2">Loading email...</p>}
+      {emailError && <div className="bg-red-500/10 rounded p-2 text-xs text-red-400">{emailError}</div>}
+      {!emailLoading && !emailError && !emailData && emailFetched && (
+        <div className="bg-accent/30 rounded p-2 text-xs text-muted-foreground">No source email found.</div>
+      )}
+      {emailData && !emailLoading && (
+        <div className="bg-accent/30 rounded p-2 text-xs space-y-1">
+          <div className="flex items-center justify-between">
+            <span className="font-medium">Email</span>
+            <button onClick={() => setShowEmail(false)} className="text-muted-foreground hover:text-foreground p-0.5">
+              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+          <div><span className="text-muted-foreground">From: </span>{emailData.from_address || 'N/A'}</div>
+          <div><span className="text-muted-foreground">Subject: </span><span className="font-medium">{emailData.subject || 'N/A'}</span></div>
+          {emailData.received_at && (
+            <div><span className="text-muted-foreground">Received: </span>{new Date(emailData.received_at).toLocaleString()}</div>
+          )}
+          <div
+            className="bg-background rounded p-2 mt-1 max-h-48 overflow-y-auto whitespace-pre-wrap text-xs"
+            dangerouslySetInnerHTML={{ __html: emailData.body || 'No content' }}
+          />
+        </div>
+      )}
+    </div>
+  ) : null;
 
   return (
     <>
@@ -991,248 +1425,259 @@ function BookingCard({ booking, watch, travellers, onRefresh }: { booking: Booki
               }}
               className="w-full px-3 py-2 text-left text-sm hover:bg-accent transition-colors"
             >
-              View Email
+              {showEmail ? 'Hide Email' : 'View Email'}
             </button>
           </div>
         )}
 
-        <div className="flex items-center gap-2 mb-1 pr-6">
-          <span className={cn('px-1.5 py-0.5 text-xs rounded', isHotel ? 'bg-purple-500/20 text-purple-400' : 'bg-blue-500/20 text-blue-400')}>
-            {booking.type}
-          </span>
-          <span className={cn('px-1.5 py-0.5 text-xs rounded', statusColors[booking.status] || 'bg-gray-500/20')}>
-            {booking.status}
-          </span>
-          <span className="text-xs text-muted-foreground">{booking.agent}</span>
+        {/* Repricing Progress Bar (for hotel bookings with repricing activity) */}
+        {isHotel && (hasRepricingActivity || (watch && isWatchActive)) && (
+          <RepricingProgressBar opportunity={activeOpportunity} hasWatch={!!(watch && isWatchActive)} />
+        )}
+
+        {/* Side-by-side layout when email is open */}
+        <div className={cn(showEmail && emailData && !isEditing ? 'grid grid-cols-2 gap-3' : '')}>
+          {/* Left: Booking details */}
+          <div>
+            <div className="flex items-center gap-2 mb-1 pr-6">
+              <span className={cn('px-1.5 py-0.5 text-xs rounded', isHotel ? 'bg-purple-500/20 text-purple-400' : 'bg-blue-500/20 text-blue-400')}>
+                {booking.type}
+              </span>
+              <span className={cn('px-1.5 py-0.5 text-xs rounded', statusColors[booking.status] || 'bg-gray-500/20')}>
+                {booking.status}
+              </span>
+              <span className="text-xs text-muted-foreground">{booking.agent}</span>
+            </div>
+
+            {isHotel && booking.hotel && (() => {
+              const price = getBookingPrice(null, booking.hotel);
+              const checkIn = booking.hotel.check_in || booking.hotel.check_in_date;
+              const checkOut = booking.hotel.check_out || booking.hotel.check_out_date;
+              return (
+                <>
+                  <div className="font-medium">{booking.hotel.hotel_name || 'Unknown Hotel'}</div>
+                  <div className="text-xs text-muted-foreground">
+                    {formatDate(checkIn)} - {formatDate(checkOut)}
+                    {booking.hotel.room_type && ` · ${booking.hotel.room_type}`}
+                  </div>
+                  <div className="text-xs mt-1">
+                    <span className="text-muted-foreground">Price: </span>
+                    {formatMoney(price.amount, price.currency)}
+                    {booking.hotel.refundability && (
+                      <span className={cn('ml-2', booking.hotel.refundability === 'REFUNDABLE' ? 'text-green-400' : 'text-yellow-400')}>
+                        {booking.hotel.refundability}
+                      </span>
+                    )}
+                  </div>
+                  {booking.hotel.cancellation_deadline && (
+                    <div className="text-xs text-muted-foreground">
+                      Cancel by: {formatDateTime(booking.hotel.cancellation_deadline)}
+                    </div>
+                  )}
+                </>
+              );
+            })()}
+
+            {!isHotel && booking.flight && (() => {
+              const price = getBookingPrice(booking.flight, null);
+              const legs = booking.flight.legs || [];
+
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              const formatLegRoute = (leg: any) => {
+                if (leg.segments?.length > 0) {
+                  const firstSeg = leg.segments[0];
+                  const lastSeg = leg.segments[leg.segments.length - 1];
+                  return `${firstSeg.origin}-${lastSeg.destination}`;
+                }
+                if (leg.departure_airport) {
+                  return `${leg.departure_airport}-${leg.arrival_airport}`;
+                }
+                return '';
+              };
+
+              const getFirstDeparture = () => {
+                if (legs.length === 0) return null;
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                const firstLeg = legs[0] as any;
+                if (firstLeg.segments?.length > 0) return firstLeg.segments[0].departure;
+                if (firstLeg.departure_time) return firstLeg.departure_time;
+                return null;
+              };
+
+              const isRepriceable = booking.flight.is_repriceable ?? (booking.flight.reprice_eligibility === 'ELIGIBLE');
+
+              return (
+                <>
+                  <div className="font-medium">
+                    {legs.map((leg, i) => {
+                      const direction = 'direction' in leg ? leg.direction : null;
+                      return (
+                        <span key={i}>
+                          {i > 0 && ' → '}
+                          {direction && <span className="text-muted-foreground text-xs mr-1">({direction})</span>}
+                          {formatLegRoute(leg)}
+                        </span>
+                      );
+                    })}
+                    {legs.length === 0 && '-'}
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    {getFirstDeparture() && formatDateTime(getFirstDeparture())}
+                    {booking.flight.passengers?.length > 0 && ` · ${booking.flight.passengers.length} pax`}
+                  </div>
+                  <div className="text-xs mt-1">
+                    <span className="text-muted-foreground">Price: </span>
+                    {formatMoney(price.amount, price.currency)}
+                  </div>
+                  <div className="text-xs mt-1">
+                    <span className={cn(isRepriceable ? 'text-green-400' : 'text-yellow-400')}>
+                      Reprice: {isRepriceable ? 'ELIGIBLE' : 'INELIGIBLE'}
+                    </span>
+                    {booking.flight.reprice_ineligible_reason && (
+                      <span className="text-muted-foreground ml-1">({booking.flight.reprice_ineligible_reason})</span>
+                    )}
+                  </div>
+                </>
+              );
+            })()}
+
+            {/* Confirmation code + Rate Hawk badge */}
+            {(() => {
+              const confCode = getConfirmationCode(booking.flight, booking.hotel);
+              if (!confCode) return null;
+              return (
+                <div className="text-xs text-muted-foreground mt-1 flex items-center gap-2">
+                  <span>Conf: {confCode}</span>
+                  {provider && !isRateHawk && <span>via {provider}</span>}
+                  {isRateHawk && (
+                    <a
+                      href="https://www.ratehawk.com/"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-orange-500/20 text-orange-400 rounded text-[10px] font-medium hover:bg-orange-500/30 transition-colors"
+                    >
+                      RateHawk
+                      <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                      </svg>
+                    </a>
+                  )}
+                </div>
+              );
+            })()}
+
+            {/* Compact Watch Indicator */}
+            {watch && isWatchActive ? (
+              <div className="mt-2 pt-2 border-t border-border/50 relative">
+                <div className="flex items-center gap-2 text-xs">
+                  {/* Health dot */}
+                  <span className={cn(
+                    'w-2 h-2 rounded-full shrink-0',
+                    watchHealth?.label === 'Healthy' ? 'bg-green-500' :
+                    watchHealth?.label === 'No Results' ? 'bg-yellow-500' :
+                    watchHealth?.label === 'Error' ? 'bg-red-500' : 'bg-gray-500'
+                  )} />
+                  {/* Last price */}
+                  {watch.latest_observed_price ? (
+                    <span>
+                      <span className="text-muted-foreground">Last: </span>
+                      <span className="font-medium">{formatMoney(watch.latest_observed_price.amount, watch.latest_observed_price.currency)}</span>
+                      {watch.latest_observed_at && <span className="text-muted-foreground"> ({timeAgo(watch.latest_observed_at)})</span>}
+                    </span>
+                  ) : (
+                    <span className="text-muted-foreground">No price yet</span>
+                  )}
+                  <span className="text-muted-foreground">·</span>
+                  {/* Next check */}
+                  {watch.next_due_at ? (
+                    <span>
+                      <span className="text-muted-foreground">Next: </span>
+                      <span>{formatTimeUntil(watch.next_due_at)}</span>
+                    </span>
+                  ) : (
+                    <span className="text-muted-foreground">No next check</span>
+                  )}
+                  {/* Actions dropdown trigger */}
+                  <button
+                    onClick={() => setShowWatchActions(!showWatchActions)}
+                    className="ml-auto p-0.5 hover:bg-accent rounded transition-colors text-muted-foreground hover:text-foreground"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
+                      <path d="M6 10a2 2 0 11-4 0 2 2 0 014 0zM12 10a2 2 0 11-4 0 2 2 0 014 0zM16 12a2 2 0 100-4 2 2 0 000 4z" />
+                    </svg>
+                  </button>
+                </div>
+                {/* Watch actions dropdown */}
+                {showWatchActions && (
+                  <div className="absolute right-0 top-full mt-1 bg-card border border-border rounded shadow-lg z-10 min-w-[140px]">
+                    <button
+                      onClick={() => { handleRetryWatch(); setShowWatchActions(false); }}
+                      disabled={!!actionLoading}
+                      className="w-full px-3 py-1.5 text-left text-xs hover:bg-accent transition-colors disabled:opacity-50"
+                    >
+                      {actionLoading === 'retry' ? 'Retrying...' : 'Retry Now'}
+                    </button>
+                    <button
+                      onClick={() => { handleRegenerateWatch(); setShowWatchActions(false); }}
+                      disabled={!!actionLoading}
+                      className="w-full px-3 py-1.5 text-left text-xs hover:bg-accent transition-colors disabled:opacity-50"
+                    >
+                      {actionLoading === 'regenerate' ? 'Regenerating...' : 'Regenerate'}
+                    </button>
+                    <button
+                      onClick={() => { handleTerminateWatch(); setShowWatchActions(false); }}
+                      disabled={!!actionLoading}
+                      className="w-full px-3 py-1.5 text-left text-xs text-red-400 hover:bg-accent transition-colors disabled:opacity-50"
+                    >
+                      {actionLoading === 'terminate' ? 'Terminating...' : 'Terminate'}
+                    </button>
+                    <button
+                      onClick={() => { navigator.clipboard.writeText(watch.id); setShowWatchActions(false); }}
+                      className="w-full px-3 py-1.5 text-left text-xs hover:bg-accent transition-colors text-muted-foreground"
+                    >
+                      Copy Watch ID
+                    </button>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="text-xs mt-2 pt-2 border-t border-border/50">
+                <span className="text-yellow-400">No active monitoring</span>
+                <button
+                  onClick={handleRegenerateWatch}
+                  disabled={!!actionLoading}
+                  className="ml-2 px-2 py-0.5 text-xs bg-accent hover:bg-accent/80 rounded transition-colors disabled:opacity-50"
+                >
+                  {actionLoading === 'regenerate' ? 'Creating...' : 'Create Watch'}
+                </button>
+              </div>
+            )}
+
+            {actionError && (
+              <div className="text-red-400 text-xs mt-1">{actionError}</div>
+            )}
+
+            {/* Repricing History */}
+            {bookingOpportunities.length > 0 && (
+              <RepricingHistory opportunities={bookingOpportunities} />
+            )}
+          </div>
+
+          {/* Right: Email panel (side-by-side when email open) */}
+          {showEmail && emailData && !isEditing && emailPanel}
         </div>
 
-        {isHotel && booking.hotel && (() => {
-          const price = getBookingPrice(null, booking.hotel);
-          const checkIn = booking.hotel.check_in || booking.hotel.check_in_date;
-          const checkOut = booking.hotel.check_out || booking.hotel.check_out_date;
-          return (
-            <>
-              <div className="font-medium">{booking.hotel.hotel_name || 'Unknown Hotel'}</div>
-              <div className="text-xs text-muted-foreground">
-                {formatDate(checkIn)} - {formatDate(checkOut)}
-                {booking.hotel.room_type && ` · ${booking.hotel.room_type}`}
-              </div>
-              <div className="text-xs mt-1">
-                <span className="text-muted-foreground">Price: </span>
-                {formatMoney(price.amount, price.currency)}
-                {booking.hotel.refundability && (
-                  <span className={cn('ml-2', booking.hotel.refundability === 'REFUNDABLE' ? 'text-green-400' : 'text-yellow-400')}>
-                    {booking.hotel.refundability}
-                  </span>
-                )}
-              </div>
-              {booking.hotel.cancellation_deadline && (
-                <div className="text-xs text-muted-foreground">
-                  Cancel by: {formatDateTime(booking.hotel.cancellation_deadline)}
-                </div>
-              )}
-            </>
-          );
-        })()}
-
-        {!isHotel && booking.flight && (() => {
-          const price = getBookingPrice(booking.flight, null);
-          const legs = booking.flight.legs || [];
-
-          // Handle new schema (legs with segments) vs old schema (legs with departure_airport)
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const formatLegRoute = (leg: any) => {
-            // New schema: leg has direction and segments
-            if (leg.segments?.length > 0) {
-              const firstSeg = leg.segments[0];
-              const lastSeg = leg.segments[leg.segments.length - 1];
-              return `${firstSeg.origin}-${lastSeg.destination}`;
-            }
-            // Old schema: leg has departure_airport/arrival_airport directly
-            if (leg.departure_airport) {
-              return `${leg.departure_airport}-${leg.arrival_airport}`;
-            }
-            return '';
-          };
-
-          const getFirstDeparture = () => {
-            if (legs.length === 0) return null;
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const firstLeg = legs[0] as any;
-            if (firstLeg.segments?.length > 0) {
-              return firstLeg.segments[0].departure;
-            }
-            if (firstLeg.departure_time) {
-              return firstLeg.departure_time;
-            }
-            return null;
-          };
-
-          const isRepriceable = booking.flight.is_repriceable ?? (booking.flight.reprice_eligibility === 'ELIGIBLE');
-
-          return (
-            <>
-              <div className="font-medium">
-                {legs.map((leg, i) => {
-                  const direction = 'direction' in leg ? leg.direction : null;
-                  return (
-                    <span key={i}>
-                      {i > 0 && ' → '}
-                      {direction && <span className="text-muted-foreground text-xs mr-1">({direction})</span>}
-                      {formatLegRoute(leg)}
-                    </span>
-                  );
-                })}
-                {legs.length === 0 && '-'}
-              </div>
-              <div className="text-xs text-muted-foreground">
-                {getFirstDeparture() && formatDateTime(getFirstDeparture())}
-                {booking.flight.passengers?.length > 0 && ` · ${booking.flight.passengers.length} pax`}
-              </div>
-              <div className="text-xs mt-1">
-                <span className="text-muted-foreground">Price: </span>
-                {formatMoney(price.amount, price.currency)}
-              </div>
-              <div className="text-xs mt-1">
-                <span className={cn(
-                  isRepriceable ? 'text-green-400' : 'text-yellow-400'
-                )}>
-                  Reprice: {isRepriceable ? 'ELIGIBLE' : 'INELIGIBLE'}
-              </span>
-              {booking.flight.reprice_ineligible_reason && (
-                <span className="text-muted-foreground ml-1">({booking.flight.reprice_ineligible_reason})</span>
-              )}
-            </div>
-          </>
-          );
-        })()}
-
-        {(() => {
-          const confCode = getConfirmationCode(booking.flight, booking.hotel);
-          const provider = getBookingProvider(booking.flight, booking.hotel);
-          if (!confCode) return null;
-          return (
-            <div className="text-xs text-muted-foreground mt-1">
-              Conf: {confCode}
-              {provider && ` via ${provider}`}
-            </div>
-          );
-        })()}
-
-        {/* Embedded Watch Info */}
-        {watch && isWatchActive ? (
-          <div className="mt-2 pt-2 border-t border-border/50">
-            <div className="flex items-center justify-between mb-1">
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-medium">Watch</span>
-                {watchHealth && (
-                  <span className={cn('flex items-center gap-1 px-1.5 py-0.5 text-xs rounded', watchHealth.color)}>
-                    <span>{watchHealth.icon}</span>
-                    <span>{watchHealth.label}</span>
-                  </span>
-                )}
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-xs">
-              {watch.latest_observed_price && (
-                <div>
-                  <span className="text-muted-foreground">Last price: </span>
-                  <span className="font-medium">
-                    {formatMoney(watch.latest_observed_price.amount, watch.latest_observed_price.currency)}
-                  </span>
-                  {watch.latest_observed_at && (
-                    <span className="text-muted-foreground"> ({timeAgo(watch.latest_observed_at)})</span>
-                  )}
-                </div>
-              )}
-              {!watch.latest_observed_price && watch.last_executed_at && (
-                <div>
-                  <span className="text-muted-foreground">Last price: </span>
-                  <span>--</span>
-                </div>
-              )}
-              {watch.next_due_at && (
-                <div>
-                  <span className="text-muted-foreground">Next check: </span>
-                  <span>{formatTimeUntil(watch.next_due_at)}</span>
-                </div>
-              )}
-              {watch.last_executed_at && (
-                <div>
-                  <span className="text-muted-foreground">Last check: </span>
-                  <span>{timeAgo(watch.last_executed_at)}</span>
-                  {watch.last_result && watch.last_result !== 'success' && (
-                    <span className="text-yellow-400"> ({watch.last_result})</span>
-                  )}
-                </div>
-              )}
-            </div>
-            {/* Watch actions */}
-            <div className="flex gap-2 mt-2">
-              <button
-                onClick={handleRetryWatch}
-                disabled={!!actionLoading}
-                className="px-2 py-1 text-xs bg-primary/20 text-primary hover:bg-primary/30 rounded transition-colors disabled:opacity-50"
-              >
-                {actionLoading === 'retry' ? 'Retrying...' : 'Retry Now'}
-              </button>
-              <button
-                onClick={handleRegenerateWatch}
-                disabled={!!actionLoading}
-                className="px-2 py-1 text-xs bg-accent hover:bg-accent/80 rounded transition-colors disabled:opacity-50"
-              >
-                {actionLoading === 'regenerate' ? 'Regenerating...' : 'Regenerate'}
-              </button>
-              <button
-                onClick={handleTerminateWatch}
-                disabled={!!actionLoading}
-                className="px-2 py-1 text-xs bg-red-500/20 text-red-400 hover:bg-red-500/30 rounded transition-colors disabled:opacity-50"
-              >
-                {actionLoading === 'terminate' ? 'Terminating...' : 'Terminate'}
-              </button>
-            </div>
+        {/* Email panel below (when loading or no data yet) */}
+        {showEmail && !isEditing && (!emailData || emailLoading) && (
+          <div className="mt-2">
+            {emailLoading && <p className="text-xs text-muted-foreground py-2">Loading email...</p>}
+            {emailError && <div className="bg-red-500/10 rounded p-2 text-xs text-red-400">{emailError}</div>}
+            {!emailLoading && !emailError && !emailData && emailFetched && (
+              <div className="bg-accent/30 rounded p-2 text-xs text-muted-foreground">No source email found.</div>
+            )}
           </div>
-        ) : (
-          <div className="text-xs mt-2 pt-2 border-t border-border/50">
-            <span className="text-yellow-400">No active monitoring</span>
-            <button
-              onClick={handleRegenerateWatch}
-              disabled={!!actionLoading}
-              className="ml-2 px-2 py-0.5 text-xs bg-accent hover:bg-accent/80 rounded transition-colors disabled:opacity-50"
-            >
-              {actionLoading === 'regenerate' ? 'Creating...' : 'Create Watch'}
-            </button>
-          </div>
-        )}
-
-        {actionError && (
-          <div className="text-red-400 text-xs mt-1">{actionError}</div>
         )}
       </div>
-
-      {/* Inline email viewer (from dropdown "View Email") */}
-      {showEmail && !isEditing && (
-        <div className="mt-2">
-          {emailLoading && <p className="text-xs text-muted-foreground py-2">Loading email...</p>}
-          {emailError && <div className="bg-red-500/10 rounded p-2 text-xs text-red-400">{emailError}</div>}
-          {!emailLoading && !emailError && !emailData && emailFetched && (
-            <div className="bg-accent/30 rounded p-2 text-xs text-muted-foreground">No source email found.</div>
-          )}
-          {emailData && !emailLoading && (
-            <div className="bg-accent/30 rounded p-2 text-xs space-y-1">
-              <div><span className="text-muted-foreground">From: </span>{emailData.from_address || 'N/A'}</div>
-              <div><span className="text-muted-foreground">Subject: </span><span className="font-medium">{emailData.subject || 'N/A'}</span></div>
-              {emailData.received_at && (
-                <div><span className="text-muted-foreground">Received: </span>{new Date(emailData.received_at).toLocaleString()}</div>
-              )}
-              <div
-                className="bg-background rounded p-2 mt-1 max-h-32 overflow-y-auto whitespace-pre-wrap text-xs"
-                dangerouslySetInnerHTML={{ __html: emailData.body || 'No content' }}
-              />
-            </div>
-          )}
-        </div>
-      )}
 
       {/* Inline edit form */}
       {isEditing && (
@@ -1249,7 +1694,7 @@ function BookingCard({ booking, watch, travellers, onRefresh }: { booking: Booki
   );
 }
 
-function TripCard({ trip, watches, travellers, onRefresh }: { trip: TripView; watches?: WatchView[]; travellers?: TravelerProfile[]; onRefresh?: () => void }) {
+function TripCard({ trip, watches, travellers, hotelOpportunities, onRefresh }: { trip: TripView; watches?: WatchView[]; travellers?: TravelerProfile[]; hotelOpportunities?: HotelOpportunityView[]; onRefresh?: () => void }) {
   const [expanded, setExpanded] = useState(false); // Default collapsed — click to expand
 
   const statusColors: Record<string, string> = {
@@ -1265,6 +1710,10 @@ function TripCard({ trip, watches, travellers, onRefresh }: { trip: TripView; wa
       watchByBookingId.set(w.booking_id, w);
     }
   });
+
+  // Check if any booking in this trip has repricing activity
+  const tripBookingIds = new Set(trip.bookings.map(b => b.id));
+  const tripHasRepricing = hotelOpportunities?.some(o => o.booking_id && tripBookingIds.has(o.booking_id));
 
   return (
     <div className="bg-accent/30 rounded overflow-hidden">
@@ -1286,6 +1735,11 @@ function TripCard({ trip, watches, travellers, onRefresh }: { trip: TripView; wa
             <span className={cn('ml-1 px-1.5 py-0.5 text-xs rounded', statusColors[trip.status])}>
               {trip.status}
             </span>
+            {tripHasRepricing && (
+              <span className="px-1.5 py-0.5 text-[10px] rounded bg-blue-500/20 text-blue-400 font-medium">
+                Repricing
+              </span>
+            )}
           </div>
           <span className="text-xs text-muted-foreground">{trip.bookings.length} bookings</span>
         </div>
@@ -1296,15 +1750,20 @@ function TripCard({ trip, watches, travellers, onRefresh }: { trip: TripView; wa
       </button>
       {expanded && trip.bookings.length > 0 && (
         <div className="p-2 pt-0 space-y-2">
-          {trip.bookings.map((booking) => (
-            <BookingCard
-              key={booking.id}
-              booking={booking}
-              watch={watchByBookingId.get(booking.id) || (booking.watch_id ? watches?.find(w => w.id === booking.watch_id) : undefined)}
-              travellers={travellers}
-              onRefresh={onRefresh}
-            />
-          ))}
+          {trip.bookings.map((booking) => {
+            // Filter opportunities for this specific booking
+            const bookingOpps = hotelOpportunities?.filter(o => o.booking_id === booking.id) || [];
+            return (
+              <BookingCard
+                key={booking.id}
+                booking={booking}
+                watch={watchByBookingId.get(booking.id) || (booking.watch_id ? watches?.find(w => w.id === booking.watch_id) : undefined)}
+                travellers={travellers}
+                opportunities={bookingOpps}
+                onRefresh={onRefresh}
+              />
+            );
+          })}
         </div>
       )}
     </div>
@@ -1761,16 +2220,10 @@ export function MemberDetail({
             </div>
           </div>
 
-          {/* Intercom Card */}
+          {/* Integrations Card (Intercom + Customer.io combined) */}
           <div className="bg-card border border-border rounded-lg p-4">
-            <h3 className="text-sm font-medium mb-3">Intercom</h3>
-            <IntercomCard userId={member.id} email={member.email} />
-          </div>
-
-          {/* Customer.io Card */}
-          <div className="bg-card border border-border rounded-lg p-4">
-            <h3 className="text-sm font-medium mb-3">Customer.io</h3>
-            <CustomerIoCard email={member.email} />
+            <h3 className="text-sm font-medium mb-3">Integrations</h3>
+            <IntegrationsCard userId={member.id} email={member.email} />
           </div>
 
           {context && (
@@ -1890,6 +2343,7 @@ export function MemberDetail({
                         trip={trip}
                         watches={context.watches}
                         travellers={context.travellers}
+                        hotelOpportunities={context.hotel_opportunities}
                         onRefresh={onRefresh}
                       />
                     ))}
