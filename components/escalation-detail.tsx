@@ -1,8 +1,191 @@
 'use client';
 
-import { useState } from 'react';
-import { Escalation, api } from '@/lib/api';
-import { cn } from '@/lib/utils';
+import { useState, useEffect } from 'react';
+import Link from 'next/link';
+import { Escalation, api, UserBasicInfo, HotelBookingDetail } from '@/lib/api';
+import { cn, formatDate } from '@/lib/utils';
+
+// ── Customer Info Section ────────────────────────────────
+
+function CustomerInfoSection({ userId }: { userId: string }) {
+  const [info, setInfo] = useState<UserBasicInfo | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    api.getUserBasicInfo(userId)
+      .then(data => { if (!cancelled) setInfo(data); })
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [userId]);
+
+  return (
+    <section>
+      <h3 className="text-sm font-medium text-muted-foreground mb-2">Customer</h3>
+      <div className="bg-accent/50 rounded-lg p-3 space-y-1">
+        {loading ? (
+          <p className="text-sm text-muted-foreground">Loading customer info...</p>
+        ) : info ? (
+          <>
+            {info.name && <p className="font-medium">{info.name}</p>}
+            {info.email && (
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">Email</span>
+                <span>{info.email}</span>
+              </div>
+            )}
+            {info.phone && (
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">Phone</span>
+                <span>{info.phone}</span>
+              </div>
+            )}
+            <div className="pt-1">
+              <Link
+                href={`/users-list/${userId}`}
+                className="text-xs text-primary hover:underline"
+              >
+                View Full Profile →
+              </Link>
+            </div>
+          </>
+        ) : (
+          <div className="flex justify-between items-center">
+            <p className="text-sm text-muted-foreground">Could not load customer info</p>
+            <Link
+              href={`/users-list/${userId}`}
+              className="text-xs text-primary hover:underline"
+            >
+              View Profile →
+            </Link>
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+// ── Booking Details Section ──────────────────────────────
+
+function BookingDetailsSection({ bookingId, sourceType }: { bookingId: string; sourceType: string }) {
+  const [detail, setDetail] = useState<HotelBookingDetail | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+
+    // Only fetch hotel booking details for booking source type
+    if (sourceType !== 'booking') {
+      setLoading(false);
+      return;
+    }
+
+    api.getHotelBookingDetail(bookingId)
+      .then(data => { if (!cancelled) setDetail(data); })
+      .catch((err) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load');
+      })
+      .finally(() => { if (!cancelled) setLoading(false); });
+
+    return () => { cancelled = true; };
+  }, [bookingId, sourceType]);
+
+  if (sourceType !== 'booking') return null;
+
+  if (loading) {
+    return (
+      <section>
+        <h3 className="text-sm font-medium text-muted-foreground mb-2">Booking Details</h3>
+        <div className="bg-accent/50 rounded-lg p-3">
+          <p className="text-sm text-muted-foreground">Loading booking details...</p>
+        </div>
+      </section>
+    );
+  }
+
+  if (error || !detail) {
+    return (
+      <section>
+        <h3 className="text-sm font-medium text-muted-foreground mb-2">Booking Details</h3>
+        <div className="bg-accent/50 rounded-lg p-3">
+          <p className="text-sm text-muted-foreground">
+            {error || 'Could not load booking details'}
+          </p>
+          <p className="text-xs text-muted-foreground mt-1 font-mono">{bookingId}</p>
+        </div>
+      </section>
+    );
+  }
+
+  const primaryGuest = detail.guests?.find(g => g.is_primary) || detail.guests?.[0];
+
+  return (
+    <section>
+      <h3 className="text-sm font-medium text-muted-foreground mb-2">Booking Details</h3>
+      <div className="bg-accent/50 rounded-lg p-3 space-y-1">
+        <div className="flex justify-between">
+          <span className="text-muted-foreground">Hotel</span>
+          <span className="font-medium">{detail.hotel_name || 'N/A'}</span>
+        </div>
+        {detail.city && (
+          <div className="flex justify-between">
+            <span className="text-muted-foreground">City</span>
+            <span>{detail.city}</span>
+          </div>
+        )}
+        <div className="flex justify-between">
+          <span className="text-muted-foreground">Check-in</span>
+          <span>{formatDate(detail.check_in_date)}</span>
+        </div>
+        <div className="flex justify-between">
+          <span className="text-muted-foreground">Check-out</span>
+          <span>{formatDate(detail.check_out_date)}</span>
+        </div>
+        {detail.room_type && (
+          <div className="flex justify-between">
+            <span className="text-muted-foreground">Room</span>
+            <span className="text-sm max-w-[200px] truncate text-right">{detail.room_type}</span>
+          </div>
+        )}
+        {primaryGuest && (
+          <div className="flex justify-between">
+            <span className="text-muted-foreground">Guest</span>
+            <span>{primaryGuest.name}</span>
+          </div>
+        )}
+        {detail.confirmation_number && (
+          <div className="flex justify-between">
+            <span className="text-muted-foreground">Confirmation</span>
+            <span className="font-mono text-sm">{detail.confirmation_number}</span>
+          </div>
+        )}
+        {detail.booking_provider && (
+          <div className="flex justify-between">
+            <span className="text-muted-foreground">Provider</span>
+            <span>{detail.booking_provider}</span>
+          </div>
+        )}
+        <div className="flex justify-between">
+          <span className="text-muted-foreground">Status</span>
+          <span className={cn(
+            'text-sm font-medium',
+            detail.status === 'active' && 'text-green-400',
+            detail.status === 'cancelled' && 'text-red-400',
+          )}>
+            {detail.status}
+          </span>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// ── Main Detail Component ────────────────────────────────
 
 interface EscalationDetailProps {
   escalation: Escalation;
@@ -75,7 +258,6 @@ export function EscalationDetail({ escalation, onClose, onUpdate }: EscalationDe
     try {
       const updated = await api.resolveEscalation(escalation.id, resolutionNotes.trim());
       onUpdate(updated);
-      onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to resolve');
     } finally {
@@ -126,6 +308,17 @@ export function EscalationDetail({ escalation, onClose, onUpdate }: EscalationDe
             </div>
           </section>
 
+          {/* Customer Info */}
+          <CustomerInfoSection userId={escalation.user_id} />
+
+          {/* Booking Details (if source is a booking) */}
+          {escalation.source_id && (
+            <BookingDetailsSection
+              bookingId={escalation.source_id}
+              sourceType={escalation.source_type}
+            />
+          )}
+
           {/* Source */}
           <section>
             <h3 className="text-sm font-medium text-muted-foreground mb-2">Source</h3>
@@ -137,13 +330,9 @@ export function EscalationDetail({ escalation, onClose, onUpdate }: EscalationDe
               {escalation.source_id && (
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">ID</span>
-                  <span className="font-mono text-sm">{escalation.source_id.slice(0, 8)}...</span>
+                  <span className="font-mono text-xs">{escalation.source_id}</span>
                 </div>
               )}
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">User</span>
-                <span className="font-mono text-sm">{escalation.user_id.slice(0, 8)}...</span>
-              </div>
             </div>
           </section>
 
