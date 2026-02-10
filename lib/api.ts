@@ -816,6 +816,9 @@ export interface HotelOpportunityView {
   id: string;
   status: string;
   hotel_booking_id: string | null;
+  // These fields exist on the type but are NOT sent by the backend HotelOpportunityResponse.
+  // They will always be null from the member context API. Hotel details come from
+  // the BookingView.hotel (HotelBookingView) found by matching hotel_booking_id in trips.
   hotel_name: string | null;
   check_in: string | null;
   check_out: string | null;
@@ -823,10 +826,17 @@ export interface HotelOpportunityView {
   savings_currency: string | null;
   new_price: number | null;
   old_price: number | null;
+  // These fields ARE sent by the backend HotelOpportunityResponse
+  original_price: MoneyView | null;
+  target_price: MoneyView | null;
   payment_status: string | null;
   payment_amount: number | null;
   payment_currency: string | null;
   cancellation_capability: string | null;
+  cancellation_scheduled_at: string | null;
+  failure_reason: string | null;
+  original_booking_id: string | null;
+  new_booking_id: string | null;
   created_at: string;
 }
 

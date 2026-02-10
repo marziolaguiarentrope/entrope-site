@@ -139,10 +139,14 @@ function HotelOpportunityInfo({
   userId,
   opportunityId,
   contextData,
+  escalationSourceId,
+  escalationSourceType,
 }: {
   userId: string;
   opportunityId: string;
   contextData: Record<string, unknown>;
+  escalationSourceId?: string | null;
+  escalationSourceType?: string;
 }) {
   const [opportunity, setOpportunity] = useState<HotelOpportunityView | null>(null);
   const [hotelBooking, setHotelBooking] = useState<HotelBookingView | null>(null);
@@ -168,25 +172,47 @@ function HotelOpportunityInfo({
         );
         setOpportunity(match || null);
 
-        // Find the original hotel booking from trips using the opportunity's hotel_booking_id
-        // or from escalation context booking_id / hotel_booking_id
-        const bId = match?.hotel_booking_id
-          || (contextData.hotel_booking_id as string | undefined)
-          || (contextData.booking_id as string | undefined);
-        setBookingId(bId || null);
+        // Build a list of candidate booking IDs to try, in priority order:
+        // 1. escalation source_id (for booking_failure, source_type=booking — this IS the booking ID)
+        // 2. context.booking_id (from escalation context — always a string)
+        // 3. context.hotel_booking_id (from escalation context)
+        // 4. opportunity.hotel_booking_id (often null due to UUID/String Pydantic coercion)
+        const candidateIds: string[] = [];
+        if (escalationSourceId && (escalationSourceType === 'booking' || escalationSourceType === 'BOOKING')) {
+          candidateIds.push(escalationSourceId);
+        }
+        const ctxBookingId = contextData.booking_id as string | undefined;
+        if (ctxBookingId) candidateIds.push(ctxBookingId);
+        const ctxHotelBookingId = contextData.hotel_booking_id as string | undefined;
+        if (ctxHotelBookingId) candidateIds.push(ctxHotelBookingId);
+        if (match?.hotel_booking_id) candidateIds.push(match.hotel_booking_id);
+        // Also try escalation source_id even if source_type isn't 'booking' (fallback)
+        if (escalationSourceId && escalationSourceType !== 'booking' && escalationSourceType !== 'BOOKING') {
+          candidateIds.push(escalationSourceId);
+        }
 
-        if (bId) {
-          const booking = findBookingInTrips(ctx, bId);
-          if (booking?.hotel) {
-            setHotelBooking(booking.hotel);
+        // Try each candidate ID to find the booking in trips
+        let foundBooking: BookingView | null = null;
+        let resolvedBookingId: string | null = null;
+        for (const candidateId of candidateIds) {
+          const booking = findBookingInTrips(ctx, candidateId);
+          if (booking) {
+            foundBooking = booking;
+            resolvedBookingId = candidateId;
+            break;
           }
+        }
+
+        setBookingId(resolvedBookingId || candidateIds[0] || null);
+        if (foundBooking?.hotel) {
+          setHotelBooking(foundBooking.hotel);
         }
       })
       .catch(() => {})
       .finally(() => { if (!cancelled) setLoading(false); });
 
     return () => { cancelled = true; };
-  }, [userId, opportunityId, contextData]);
+  }, [userId, opportunityId, contextData, escalationSourceId, escalationSourceType]);
 
   // Fallback values from escalation context
   const confCode = contextData.confirmation_code as string | undefined;
@@ -199,33 +225,42 @@ function HotelOpportunityInfo({
     );
   }
 
-  // No opportunity AND no booking found — minimal fallback
+  // No opportunity AND no booking found — minimal fallback with available context data
   if (!opportunity && !hotelBooking) {
-    if (!confCode) return null;
     return (
-      <div className="bg-purple-500/5 border border-purple-500/20 rounded-lg p-3">
-        <p className="text-xs font-medium text-purple-400 mb-2">Hotel Repricing</p>
-        <div className="flex justify-between text-sm">
-          <span className="text-muted-foreground">Confirmation</span>
-          <span className="font-mono">{confCode}</span>
+      <div className="bg-purple-500/5 border border-purple-500/20 rounded-lg p-3 space-y-2">
+        <p className="text-xs font-medium text-purple-400">Hotel Repricing</p>
+        {confCode && (
+          <div className="flex justify-between text-sm">
+            <span className="text-muted-foreground">Confirmation</span>
+            <span className="font-mono">{confCode}</span>
+          </div>
+        )}
+        <div className="flex flex-wrap gap-3">
+          <IdPill label="Opportunity" value={opportunityId} />
+          {bookingId && <IdPill label="Booking" value={bookingId} />}
         </div>
-        <IdPill label="Opportunity" value={opportunityId} />
+        <p className="text-xs text-muted-foreground italic">
+          Could not load hotel details — booking may not be in trips yet.
+        </p>
       </div>
     );
   }
 
-  // Merge data: prefer booking data for hotel details (it has the actual hotel info),
-  // opportunity data for repricing-specific fields (status, pricing, payment)
-  const hotelName = hotelBooking?.hotel_name || opportunity?.hotel_name || 'Hotel';
-  const checkIn = hotelBooking?.check_in || opportunity?.check_in;
-  const checkOut = hotelBooking?.check_out || opportunity?.check_out;
+  // Merge data: booking data has hotel details (name, city, dates, room),
+  // opportunity data has repricing-specific fields (status, pricing, payment)
+  const hotelName = hotelBooking?.hotel_name || 'Hotel';
+  const checkIn = hotelBooking?.check_in;
+  const checkOut = hotelBooking?.check_out;
   const city = hotelBooking?.hotel_city;
   const roomType = hotelBooking?.room_type;
   const guests = hotelBooking?.guests;
   const bookedWith = hotelBooking?.booked_with;
-  const originalPrice = hotelBooking?.total_price;
+  const originalPrice = hotelBooking?.total_price || opportunity?.original_price;
+  const targetPrice = opportunity?.target_price;
   const confirmationCode = confCode || hotelBooking?.confirmation_code;
   const oppStatus = opportunity?.status || 'unknown';
+  const failureReason = opportunity?.failure_reason;
 
   const statusColors: Record<string, string> = {
     active: 'text-blue-400',
@@ -263,6 +298,11 @@ function HotelOpportunityInfo({
         </span>
       </div>
 
+      {/* Failure reason */}
+      {failureReason && (
+        <p className="text-xs text-red-400 bg-red-500/10 px-2 py-1 rounded">{failureReason}</p>
+      )}
+
       {/* Room + guests */}
       {(roomType || guests?.length) && (
         <div className="text-xs text-muted-foreground space-y-0.5">
@@ -271,34 +311,24 @@ function HotelOpportunityInfo({
         </div>
       )}
 
-      {/* Pricing row — opportunity pricing (savings) */}
-      {(opportunity?.old_price || opportunity?.new_price) && (
+      {/* Pricing row */}
+      {(originalPrice || targetPrice) && (
         <div className="flex items-center gap-3 text-sm">
-          {opportunity.old_price && (
-            <span className="line-through text-muted-foreground">
-              {formatMoney(opportunity.old_price, opportunity.savings_currency || 'USD')}
+          {originalPrice && (
+            <span className={cn(targetPrice ? 'line-through text-muted-foreground' : 'font-medium')}>
+              {new Intl.NumberFormat('en-US', { style: 'currency', currency: originalPrice.currency || 'USD' }).format(originalPrice.amount / 100)}
             </span>
           )}
-          {opportunity.new_price && (
+          {targetPrice && (
             <span className="text-green-400 font-medium">
-              {formatMoney(opportunity.new_price, opportunity.savings_currency || 'USD')}
+              {new Intl.NumberFormat('en-US', { style: 'currency', currency: targetPrice.currency || 'USD' }).format(targetPrice.amount / 100)}
             </span>
           )}
-          {opportunity.savings_amount && (
+          {originalPrice && targetPrice && originalPrice.amount > targetPrice.amount && (
             <span className="text-green-400 text-xs bg-green-500/10 px-1.5 py-0.5 rounded">
-              Save {formatMoney(opportunity.savings_amount, opportunity.savings_currency || 'USD')}
+              Save {new Intl.NumberFormat('en-US', { style: 'currency', currency: originalPrice.currency || 'USD' }).format((originalPrice.amount - targetPrice.amount) / 100)}
             </span>
           )}
-        </div>
-      )}
-
-      {/* If no opportunity pricing but we have original booking price */}
-      {!opportunity?.old_price && !opportunity?.new_price && originalPrice && (
-        <div className="text-sm">
-          <span className="text-muted-foreground">Original price: </span>
-          <span className="font-medium">
-            {new Intl.NumberFormat('en-US', { style: 'currency', currency: originalPrice.currency || 'USD' }).format(originalPrice.amount / 100)}
-          </span>
         </div>
       )}
 
@@ -696,6 +726,8 @@ export function EscalationDetail({ escalation, onClose, onUpdate }: EscalationDe
               userId={escalation.user_id}
               opportunityId={opportunityId}
               contextData={ctx}
+              escalationSourceId={escalation.source_id}
+              escalationSourceType={escalation.source_type}
             />
           )}
 
