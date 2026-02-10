@@ -169,25 +169,112 @@ function BookingDetailCard({ bookingId, label }: { bookingId: string; label: str
   );
 }
 
+// Shows hotel details from escalation context (inline data, no API call needed)
+function HotelContextSummary({ context }: { context: Record<string, unknown> }) {
+  const hotelName = context.hotel_name as string | undefined;
+  const checkIn = context.check_in as string | undefined;
+  const checkOut = context.check_out as string | undefined;
+  const roomType = context.room_type as string | undefined;
+  const confirmationCode = context.confirmation_code as string | undefined;
+  const oldPrice = context.old_price as number | undefined;
+  const newPrice = context.new_price as number | undefined;
+  const savingsAmount = context.savings_amount as number | undefined;
+  const currency = (context.savings_currency || context.currency || 'USD') as string;
+  const cancellationCapability = context.cancellation_capability as string | undefined;
+
+  // Only render if we have at least some hotel data
+  if (!hotelName && !checkIn && !confirmationCode) return null;
+
+  const formatCtxMoney = (cents: number | undefined) => {
+    if (cents === null || cents === undefined) return null;
+    return new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(cents / 100);
+  };
+
+  return (
+    <div className="bg-purple-500/5 border border-purple-500/20 rounded-lg p-3 space-y-1">
+      <p className="text-xs font-medium text-purple-400 mb-1">Hotel Repricing Details</p>
+      {hotelName && (
+        <div className="flex justify-between">
+          <span className="text-muted-foreground">Hotel</span>
+          <span className="font-medium">{hotelName}</span>
+        </div>
+      )}
+      {checkIn && (
+        <div className="flex justify-between">
+          <span className="text-muted-foreground">Check-in</span>
+          <span>{formatDate(checkIn)}</span>
+        </div>
+      )}
+      {checkOut && (
+        <div className="flex justify-between">
+          <span className="text-muted-foreground">Check-out</span>
+          <span>{formatDate(checkOut)}</span>
+        </div>
+      )}
+      {roomType && (
+        <div className="flex justify-between">
+          <span className="text-muted-foreground">Room</span>
+          <span className="text-sm max-w-[200px] truncate text-right">{roomType}</span>
+        </div>
+      )}
+      {confirmationCode && (
+        <div className="flex justify-between">
+          <span className="text-muted-foreground">Confirmation</span>
+          <span className="font-mono text-sm">{confirmationCode}</span>
+        </div>
+      )}
+      {(oldPrice || newPrice) && (
+        <div className="flex justify-between">
+          <span className="text-muted-foreground">Price</span>
+          <span>
+            {oldPrice && <span className="line-through text-muted-foreground mr-1">{formatCtxMoney(oldPrice)}</span>}
+            {newPrice && <span className="text-green-400">{formatCtxMoney(newPrice)}</span>}
+          </span>
+        </div>
+      )}
+      {savingsAmount && (
+        <div className="flex justify-between">
+          <span className="text-muted-foreground">Savings</span>
+          <span className="text-green-400 font-medium">{formatCtxMoney(savingsAmount)}</span>
+        </div>
+      )}
+      {cancellationCapability && (
+        <div className="flex justify-between">
+          <span className="text-muted-foreground">Cancellation</span>
+          <span className={cn(
+            'text-sm font-medium',
+            cancellationCapability === 'we_cancel' ? 'text-green-400' : 'text-yellow-400'
+          )}>
+            {cancellationCapability === 'we_cancel' ? 'Auto (we cancel)' : 'Manual (they cancel)'}
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function BookingDetailsSection({ escalation }: { escalation: Escalation }) {
   // Collect all booking IDs to display from source and context
   const ctx = escalation.context || {};
   const bookingIds: { id: string; label: string }[] = [];
+  const seen = new Set<string>();
+
+  const addBooking = (id: string | undefined | null, label: string) => {
+    if (id && id !== 'None' && !seen.has(id)) {
+      seen.add(id);
+      bookingIds.push({ id, label });
+    }
+  };
 
   if (escalation.source_type === 'booking' && escalation.source_id) {
-    bookingIds.push({ id: escalation.source_id, label: 'Booking' });
+    addBooking(escalation.source_id, 'Booking');
   }
 
-  if (escalation.source_type === 'opportunity') {
-    // For opportunity-sourced escalations, pull booking IDs from context
-    const origId = ctx.original_booking_id as string | undefined;
-    const bookingId = ctx.booking_id as string | undefined;
-    const newId = ctx.new_booking_id as string | undefined;
-
-    if (origId) bookingIds.push({ id: origId, label: 'Original Booking' });
-    if (bookingId && bookingId !== origId) bookingIds.push({ id: bookingId, label: 'Booking' });
-    if (newId && newId !== 'None') bookingIds.push({ id: newId, label: 'New Booking' });
-  }
+  // Pull booking IDs from context — covers opportunity-sourced, booking_failure, and other types
+  addBooking(ctx.original_booking_id as string | undefined, 'Original Booking');
+  addBooking(ctx.hotel_booking_id as string | undefined, 'Original Hotel Booking');
+  addBooking(ctx.booking_id as string | undefined, 'Booking');
+  addBooking(ctx.new_booking_id as string | undefined, 'New Booking');
 
   if (bookingIds.length === 0) return null;
 
@@ -217,7 +304,13 @@ function ContextSection({ context, sourceType, sourceId }: {
   const opportunityId = (context.opportunity_id as string | undefined) || (sourceType === 'opportunity' ? sourceId : null);
 
   // Fields already shown elsewhere (booking IDs, etc.)
-  const shownKeys = new Set(['booking_id', 'original_booking_id', 'new_booking_id', 'opportunity_id', 'action_needed', 'opportunity_type', 'confirmation_code']);
+  const shownKeys = new Set([
+    'booking_id', 'original_booking_id', 'new_booking_id', 'hotel_booking_id',
+    'opportunity_id', 'action_needed', 'opportunity_type', 'confirmation_code',
+    'hotel_name', 'check_in', 'check_out', 'room_type',
+    'old_price', 'new_price', 'savings_amount', 'savings_currency', 'currency',
+    'cancellation_capability',
+  ]);
   const extraFields = Object.entries(context).filter(([k]) => !shownKeys.has(k));
 
   return (
@@ -448,6 +541,11 @@ export function EscalationDetail({ escalation, onClose, onUpdate }: EscalationDe
 
           {/* Booking Details — works for both booking and opportunity source types */}
           <BookingDetailsSection escalation={escalation} />
+
+          {/* Hotel Repricing Context (inline data from escalation context) */}
+          {escalation.context && (
+            <HotelContextSummary context={escalation.context} />
+          )}
 
           {/* Source */}
           <section>
