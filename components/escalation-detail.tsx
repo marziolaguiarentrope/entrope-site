@@ -69,7 +69,7 @@ function CustomerInfoSection({ userId }: { userId: string }) {
 
 // ── Booking Details Section ──────────────────────────────
 
-function BookingDetailsSection({ bookingId, sourceType }: { bookingId: string; sourceType: string }) {
+function BookingDetailCard({ bookingId, label }: { bookingId: string; label: string }) {
   const [detail, setDetail] = useState<HotelBookingDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -79,12 +79,6 @@ function BookingDetailsSection({ bookingId, sourceType }: { bookingId: string; s
     setLoading(true);
     setError(null);
 
-    // Only fetch hotel booking details for booking source type
-    if (sourceType !== 'booking') {
-      setLoading(false);
-      return;
-    }
-
     api.getHotelBookingDetail(bookingId)
       .then(data => { if (!cancelled) setDetail(data); })
       .catch((err) => {
@@ -93,92 +87,184 @@ function BookingDetailsSection({ bookingId, sourceType }: { bookingId: string; s
       .finally(() => { if (!cancelled) setLoading(false); });
 
     return () => { cancelled = true; };
-  }, [bookingId, sourceType]);
-
-  if (sourceType !== 'booking') return null;
+  }, [bookingId]);
 
   if (loading) {
     return (
-      <section>
-        <h3 className="text-sm font-medium text-muted-foreground mb-2">Booking Details</h3>
-        <div className="bg-accent/50 rounded-lg p-3">
-          <p className="text-sm text-muted-foreground">Loading booking details...</p>
-        </div>
-      </section>
+      <div className="bg-accent/50 rounded-lg p-3">
+        <p className="text-xs font-medium text-muted-foreground mb-1">{label}</p>
+        <p className="text-sm text-muted-foreground">Loading...</p>
+      </div>
     );
   }
 
   if (error || !detail) {
     return (
-      <section>
-        <h3 className="text-sm font-medium text-muted-foreground mb-2">Booking Details</h3>
-        <div className="bg-accent/50 rounded-lg p-3">
-          <p className="text-sm text-muted-foreground">
-            {error || 'Could not load booking details'}
-          </p>
-          <p className="text-xs text-muted-foreground mt-1 font-mono">{bookingId}</p>
-        </div>
-      </section>
+      <div className="bg-accent/50 rounded-lg p-3">
+        <p className="text-xs font-medium text-muted-foreground mb-1">{label}</p>
+        <p className="text-sm text-muted-foreground">{error || 'Could not load'}</p>
+        <p className="text-xs text-muted-foreground mt-1 font-mono">{bookingId}</p>
+      </div>
     );
   }
 
   const primaryGuest = detail.guests?.find(g => g.is_primary) || detail.guests?.[0];
 
   return (
+    <div className="bg-accent/50 rounded-lg p-3 space-y-1">
+      <p className="text-xs font-medium text-muted-foreground mb-1">{label}</p>
+      <div className="flex justify-between">
+        <span className="text-muted-foreground">Hotel</span>
+        <span className="font-medium">{detail.hotel_name || 'N/A'}</span>
+      </div>
+      {detail.city && (
+        <div className="flex justify-between">
+          <span className="text-muted-foreground">City</span>
+          <span>{detail.city}</span>
+        </div>
+      )}
+      <div className="flex justify-between">
+        <span className="text-muted-foreground">Check-in</span>
+        <span>{formatDate(detail.check_in_date)}</span>
+      </div>
+      <div className="flex justify-between">
+        <span className="text-muted-foreground">Check-out</span>
+        <span>{formatDate(detail.check_out_date)}</span>
+      </div>
+      {detail.room_type && (
+        <div className="flex justify-between">
+          <span className="text-muted-foreground">Room</span>
+          <span className="text-sm max-w-[200px] truncate text-right">{detail.room_type}</span>
+        </div>
+      )}
+      {primaryGuest && (
+        <div className="flex justify-between">
+          <span className="text-muted-foreground">Guest</span>
+          <span>{primaryGuest.name}</span>
+        </div>
+      )}
+      {detail.confirmation_number && (
+        <div className="flex justify-between">
+          <span className="text-muted-foreground">Confirmation</span>
+          <span className="font-mono text-sm">{detail.confirmation_number}</span>
+        </div>
+      )}
+      {detail.booking_provider && (
+        <div className="flex justify-between">
+          <span className="text-muted-foreground">Provider</span>
+          <span>{detail.booking_provider}</span>
+        </div>
+      )}
+      <div className="flex justify-between">
+        <span className="text-muted-foreground">Status</span>
+        <span className={cn(
+          'text-sm font-medium',
+          detail.status === 'active' && 'text-green-400',
+          detail.status === 'cancelled' && 'text-red-400',
+        )}>
+          {detail.status}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function BookingDetailsSection({ escalation }: { escalation: Escalation }) {
+  // Collect all booking IDs to display from source and context
+  const ctx = escalation.context || {};
+  const bookingIds: { id: string; label: string }[] = [];
+
+  if (escalation.source_type === 'booking' && escalation.source_id) {
+    bookingIds.push({ id: escalation.source_id, label: 'Booking' });
+  }
+
+  if (escalation.source_type === 'opportunity') {
+    // For opportunity-sourced escalations, pull booking IDs from context
+    const origId = ctx.original_booking_id as string | undefined;
+    const bookingId = ctx.booking_id as string | undefined;
+    const newId = ctx.new_booking_id as string | undefined;
+
+    if (origId) bookingIds.push({ id: origId, label: 'Original Booking' });
+    if (bookingId && bookingId !== origId) bookingIds.push({ id: bookingId, label: 'Booking' });
+    if (newId && newId !== 'None') bookingIds.push({ id: newId, label: 'New Booking' });
+  }
+
+  if (bookingIds.length === 0) return null;
+
+  return (
     <section>
       <h3 className="text-sm font-medium text-muted-foreground mb-2">Booking Details</h3>
-      <div className="bg-accent/50 rounded-lg p-3 space-y-1">
-        <div className="flex justify-between">
-          <span className="text-muted-foreground">Hotel</span>
-          <span className="font-medium">{detail.hotel_name || 'N/A'}</span>
-        </div>
-        {detail.city && (
-          <div className="flex justify-between">
-            <span className="text-muted-foreground">City</span>
-            <span>{detail.city}</span>
+      <div className="space-y-2">
+        {bookingIds.map(({ id, label }) => (
+          <BookingDetailCard key={id} bookingId={id} label={label} />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+// ── Context Section (structured) ─────────────────────────
+
+function ContextSection({ context, sourceType, sourceId }: {
+  context: Record<string, unknown> | null;
+  sourceType: string;
+  sourceId: string | null;
+}) {
+  if (!context || Object.keys(context).length === 0) return null;
+
+  const actionNeeded = context.action_needed as string | undefined;
+  const opportunityType = context.opportunity_type as string | undefined;
+  const opportunityId = (context.opportunity_id as string | undefined) || (sourceType === 'opportunity' ? sourceId : null);
+
+  // Fields already shown elsewhere (booking IDs, etc.)
+  const shownKeys = new Set(['booking_id', 'original_booking_id', 'new_booking_id', 'opportunity_id', 'action_needed', 'opportunity_type', 'confirmation_code']);
+  const extraFields = Object.entries(context).filter(([k]) => !shownKeys.has(k));
+
+  return (
+    <section>
+      <h3 className="text-sm font-medium text-muted-foreground mb-2">Context</h3>
+      <div className="space-y-2">
+        {/* Action Needed — prominent */}
+        {actionNeeded && (
+          <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-3">
+            <p className="text-xs font-medium text-yellow-400 mb-1">Action Needed</p>
+            <p className="text-sm">{actionNeeded}</p>
           </div>
         )}
-        <div className="flex justify-between">
-          <span className="text-muted-foreground">Check-in</span>
-          <span>{formatDate(detail.check_in_date)}</span>
-        </div>
-        <div className="flex justify-between">
-          <span className="text-muted-foreground">Check-out</span>
-          <span>{formatDate(detail.check_out_date)}</span>
-        </div>
-        {detail.room_type && (
-          <div className="flex justify-between">
-            <span className="text-muted-foreground">Room</span>
-            <span className="text-sm max-w-[200px] truncate text-right">{detail.room_type}</span>
-          </div>
-        )}
-        {primaryGuest && (
-          <div className="flex justify-between">
-            <span className="text-muted-foreground">Guest</span>
-            <span>{primaryGuest.name}</span>
-          </div>
-        )}
-        {detail.confirmation_number && (
-          <div className="flex justify-between">
-            <span className="text-muted-foreground">Confirmation</span>
-            <span className="font-mono text-sm">{detail.confirmation_number}</span>
-          </div>
-        )}
-        {detail.booking_provider && (
-          <div className="flex justify-between">
-            <span className="text-muted-foreground">Provider</span>
-            <span>{detail.booking_provider}</span>
-          </div>
-        )}
-        <div className="flex justify-between">
-          <span className="text-muted-foreground">Status</span>
-          <span className={cn(
-            'text-sm font-medium',
-            detail.status === 'active' && 'text-green-400',
-            detail.status === 'cancelled' && 'text-red-400',
-          )}>
-            {detail.status}
-          </span>
+
+        <div className="bg-accent/50 rounded-lg p-3 space-y-1">
+          {/* Opportunity link */}
+          {opportunityId && (
+            <div className="flex justify-between items-center">
+              <span className="text-muted-foreground">Opportunity</span>
+              <div className="flex items-center gap-2">
+                {opportunityType && <span className="text-xs text-muted-foreground">{opportunityType}</span>}
+                <span className="font-mono text-xs">{opportunityId.slice(0, 8)}...</span>
+              </div>
+            </div>
+          )}
+
+          {/* Link to hotel repricing tracker */}
+          {(sourceType === 'opportunity' || opportunityType === 'hotel_reprice') && (
+            <div className="pt-1">
+              <Link
+                href="/hotel-repricing-tracking"
+                className="text-xs text-primary hover:underline"
+              >
+                View Hotel Repricing Tracker →
+              </Link>
+            </div>
+          )}
+
+          {/* Extra context fields not shown elsewhere */}
+          {extraFields.map(([key, value]) => (
+            <div key={key} className="flex justify-between">
+              <span className="text-muted-foreground text-sm">{key.replace(/_/g, ' ')}</span>
+              <span className="text-sm font-mono max-w-[200px] truncate text-right">
+                {typeof value === 'object' ? JSON.stringify(value) : String(value ?? '—')}
+              </span>
+            </div>
+          ))}
         </div>
       </div>
     </section>
@@ -311,13 +397,8 @@ export function EscalationDetail({ escalation, onClose, onUpdate }: EscalationDe
           {/* Customer Info */}
           <CustomerInfoSection userId={escalation.user_id} />
 
-          {/* Booking Details (if source is a booking) */}
-          {escalation.source_id && (
-            <BookingDetailsSection
-              bookingId={escalation.source_id}
-              sourceType={escalation.source_type}
-            />
-          )}
+          {/* Booking Details — works for both booking and opportunity source types */}
+          <BookingDetailsSection escalation={escalation} />
 
           {/* Source */}
           <section>
@@ -336,17 +417,12 @@ export function EscalationDetail({ escalation, onClose, onUpdate }: EscalationDe
             </div>
           </section>
 
-          {/* Context (if available) */}
-          {escalation.context && Object.keys(escalation.context).length > 0 && (
-            <section>
-              <h3 className="text-sm font-medium text-muted-foreground mb-2">Context</h3>
-              <div className="bg-accent/50 rounded-lg p-3">
-                <pre className="text-xs overflow-x-auto whitespace-pre-wrap">
-                  {JSON.stringify(escalation.context, null, 2)}
-                </pre>
-              </div>
-            </section>
-          )}
+          {/* Context — structured display */}
+          <ContextSection
+            context={escalation.context}
+            sourceType={escalation.source_type}
+            sourceId={escalation.source_id}
+          />
 
           {/* Timestamps */}
           <section>
