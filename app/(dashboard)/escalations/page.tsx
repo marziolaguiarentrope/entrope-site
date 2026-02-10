@@ -191,9 +191,31 @@ export default function EscalationsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Locally-claimed escalations that the backend won't return in list_open
-  // We keep them in state so they persist when the operator navigates the page
-  const claimedLocallyRef = useRef<Map<string, Escalation>>(new Map());
+  // Persist claimed escalation IDs in localStorage so they survive page refresh.
+  // The backend only returns open escalations — claimed ones vanish from the list.
+  // We store their IDs and re-fetch each one individually on load.
+  const CLAIMED_IDS_KEY = 'escalation_claimed_ids';
+
+  function getStoredClaimedIds(): string[] {
+    try {
+      const raw = localStorage.getItem(CLAIMED_IDS_KEY);
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  function storeClaimedId(id: string) {
+    const ids = new Set(getStoredClaimedIds());
+    ids.add(id);
+    localStorage.setItem(CLAIMED_IDS_KEY, JSON.stringify([...ids]));
+  }
+
+  function removeClaimedId(id: string) {
+    const ids = new Set(getStoredClaimedIds());
+    ids.delete(id);
+    localStorage.setItem(CLAIMED_IDS_KEY, JSON.stringify([...ids]));
+  }
 
   // Detail panel
   const [selectedEscalation, setSelectedEscalation] = useState<Escalation | null>(null);
@@ -207,32 +229,54 @@ export default function EscalationsPage() {
     setError(null);
 
     try {
+      // Fetch open escalations from server
       const response = await api.listEscalations({ limit: 100 });
-      // The backend only returns open escalations.
-      // Merge in locally-claimed ones so they don't vanish.
       const openFromServer = response.escalations;
-      const localClaimed = Array.from(claimedLocallyRef.current.values());
-
-      // Remove from local cache any that the server returned (means they were unclaimed/re-opened)
       const serverIds = new Set(openFromServer.map(e => e.id));
-      localClaimed.forEach(e => {
-        if (serverIds.has(e.id)) {
-          claimedLocallyRef.current.delete(e.id);
+
+      // Re-fetch claimed escalations by ID from localStorage
+      const storedIds = getStoredClaimedIds();
+      const claimedToFetch = storedIds.filter(id => !serverIds.has(id));
+
+      const claimedResults = await Promise.allSettled(
+        claimedToFetch.map(id => api.getEscalation(id))
+      );
+
+      const claimedEscalations: Escalation[] = [];
+      const idsToRemove: string[] = [];
+
+      claimedResults.forEach((result, i) => {
+        if (result.status === 'fulfilled') {
+          const esc = result.value;
+          // Only keep if still claimed (not resolved/reopened)
+          if (esc.status === 'claimed') {
+            claimedEscalations.push(esc);
+          } else if (esc.status === 'resolved') {
+            idsToRemove.push(claimedToFetch[i]);
+          }
+          // If it's open, it'll be in openFromServer already
+        } else {
+          // Failed to fetch — remove stale ID
+          idsToRemove.push(claimedToFetch[i]);
         }
       });
 
-      const merged = [
-        ...openFromServer,
-        ...Array.from(claimedLocallyRef.current.values()),
-      ];
+      // Clean up resolved/stale IDs from storage
+      idsToRemove.forEach(id => removeClaimedId(id));
 
-      setEscalations(merged);
+      // Also remove any IDs that are back in the open list (re-opened)
+      storedIds.forEach(id => {
+        if (serverIds.has(id)) removeClaimedId(id);
+      });
+
+      setEscalations([...openFromServer, ...claimedEscalations]);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch data');
       setEscalations([]);
     } finally {
       setLoading(false);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => { fetchData(); }, [fetchData]);
@@ -279,13 +323,12 @@ export default function EscalationsPage() {
 
   // Handle escalation updates from the detail panel
   function handleUpdate(updated: Escalation) {
-    // If it was just claimed, add to local cache so it persists
+    // Persist claimed IDs to localStorage so they survive page refresh
     if (updated.status === 'claimed') {
-      claimedLocallyRef.current.set(updated.id, updated);
+      storeClaimedId(updated.id);
     }
-    // If resolved, remove from local cache
     if (updated.status === 'resolved') {
-      claimedLocallyRef.current.delete(updated.id);
+      removeClaimedId(updated.id);
     }
 
     setEscalations(prev => {
