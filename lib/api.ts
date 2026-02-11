@@ -1249,6 +1249,36 @@ export interface PeriodOnly {
   prev_7: number;
 }
 
+export interface OnboardingFunnelUser {
+  user_id: string;
+  email: string;
+  signed_up: string;
+  flight_bookings: number;
+  hotel_bookings: number;
+  flight_watches: number;
+  hotel_watches: number;
+  flight_opps: number;
+  hotel_opps: number;
+  flight_opp_statuses: Record<string, number>;
+  hotel_opp_statuses: Record<string, number>;
+  hours_to_first_booking: number | null;
+  hours_to_first_opp: number | null;
+}
+
+export interface OnboardingFunnelSummary {
+  signed_up: number;
+  has_booking: number;
+  has_watch: number;
+  has_opportunity: number;
+  has_opportunity_progressed: number;
+}
+
+export interface OnboardingFunnel {
+  since: string;
+  summary: OnboardingFunnelSummary;
+  users: OnboardingFunnelUser[];
+}
+
 export interface BusinessDashboardResponse {
   users: {
     total: MetricPoint;
@@ -1279,6 +1309,7 @@ export interface BusinessDashboardResponse {
     count: number;
     priority: number;
   }> | null;
+  onboarding_funnel: OnboardingFunnel | null;
 }
 
 export const api = new ApiClient(API_BASE);

@@ -2,9 +2,9 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { api } from '@/lib/api';
-import type { BusinessDashboardResponse, MetricPoint, PeriodOnly } from '@/lib/api';
+import type { BusinessDashboardResponse, MetricPoint, PeriodOnly, OnboardingFunnelUser } from '@/lib/api';
 import { cn, exportCSV, exportJSON } from '@/lib/utils';
-import { RefreshCw, Download } from 'lucide-react';
+import { RefreshCw, Download, ChevronDown, ChevronRight } from 'lucide-react';
 
 // ── Helpers ──────────────────────────────────────────────
 
@@ -103,6 +103,48 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
+// ── Funnel Bar ──────────────────────────────────────────
+
+function FunnelBar({ label, count, total }: { label: string; count: number; total: number }) {
+  const pct = total > 0 ? (count / total) * 100 : 0;
+  return (
+    <div className="flex items-center gap-3 py-1.5">
+      <span className="text-sm text-zinc-400 w-40 shrink-0">{label}</span>
+      <div className="flex-1 h-6 bg-[#1a1f2e] rounded overflow-hidden">
+        <div
+          className="h-full bg-emerald-500/70 rounded transition-all duration-300"
+          style={{ width: `${Math.max(pct, pct > 0 ? 2 : 0)}%` }}
+        />
+      </div>
+      <span className="text-sm font-medium text-zinc-200 w-12 text-right">{count}</span>
+      <span className="text-xs text-zinc-500 w-12 text-right">{pct.toFixed(0)}%</span>
+    </div>
+  );
+}
+
+function formatHours(h: number | null): string {
+  if (h === null) return '-';
+  if (h < 1) return `${Math.round(h * 60)}m`;
+  if (h < 24) return `${h.toFixed(1)}h`;
+  return `${(h / 24).toFixed(1)}d`;
+}
+
+function FunnelUserRow({ user }: { user: OnboardingFunnelUser }) {
+  const bookings = user.flight_bookings + user.hotel_bookings;
+  const watches = user.flight_watches + user.hotel_watches;
+  const opps = user.flight_opps + user.hotel_opps;
+  return (
+    <div className="flex items-center gap-2 py-2 border-b border-[#1a1f2e] last:border-0 text-xs">
+      <span className="text-zinc-300 w-48 truncate" title={user.email}>{user.email}</span>
+      <span className="text-zinc-500 w-20 text-right" title="Bookings">{bookings > 0 ? `${bookings} bk` : '-'}</span>
+      <span className="text-zinc-500 w-20 text-right" title="Watches">{watches > 0 ? `${watches} w` : '-'}</span>
+      <span className="text-zinc-500 w-20 text-right" title="Opportunities">{opps > 0 ? `${opps} opp` : '-'}</span>
+      <span className="text-zinc-500 w-20 text-right" title="Time to first booking">{formatHours(user.hours_to_first_booking)}</span>
+      <span className="text-zinc-500 w-20 text-right" title="Time to first opportunity">{formatHours(user.hours_to_first_opp)}</span>
+    </div>
+  );
+}
+
 // ── Main Page ────────────────────────────────────────────
 
 function flattenBusinessData(data: BusinessDashboardResponse): Record<string, unknown>[] {
@@ -156,6 +198,7 @@ export default function BusinessPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showExportMenu, setShowExportMenu] = useState(false);
+  const [funnelExpanded, setFunnelExpanded] = useState(false);
   const exportRef = useRef<HTMLDivElement>(null);
 
   // Close export menu on outside click
@@ -361,6 +404,49 @@ export default function BusinessPage() {
                 ))}
               </div>
             </Section>
+          )}
+
+          {/* Onboarding Funnel */}
+          {data.onboarding_funnel && (
+            <div className="bg-[#0d1117] border border-[#1a1f2e] rounded-lg p-5">
+              <h2 className="text-sm font-semibold text-zinc-300 mb-1">Onboarding Funnel</h2>
+              <p className="text-xs text-zinc-500 mb-4">Last 7 days &mdash; signups through opportunity progression</p>
+
+              <div className="space-y-0">
+                <FunnelBar label="Signed up" count={data.onboarding_funnel.summary.signed_up} total={data.onboarding_funnel.summary.signed_up} />
+                <FunnelBar label="Has booking" count={data.onboarding_funnel.summary.has_booking} total={data.onboarding_funnel.summary.signed_up} />
+                <FunnelBar label="Has watch" count={data.onboarding_funnel.summary.has_watch} total={data.onboarding_funnel.summary.signed_up} />
+                <FunnelBar label="Has opportunity" count={data.onboarding_funnel.summary.has_opportunity} total={data.onboarding_funnel.summary.signed_up} />
+                <FunnelBar label="Opp progressed" count={data.onboarding_funnel.summary.has_opportunity_progressed} total={data.onboarding_funnel.summary.signed_up} />
+              </div>
+
+              {data.onboarding_funnel.users.length > 0 && (
+                <div className="mt-4 pt-4 border-t border-[#1a1f2e]">
+                  <button
+                    onClick={() => setFunnelExpanded(v => !v)}
+                    className="flex items-center gap-1 text-xs text-zinc-400 hover:text-zinc-300 transition-colors"
+                  >
+                    {funnelExpanded ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
+                    {funnelExpanded ? 'Hide' : 'Show'} per-user breakdown ({data.onboarding_funnel.users.length})
+                  </button>
+                  {funnelExpanded && (
+                    <div className="mt-3">
+                      <div className="flex items-center gap-2 pb-2 border-b border-[#1a1f2e] text-xs text-zinc-500">
+                        <span className="w-48">Email</span>
+                        <span className="w-20 text-right">Bookings</span>
+                        <span className="w-20 text-right">Watches</span>
+                        <span className="w-20 text-right">Opps</span>
+                        <span className="w-20 text-right">To 1st bk</span>
+                        <span className="w-20 text-right">To 1st opp</span>
+                      </div>
+                      {data.onboarding_funnel.users.map((user) => (
+                        <FunnelUserRow key={user.user_id} user={user} />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
           )}
         </div>
       ) : null}
