@@ -12,7 +12,7 @@ import {
   CartesianGrid,
   Tooltip,
 } from 'recharts';
-import { api, UserListItem } from '@/lib/api';
+import { api } from '@/lib/api';
 import { cn, exportCSV, exportJSON } from '@/lib/utils';
 
 // ── Types ────────────────────────────────────────────────
@@ -61,14 +61,6 @@ const CHART_GREEN_LIGHT = '#00E608';
 const CHART_GREEN_DIM = '#00C80540';
 const CHART_GRID = '#1a1f2e';
 const CHART_AXIS = '#6b7280';
-
-const STATUS_OPTIONS = [
-  { value: null, label: 'All statuses' },
-  { value: 'active', label: 'Active' },
-  { value: 'suspended', label: 'Suspended' },
-  { value: 'banned', label: 'Banned' },
-  { value: 'deactivated', label: 'Deactivated' },
-] as const;
 
 // ── Auto-granularity map for preset ranges ──────────────
 const AUTO_GRANULARITY: Partial<Record<DateRange, Granularity>> = {
@@ -302,6 +294,46 @@ function formatBucketLabel(key: string, granularity: Granularity): string {
   }
 }
 
+/**
+ * Generate time bucket boundaries for the count-based fetch strategy.
+ * Returns an array of { key, start: ISO, end: ISO } for each bucket in the range.
+ */
+function generateBuckets(
+  rangeStart: Date,
+  rangeEnd: Date,
+  gran: Granularity,
+): { key: string; start: Date; end: Date }[] {
+  const buckets: { key: string; start: Date; end: Date }[] = [];
+  const cursor = new Date(rangeStart);
+  const maxIter = 10000;
+  let iter = 0;
+
+  while (cursor < rangeEnd && iter < maxIter) {
+    const bucketStart = new Date(cursor);
+    // Advance cursor to next bucket start
+    switch (gran) {
+      case 'hourly':
+        cursor.setUTCHours(cursor.getUTCHours() + 1);
+        break;
+      case 'daily':
+        cursor.setUTCDate(cursor.getUTCDate() + 1);
+        break;
+      case 'weekly':
+        cursor.setUTCDate(cursor.getUTCDate() + 7);
+        break;
+      case 'monthly':
+        cursor.setUTCMonth(cursor.getUTCMonth() + 1);
+        break;
+    }
+    const bucketEnd = new Date(Math.min(cursor.getTime(), rangeEnd.getTime()));
+    const key = getBucketKey(bucketStart, gran, 'UTC');
+    buckets.push({ key, start: bucketStart, end: bucketEnd });
+    iter++;
+  }
+
+  return buckets;
+}
+
 // ── Calendar Picker Component ────────────────────────────
 
 function CalendarPicker({
@@ -469,13 +501,14 @@ export default function MetricsPage() {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   });
   const [granularity, setGranularity] = useState<Granularity>('daily');
-  const [statusFilter, setStatusFilter] = useState<string | null>(null);
   const [chartMode, setChartMode] = useState<ChartMode>('cumulative');
   const [timezone, setTimezone] = useState<Timezone>('UTC');
   const [showCalendar, setShowCalendar] = useState(false);
 
-  // Data
-  const [allUsers, setAllUsers] = useState<UserListItem[]>([]);
+  // Data — store chart points directly instead of raw user records
+  const [chartData, setChartData] = useState<ChartDataPoint[]>([]);
+  const [baselineCount, setBaselineCount] = useState(0); // users before range start
+  const [totalInRange, setTotalInRange] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [fetchProgress, setFetchProgress] = useState<string | null>(null);
@@ -527,110 +560,95 @@ export default function MetricsPage() {
     return getDateRange(dateRange);
   }, [dateRange, customStart, customEnd]);
 
-  // Fetch all users in the date range (paginated)
+  // Fetch counts per bucket in parallel (no user record download)
   const fetchData = useCallback(async () => {
     setLoading(true);
     setError(null);
-    setFetchProgress('Fetching users...');
+    setFetchProgress('Generating buckets...');
 
     try {
-      const users: UserListItem[] = [];
-      let offset = 0;
-      const limit = 250;
-      let totalCount = 0;
+      const rangeStart = effectiveDates.start ?? new Date('2020-01-01T00:00:00Z');
+      const rangeEnd = effectiveDates.end;
 
-      do {
-        const result = await api.listUsers({
-          offset,
-          limit,
-          created_after: effectiveDates.start ? effectiveDates.start.toISOString() : undefined,
-          created_before: effectiveDates.end.toISOString(),
-        });
+      // Generate time buckets for the range
+      const buckets = generateBuckets(rangeStart, rangeEnd, granularity);
 
-        users.push(...result.members);
-        totalCount = result.total_count;
-        offset += limit;
+      if (buckets.length === 0) {
+        setChartData([]);
+        setBaselineCount(0);
+        setTotalInRange(0);
+        setLoading(false);
+        setFetchProgress(null);
+        return;
+      }
 
-        setFetchProgress(`Fetched ${users.length} of ${totalCount} users...`);
-      } while (users.length < totalCount);
+      setFetchProgress(`Fetching counts for ${buckets.length} periods...`);
 
-      setAllUsers(users);
+      // Fire all bucket count requests in parallel + baseline count
+      // Use limit=1 to only get total_count without downloading user data
+      const BATCH_SIZE = 15; // limit concurrent requests to avoid hammering the API
+      const bucketCounts: number[] = new Array(buckets.length).fill(0);
+      let baseline = 0;
+
+      // Fetch baseline (users before range start) for cumulative mode
+      const baselinePromise = effectiveDates.start
+        ? api.listUsers({ limit: 1, created_before: effectiveDates.start.toISOString() }).then(r => r.total_count).catch(() => 0)
+        : Promise.resolve(0);
+
+      // Process buckets in batches
+      for (let i = 0; i < buckets.length; i += BATCH_SIZE) {
+        const batch = buckets.slice(i, i + BATCH_SIZE);
+        const results = await Promise.all(
+          batch.map(b =>
+            api.listUsers({
+              limit: 1,
+              created_after: b.start.toISOString(),
+              created_before: b.end.toISOString(),
+            }).then(r => r.total_count).catch(() => 0)
+          )
+        );
+        for (let j = 0; j < results.length; j++) {
+          bucketCounts[i + j] = results[j];
+        }
+        setFetchProgress(`Fetched ${Math.min(i + BATCH_SIZE, buckets.length)} of ${buckets.length} periods...`);
+      }
+
+      baseline = await baselinePromise;
+
+      // Build chart data points
+      let cumulative = baseline;
+      const points: ChartDataPoint[] = buckets.map((b, i) => {
+        const count = bucketCounts[i];
+        cumulative += count;
+        return {
+          date: formatBucketLabel(b.key, granularity),
+          dateRaw: b.key,
+          count,
+          cumulative,
+        };
+      });
+
+      const total = bucketCounts.reduce((s, c) => s + c, 0);
+      setChartData(points);
+      setBaselineCount(baseline);
+      setTotalInRange(total);
       setFetchProgress(null);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Failed to load users';
+      const msg = err instanceof Error ? err.message : 'Failed to load metrics';
       setError(msg);
-      setAllUsers([]);
+      setChartData([]);
     } finally {
       setLoading(false);
       setFetchProgress(null);
     }
-  }, [effectiveDates]);
+  }, [effectiveDates, granularity]);
 
   useEffect(() => {
     fetchData();
   }, [fetchData]);
 
-  // Filter users by status
-  const filteredUsers = useMemo(() => {
-    if (!statusFilter) return allUsers;
-    return allUsers.filter(u => u.status === statusFilter);
-  }, [allUsers, statusFilter]);
-
-  // Aggregate into chart data
-  const chartData = useMemo((): ChartDataPoint[] => {
-    if (filteredUsers.length === 0) return [];
-
-    // Bucket users by created_at
-    const buckets: Record<string, number> = {};
-
-    for (const user of filteredUsers) {
-      if (!user.created_at) continue;
-      // Ensure created_at is parsed as UTC — backend may omit the Z suffix
-      let raw = user.created_at;
-      if (!raw.endsWith('Z') && !raw.includes('+') && !raw.includes('-', 10)) {
-        raw = raw.replace(' ', 'T') + 'Z';
-      }
-      const date = new Date(raw);
-      if (isNaN(date.getTime())) continue;
-      const key = getBucketKey(date, granularity, timezone);
-      buckets[key] = (buckets[key] || 0) + 1;
-    }
-
-    // Sort bucket keys chronologically
-    const sortedKeys = Object.keys(buckets).sort();
-    if (sortedKeys.length === 0) return [];
-
-    // Fill gaps using advanceBucketKey (operates on key strings, no timezone issues)
-    const allKeys: string[] = [];
-    const firstKey = sortedKeys[0];
-    const lastKey = sortedKeys[sortedKeys.length - 1];
-
-    let cursor = firstKey;
-    const maxIter = 10000; // safety limit
-    let iter = 0;
-    while (cursor <= lastKey && iter < maxIter) {
-      allKeys.push(cursor);
-      cursor = advanceBucketKey(cursor, granularity);
-      iter++;
-    }
-
-    // Build data points
-    let cumulative = 0;
-    return allKeys.map(key => {
-      const count = buckets[key] || 0;
-      cumulative += count;
-      return {
-        date: formatBucketLabel(key, granularity),
-        dateRaw: key,
-        count,
-        cumulative,
-      };
-    });
-  }, [filteredUsers, granularity, timezone]);
-
   // Stats
   const stats = useMemo(() => {
-    const totalInRange = filteredUsers.length;
     const periods = chartData.length || 1;
     const avgPerPeriod = totalInRange / periods;
 
@@ -652,10 +670,10 @@ export default function MetricsPage() {
       granLabel,
       growthRate,
     };
-  }, [filteredUsers, chartData, granularity]);
+  }, [totalInRange, chartData, granularity]);
 
   // Export handlers
-  function handleExport(type: 'chart_csv' | 'users_csv' | 'json') {
+  function handleExport(type: 'chart_csv' | 'json') {
     setShowExportMenu(false);
     const date = new Date().toISOString().slice(0, 10);
     const rangeSuffix = dateRange === 'custom' ? `${customStart}_${customEnd}` : dateRange;
@@ -670,31 +688,15 @@ export default function MetricsPage() {
         timezone,
       }));
       exportCSV(rows, `user-growth-${rangeSuffix}-${date}.csv`);
-    } else if (type === 'users_csv') {
-      const rows = filteredUsers.map(u => ({
-        id: u.id,
-        email: u.email ?? '',
-        phone: u.phone_number ?? '',
-        name: u.name ?? '',
-        status: u.status,
-        membership_status: u.membership_status ?? '',
-        membership_plan: u.membership_plan ?? '',
-        created_at: u.created_at,
-        hotel_count: u.hotel_count ?? '',
-        flight_count: u.flight_count ?? '',
-        email_count: u.email_count ?? '',
-      }));
-      exportCSV(rows, `users-${rangeSuffix}-${date}.csv`);
     } else {
       exportJSON({
         exported_at: new Date().toISOString(),
         date_range: dateRange === 'custom' ? `${customStart} to ${customEnd}` : dateRange,
         granularity,
         timezone,
-        status_filter: statusFilter,
+        baseline_count: baselineCount,
         stats,
         chart_data: chartData,
-        users: filteredUsers,
       }, `metrics-full-${rangeSuffix}-${date}.json`);
     }
   }
@@ -734,7 +736,7 @@ export default function MetricsPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          {!loading && filteredUsers.length > 0 && (
+          {!loading && chartData.length > 0 && (
             <div ref={exportRef} className="relative">
               <button
                 onClick={() => setShowExportMenu(v => !v)}
@@ -747,9 +749,6 @@ export default function MetricsPage() {
                 <div className="absolute right-0 top-full mt-1 z-50 bg-[#0d1117] border border-[#1a1f2e] rounded-lg shadow-xl overflow-hidden min-w-[200px]">
                   <button onClick={() => handleExport('chart_csv')} className="w-full text-left px-4 py-2.5 text-sm text-zinc-300 hover:bg-accent/50 transition-colors">
                     Chart data (CSV)
-                  </button>
-                  <button onClick={() => handleExport('users_csv')} className="w-full text-left px-4 py-2.5 text-sm text-zinc-300 hover:bg-accent/50 transition-colors border-t border-[#1a1f2e]">
-                    User list (CSV)
                   </button>
                   <button onClick={() => handleExport('json')} className="w-full text-left px-4 py-2.5 text-sm text-zinc-300 hover:bg-accent/50 transition-colors border-t border-[#1a1f2e]">
                     Full export (JSON)
@@ -856,16 +855,6 @@ export default function MetricsPage() {
           ))}
         </select>
 
-        {/* Status Filter */}
-        <select
-          value={statusFilter ?? ''}
-          onChange={(e) => setStatusFilter(e.target.value || null)}
-          className="bg-background border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
-        >
-          {STATUS_OPTIONS.map(opt => (
-            <option key={opt.label} value={opt.value ?? ''}>{opt.label}</option>
-          ))}
-        </select>
       </div>
 
       {/* Controls Row 2: Timezone + Chart mode */}
@@ -919,7 +908,7 @@ export default function MetricsPage() {
       </div>
 
       {/* Stats Bar */}
-      {!loading && !error && filteredUsers.length > 0 && (
+      {!loading && !error && chartData.length > 0 && (
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
           <div className="bg-[#0d1117] border border-[#1a1f2e] rounded-lg p-4">
             <p className="text-xs text-zinc-500 mb-1">Total Users</p>
@@ -1040,8 +1029,7 @@ export default function MetricsPage() {
       {/* Footer info */}
       {!loading && !error && chartData.length > 0 && (
         <p className="text-xs text-muted-foreground mt-3">
-          Showing {filteredUsers.length.toLocaleString()} users from {dateRangeLabel}
-          {statusFilter && ` (${statusFilter} only)`}
+          Showing {totalInRange.toLocaleString()} new users from {dateRangeLabel}
           {` \u00b7 ${TIMEZONE_OPTIONS.find(o => o.value === timezone)?.label ?? timezone} time`}
         </p>
       )}
