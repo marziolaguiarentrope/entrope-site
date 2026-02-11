@@ -399,12 +399,13 @@ class ApiClient {
   async markBookingCancelled(
     bookingType: 'hotel' | 'flight',
     bookingId: string,
+    outcome: 'cancelled' | 'unable_to_cancel',
     notes: string,
     confirmationCode?: string
-  ): Promise<{ booking_id: string; booking_type: string; status: string; cancelled_at: string; operator: string }> {
+  ): Promise<{ booking_id: string; booking_type: string; status: string; cancelled_at: string | null; operator: string; outcome: string }> {
     return this.fetch(`/bookings/${bookingType}/${bookingId}/mark-cancelled`, {
       method: 'POST',
-      body: JSON.stringify({ notes, confirmation_code: confirmationCode }),
+      body: JSON.stringify({ outcome, notes, confirmation_code: confirmationCode }),
     });
   }
 

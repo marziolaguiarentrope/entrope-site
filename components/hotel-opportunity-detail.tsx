@@ -566,6 +566,7 @@ export function HotelOpportunityDetail({
       await api.markBookingCancelled(
         'hotel',
         opportunity.old_booking_id,
+        'cancelled',
         fullNotes,
       );
       onUpdate({
@@ -576,6 +577,33 @@ export function HotelOpportunityDetail({
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to mark as cancelled');
       setShowConfirm(false);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleUnableToCancel() {
+    if (!opportunity.old_booking_id) {
+      setError('No booking ID available');
+      return;
+    }
+    if (!notes.trim()) {
+      setError('Please enter notes about why cancellation was not possible');
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+    try {
+      await api.markBookingCancelled(
+        'hotel',
+        opportunity.old_booking_id,
+        'unable_to_cancel',
+        notes.trim(),
+      );
+      onClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to send cancel reminder');
     } finally {
       setLoading(false);
     }
@@ -696,6 +724,25 @@ export function HotelOpportunityDetail({
             >
               Mark as Cancelled
             </button>
+            <div className="border-t border-border pt-4">
+              <p className="text-sm text-muted-foreground mb-2">
+                This sends an email reminder to the customer to cancel their booking.
+              </p>
+              <button
+                onClick={() => {
+                  if (!notes.trim()) {
+                    setError('Please enter notes about why cancellation was not possible');
+                    return;
+                  }
+                  setError(null);
+                  handleUnableToCancel();
+                }}
+                disabled={loading}
+                className="w-full py-2 px-4 bg-amber-600 text-white rounded-lg font-medium hover:bg-amber-700 disabled:opacity-50 transition-colors"
+              >
+                {loading ? 'Sending...' : 'Unable to Cancel'}
+              </button>
+            </div>
           </div>
         )}
 
