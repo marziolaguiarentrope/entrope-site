@@ -25,7 +25,7 @@ function timeAgo(dateString: string): string {
 
 // ── Types ────────────────────────────────────────────────
 
-type TabFilter = 'open' | 'claimed' | 'resolved' | 'all';
+type TabFilter = 'open' | 'resolved' | 'all';
 type SortKey = 'priority' | 'created' | 'type' | 'status';
 type SortDir = 'asc' | 'desc';
 
@@ -227,10 +227,9 @@ export default function EscalationsPage() {
     };
   }, [fetchData]);
 
-  // Tab filter
+  // Tab filter — open includes claimed (claiming is automatic)
   const tabFiltered = useMemo(() => {
-    if (tab === 'open') return escalations.filter(e => e.status === 'open');
-    if (tab === 'claimed') return escalations.filter(e => e.status === 'claimed');
+    if (tab === 'open') return escalations.filter(e => e.status === 'open' || e.status === 'claimed');
     if (tab === 'resolved') return escalations.filter(e => e.status === 'resolved');
     return escalations;
   }, [escalations, tab]);
@@ -255,9 +254,8 @@ export default function EscalationsPage() {
     }
   }
 
-  // Counts
-  const openCount = escalations.filter(e => e.status === 'open').length;
-  const claimedCount = escalations.filter(e => e.status === 'claimed').length;
+  // Counts — open includes claimed (claiming is automatic)
+  const openCount = escalations.filter(e => e.status === 'open' || e.status === 'claimed').length;
   const resolvedCount = escalations.filter(e => e.status === 'resolved').length;
 
   // Handle escalation updates from the detail panel
@@ -287,7 +285,7 @@ export default function EscalationsPage() {
         <span>
           <span className="font-medium text-yellow-400">{openCount}</span> open
           <span className="mx-1">·</span>
-          <span className="font-medium text-blue-400">{claimedCount}</span> claimed
+          <span className="font-medium text-green-400">{resolvedCount}</span> resolved
         </span>
       </div>
 
@@ -303,15 +301,6 @@ export default function EscalationsPage() {
             )}
           >
             Open {openCount > 0 && <span className="ml-1 text-xs opacity-70">({openCount})</span>}
-          </button>
-          <button
-            onClick={() => setTab('claimed')}
-            className={cn(
-              'px-4 py-1.5 text-sm font-medium rounded-md transition-colors',
-              tab === 'claimed' ? 'bg-background shadow-sm text-foreground' : 'text-muted-foreground hover:text-foreground'
-            )}
-          >
-            Claimed {claimedCount > 0 && <span className="ml-1 text-xs opacity-70">({claimedCount})</span>}
           </button>
           <button
             onClick={() => setTab('resolved')}
@@ -392,7 +381,7 @@ export default function EscalationsPage() {
           <div className="p-6 text-center text-muted-foreground">Loading escalations...</div>
         ) : sorted.length === 0 ? (
           <div className="p-6 text-center text-muted-foreground">
-            {search ? 'No escalations match your search' : tab === 'claimed' ? 'No claimed escalations' : tab === 'resolved' ? 'No resolved escalations' : tab === 'all' ? 'No escalations' : 'No open escalations'}
+            {search ? 'No escalations match your search' : tab === 'resolved' ? 'No resolved escalations' : tab === 'all' ? 'No escalations' : 'No open escalations'}
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -404,7 +393,7 @@ export default function EscalationsPage() {
                   <SortHeader label="Type" sortKey="type" currentKey={sortKey} dir={sortDir} onSort={handleSort} />
                   <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground whitespace-nowrap">Source</th>
                   <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground whitespace-nowrap">Reason</th>
-                  <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground whitespace-nowrap">Claimed By</th>
+                  <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground whitespace-nowrap">Handled By</th>
                   <SortHeader label="Created" sortKey="created" currentKey={sortKey} dir={sortDir} onSort={handleSort} />
                   <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground whitespace-nowrap">Profile</th>
                 </tr>

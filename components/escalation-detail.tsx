@@ -601,16 +601,15 @@ export function EscalationDetail({ escalation, onClose, onUpdate }: EscalationDe
   const [supplierCostCurrency, setSupplierCostCurrency] = useState('USD');
   const [confirmBookingSuccess, setConfirmBookingSuccess] = useState(false);
 
-  const isOpen = escalation.status === 'open';
-  const isClaimed = escalation.status === 'claimed';
   const isResolved = escalation.status === 'resolved';
+  const canAct = !isResolved; // can take action on open or claimed
 
   // Extract key context data
   const ctx = escalation.context || {};
   const opportunityId = (ctx.opportunity_id as string | undefined) || (escalation.source_type === 'opportunity' ? escalation.source_id : null);
   const actionNeeded = ctx.action_needed as string | undefined;
   const isBookingFailure = escalation.type === 'booking_failure';
-  const canConfirmBooking = isBookingFailure && !!opportunityId && (isClaimed || isOpen);
+  const canConfirmBooking = isBookingFailure && !!opportunityId && canAct;
 
   const priorityColors: Record<string, string> = {
     urgent: 'bg-red-500/20 text-red-400',
@@ -625,19 +624,6 @@ export function EscalationDetail({ escalation, onClose, onUpdate }: EscalationDe
     resolved: 'bg-green-500/20 text-green-400',
   };
 
-  async function handleClaim() {
-    setLoading(true);
-    setError(null);
-    try {
-      const updated = await api.claimEscalation(escalation.id);
-      onUpdate(updated);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to claim');
-    } finally {
-      setLoading(false);
-    }
-  }
-
   async function handleResolve() {
     if (!resolutionNotes.trim()) {
       setError('Resolution notes required');
@@ -646,8 +632,13 @@ export function EscalationDetail({ escalation, onClose, onUpdate }: EscalationDe
     setLoading(true);
     setError(null);
     try {
+      // Auto-claim first if not yet claimed (logs who acted)
+      if (escalation.status === 'open') {
+        await api.claimEscalation(escalation.id).catch(() => {});
+      }
       const updated = await api.resolveEscalation(escalation.id, resolutionNotes.trim());
       onUpdate(updated);
+      onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to resolve');
     } finally {
@@ -663,6 +654,10 @@ export function EscalationDetail({ escalation, onClose, onUpdate }: EscalationDe
     setLoading(true);
     setError(null);
     try {
+      // Auto-claim first if not yet claimed (logs who acted)
+      if (escalation.status === 'open') {
+        await api.claimEscalation(escalation.id).catch(() => {});
+      }
       const costAmount = supplierCostAmount ? Math.round(parseFloat(supplierCostAmount) * 100) : undefined;
       await api.confirmBooking(
         opportunityId,
@@ -671,16 +666,14 @@ export function EscalationDetail({ escalation, onClose, onUpdate }: EscalationDe
         costAmount,
         costAmount ? supplierCostCurrency : undefined,
       );
-      setConfirmBookingSuccess(true);
-      setShowConfirmBookingForm(false);
-      setConfirmBookingStep('input');
       // Refresh the escalation (the API auto-resolves it)
       try {
         const updated = await api.getEscalation(escalation.id);
         onUpdate(updated);
       } catch {
-        // Escalation might already be resolved; just close
+        // Escalation might already be resolved
       }
+      onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to confirm booking');
       setConfirmBookingStep('input');
@@ -704,7 +697,7 @@ export function EscalationDetail({ escalation, onClose, onUpdate }: EscalationDe
                 <span className={cn('px-2 py-0.5 text-xs font-medium rounded', priorityColors[escalation.priority] || 'bg-gray-500/20 text-gray-400')}>
                   {escalation.priority}
                 </span>
-                {escalation.claimed_by && (
+                {isResolved && escalation.claimed_by && (
                   <span className="text-xs text-muted-foreground">
                     by {escalation.claimed_by}
                   </span>
@@ -937,17 +930,7 @@ export function EscalationDetail({ escalation, onClose, onUpdate }: EscalationDe
           )}
 
           {/* Actions */}
-          {isOpen && (
-            <button
-              onClick={handleClaim}
-              disabled={loading}
-              className="w-full py-2 px-4 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-50 transition-colors"
-            >
-              {loading ? 'Claiming…' : 'Claim Escalation'}
-            </button>
-          )}
-
-          {isClaimed && !showResolveForm && !showConfirmBookingForm && (
+          {canAct && !showResolveForm && !showConfirmBookingForm && (
             <button
               onClick={() => setShowResolveForm(true)}
               className="w-full py-2 px-4 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition-colors"
@@ -956,7 +939,7 @@ export function EscalationDetail({ escalation, onClose, onUpdate }: EscalationDe
             </button>
           )}
 
-          {isClaimed && showResolveForm && (
+          {canAct && showResolveForm && (
             <div className="space-y-3">
               <div>
                 <label className="block text-sm font-medium mb-1">Resolution Notes *</label>
