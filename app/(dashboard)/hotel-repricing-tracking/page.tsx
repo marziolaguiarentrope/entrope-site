@@ -492,16 +492,16 @@ export default function HotelRepricingTrackingPage() {
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
-  // Auto-refresh for current tab (every 30s)
+  // Auto-refresh for current tab (every 30s) — paused while detail panel is open
   useEffect(() => {
     if (refreshTimer.current) clearInterval(refreshTimer.current);
-    if (tab === 'current') {
+    if (tab === 'current' && !selectedOpportunity) {
       refreshTimer.current = setInterval(fetchData, 30_000);
     }
     return () => {
       if (refreshTimer.current) clearInterval(refreshTimer.current);
     };
-  }, [tab, fetchData]);
+  }, [tab, fetchData, selectedOpportunity]);
 
   // Background counts for tabs we're not viewing
   useEffect(() => {
