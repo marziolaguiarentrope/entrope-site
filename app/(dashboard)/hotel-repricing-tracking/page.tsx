@@ -65,6 +65,9 @@ const COLUMNS: ColumnDef[] = [
   { id: 'created', label: 'Created', sortKey: 'created', minWidth: 70, defaultWidth: 90 },
 ];
 
+// Terminal statuses — these go in the "past" tab; everything else is "current"
+const TERMINAL_STATUSES = new Set(['completed', 'failed', 'declined', 'expired', 'withdrawn', 'cancelled']);
+
 // ── Sort Logic ───────────────────────────────────────────
 
 function sortOpportunities(
@@ -431,43 +434,53 @@ export default function HotelRepricingTrackingPage() {
     setSearch('');
   }, [tab]);
 
-  // Fetch data
+  // Fetch data — always pull from all three endpoints and classify on the frontend
   const fetchData = useCallback(async () => {
     setLoading(true);
     setError(null);
 
     try {
-      let opps: EnrichedOpportunity[] = [];
+      // Always fetch all three lists so no opportunity falls through the cracks
+      const [paymentRes, cancelRes, completedRes] = await Promise.allSettled([
+        api.listHotelOpportunitiesPendingPayment({ limit: 100 }),
+        api.listHotelOpportunitiesPendingCancel({ limit: 100 }),
+        api.listHotelOpportunitiesCompleted({ limit: 100 }),
+      ]);
 
-      if (tab === 'current' || tab === 'all') {
-        const [paymentRes, cancelRes] = await Promise.all([
-          api.listHotelOpportunitiesPendingPayment({ limit: 100 }),
-          api.listHotelOpportunitiesPendingCancel({ limit: 100 }),
-        ]);
-        opps = [
-          ...paymentRes.opportunities.map(o => ({ ...o, opp_type: 'pending_payment' as OpportunityType })),
-          ...cancelRes.opportunities.map(o => ({ ...o, opp_type: 'pending_cancel' as OpportunityType })),
-        ];
-        setCounts(prev => ({
-          ...prev,
-          payment: paymentRes.total,
-          cancel: cancelRes.total,
-        }));
+      const paymentOpps = paymentRes.status === 'fulfilled' ? paymentRes.value.opportunities : [];
+      const cancelOpps = cancelRes.status === 'fulfilled' ? cancelRes.value.opportunities : [];
+      const completedOpps = completedRes.status === 'fulfilled' ? completedRes.value.opportunities : [];
+
+      // Deduplicate by id — pending-payment and pending-cancel take priority for opp_type tagging
+      const seen = new Set<string>();
+      const allOpps: EnrichedOpportunity[] = [];
+
+      for (const o of paymentOpps) {
+        if (!seen.has(o.id)) { seen.add(o.id); allOpps.push({ ...o, opp_type: 'pending_payment' }); }
+      }
+      for (const o of cancelOpps) {
+        if (!seen.has(o.id)) { seen.add(o.id); allOpps.push({ ...o, opp_type: 'pending_cancel' }); }
+      }
+      for (const o of completedOpps) {
+        if (!seen.has(o.id)) { seen.add(o.id); allOpps.push({ ...o, opp_type: 'completed' }); }
       }
 
-      if (tab === 'past' || tab === 'all') {
-        try {
-          const completedRes = await api.listHotelOpportunitiesCompleted({ limit: 100 });
-          const completedOpps = completedRes.opportunities.map(o => ({ ...o, opp_type: 'completed' as OpportunityType }));
-          opps = tab === 'all' ? [...opps, ...completedOpps] : completedOpps;
-          setCounts(prev => ({ ...prev, completed: completedRes.total }));
-        } catch {
-          if (tab === 'past') {
-            setOpportunities([]);
-            setLoading(false);
-            return;
-          }
-        }
+      // Update counts
+      setCounts({
+        payment: paymentRes.status === 'fulfilled' ? paymentRes.value.total : 0,
+        cancel: cancelRes.status === 'fulfilled' ? cancelRes.value.total : 0,
+        completed: completedRes.status === 'fulfilled' ? completedRes.value.total : 0,
+      });
+
+      // Filter by tab
+      let opps: EnrichedOpportunity[];
+      if (tab === 'current') {
+        // Show every repricing that is NOT in a terminal state
+        opps = allOpps.filter(o => !TERMINAL_STATUSES.has(o.status));
+      } else if (tab === 'past') {
+        opps = allOpps.filter(o => TERMINAL_STATUSES.has(o.status));
+      } else {
+        opps = allOpps;
       }
 
       setOpportunities(opps);
@@ -502,32 +515,6 @@ export default function HotelRepricingTrackingPage() {
       if (refreshTimer.current) clearInterval(refreshTimer.current);
     };
   }, [tab, fetchData, selectedOpportunity]);
-
-  // Background counts for tabs we're not viewing
-  useEffect(() => {
-    async function fetchOtherCounts() {
-      try {
-        if (tab !== 'current') {
-          const [paymentRes, cancelRes] = await Promise.all([
-            api.listHotelOpportunitiesPendingPayment({ limit: 1 }),
-            api.listHotelOpportunitiesPendingCancel({ limit: 1 }),
-          ]);
-          setCounts(prev => ({ ...prev, payment: paymentRes.total, cancel: cancelRes.total }));
-        }
-        if (tab !== 'past') {
-          try {
-            const completedRes = await api.listHotelOpportunitiesCompleted({ limit: 1 });
-            setCounts(prev => ({ ...prev, completed: completedRes.total }));
-          } catch {
-            // Endpoint may not exist yet
-          }
-        }
-      } catch {
-        // Silent fail
-      }
-    }
-    fetchOtherCounts();
-  }, [tab]);
 
   // Filter by payment status
   const paymentFiltered = useMemo(() => {
@@ -564,7 +551,7 @@ export default function HotelRepricingTrackingPage() {
     return [...set].sort();
   }, [opportunities]);
 
-  const currentCount = counts.payment + counts.cancel;
+  const currentCount = tab === 'current' ? opportunities.length : counts.payment + counts.cancel;
 
   return (
     <div>
@@ -671,11 +658,6 @@ export default function HotelRepricingTrackingPage() {
           </div>
         ) : loading && opportunities.length === 0 ? (
           <div className="p-6 text-center text-muted-foreground">Loading hotel repricings...</div>
-        ) : tab === 'past' && sorted.length === 0 && !search ? (
-          <div className="p-6 text-center text-muted-foreground">
-            <p>No historical data available yet.</p>
-            <p className="text-xs mt-1 opacity-70">Backend endpoint pending (ENG-16263)</p>
-          </div>
         ) : sorted.length === 0 ? (
           <div className="p-6 text-center text-muted-foreground">
             {search ? 'No repricings match your search' : 'No hotel repricings found'}
