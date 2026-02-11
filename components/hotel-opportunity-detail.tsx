@@ -312,24 +312,27 @@ function HotelBookingDetailsModule({
 
 // ── Repricing History Section ────────────────────────────
 
-function RepricingHistorySection({ userId, currentOpportunityId }: { userId: string; currentOpportunityId: string }) {
+function RepricingHistorySection({ userId, currentOpportunityId, bookingId }: { userId: string; currentOpportunityId: string; bookingId: string | null }) {
   const [opportunities, setOpportunities] = useState<HotelOpportunityView[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (!bookingId) { setLoading(false); return; }
     let cancelled = false;
     setLoading(true);
     api.getMember(userId)
       .then((ctx: MemberContext) => {
         if (cancelled) return;
-        // Get all hotel opportunities for this user
-        const opps = ctx.hotel_opportunities || [];
+        // Only show opportunities for the same hotel booking
+        const opps = (ctx.hotel_opportunities || []).filter(
+          o => o.hotel_booking_id === bookingId
+        );
         setOpportunities(opps);
       })
       .catch(() => {})
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [userId]);
+  }, [userId, bookingId]);
 
   if (loading) {
     return (
@@ -675,6 +678,7 @@ export function HotelOpportunityDetail({
         <RepricingHistorySection
           userId={opportunity.user_id}
           currentOpportunityId={opportunity.id}
+          bookingId={opportunity.old_booking_id}
         />
 
         {/* Error */}
