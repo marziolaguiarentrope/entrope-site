@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { HotelOpportunity, HotelBookingDetail, api, RawEmail, UserBasicInfo, MemberContext, HotelOpportunityView } from '@/lib/api';
+import { HotelOpportunity, BookingEnrichment, api, RawEmail, UserBasicInfo, MemberContext, HotelOpportunityView } from '@/lib/api';
 import { cn, formatDate } from '@/lib/utils';
 
 // ── Helpers ──────────────────────────────────────────────
@@ -117,26 +117,26 @@ function CustomerInfoSection({ userId, userInfo }: { userId: string; userInfo?: 
 
 function HotelBookingDetailsModule({
   opportunity,
-  bookingDetail,
+  bookingEnrichment,
 }: {
   opportunity: HotelOpportunity;
-  bookingDetail?: HotelBookingDetail;
+  bookingEnrichment?: BookingEnrichment;
 }) {
-  const hotelName = bookingDetail?.hotel_name || opportunity.hotel_name || 'Unknown Hotel';
-  const city = bookingDetail?.city;
-  const checkIn = bookingDetail?.check_in_date || opportunity.check_in;
-  const checkOut = bookingDetail?.check_out_date || opportunity.check_out;
-  const roomType = bookingDetail?.room_type;
-  const guests = bookingDetail?.guests;
-  const primaryGuest = guests?.find(g => g.is_primary) || guests?.[0];
-  const bookedWith = bookingDetail?.booking_provider || opportunity.old_booking_provider;
+  const hotelName = bookingEnrichment?.hotel_name || opportunity.hotel_name || 'Unknown Hotel';
+  const city = bookingEnrichment?.hotel_city || null;
+  const checkIn = bookingEnrichment?.check_in || opportunity.check_in;
+  const checkOut = bookingEnrichment?.check_out || opportunity.check_out;
+  const roomType = bookingEnrichment?.room_type || null;
+  const guestNames = bookingEnrichment?.guests || [];
+  const primaryGuestName = guestNames[0] || null;
+  const bookedWith = bookingEnrichment?.booked_with || opportunity.old_booking_provider;
 
-  // Pricing
-  const originalPrice = bookingDetail?.cash_paid;
+  // Pricing — total_price from BookingEnrichment is the original booking price
+  const originalPrice = bookingEnrichment?.total_price || null;
   const newPrice = opportunity.payment_amount;
   const newCurrency = opportunity.payment_currency || 'USD';
 
-  // Savings (only same currency)
+  // Savings (only when same currency)
   let savingsAmount: number | null = null;
   if (originalPrice && newPrice && originalPrice.currency === newCurrency) {
     const diff = originalPrice.amount - newPrice;
@@ -144,7 +144,7 @@ function HotelBookingDetailsModule({
   }
 
   // Confirmation codes
-  const hotelConfCode = bookingDetail?.confirmation_number || opportunity.old_booking_confirmation_code;
+  const hotelConfCode = bookingEnrichment?.confirmation_code || opportunity.old_booking_confirmation_code;
 
   // Status
   const statusColors: Record<string, string> = {
@@ -181,11 +181,11 @@ function HotelBookingDetailsModule({
       </div>
 
       {/* Room + guest */}
-      {(roomType || primaryGuest) && (
+      {(roomType || primaryGuestName) && (
         <div className="text-xs text-muted-foreground space-y-0.5">
           {roomType && <p>{roomType}</p>}
-          {primaryGuest && <p>Guest: {primaryGuest.name}</p>}
-          {guests && guests.length > 1 && <p className="text-xs">+{guests.length - 1} more guest{guests.length > 2 ? 's' : ''}</p>}
+          {primaryGuestName && <p>Guest: {primaryGuestName}</p>}
+          {guestNames.length > 1 && <p className="text-xs">+{guestNames.length - 1} more guest{guestNames.length > 2 ? 's' : ''}</p>}
         </div>
       )}
 
@@ -521,7 +521,7 @@ function EmailSidePanel({
 
 interface HotelOpportunityDetailProps {
   opportunity: HotelOpportunity;
-  bookingDetail?: HotelBookingDetail;
+  bookingEnrichment?: BookingEnrichment;
   userInfo?: UserBasicInfo;
   variant: 'payment' | 'cancel';
   onClose: () => void;
@@ -530,7 +530,7 @@ interface HotelOpportunityDetailProps {
 
 export function HotelOpportunityDetail({
   opportunity,
-  bookingDetail,
+  bookingEnrichment,
   userInfo,
   variant,
   onClose,
@@ -618,7 +618,7 @@ export function HotelOpportunityDetail({
           {/* Hotel Booking Details Module */}
           <HotelBookingDetailsModule
             opportunity={opportunity}
-            bookingDetail={bookingDetail}
+            bookingEnrichment={bookingEnrichment}
           />
 
           {/* View Original Email button */}

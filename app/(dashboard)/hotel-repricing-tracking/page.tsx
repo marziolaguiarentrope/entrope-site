@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import Link from 'next/link';
 import { cn, formatDate } from '@/lib/utils';
-import { api, HotelOpportunity, HotelBookingDetail, UserBasicInfo } from '@/lib/api';
+import { api, HotelOpportunity, BookingEnrichment, UserBasicInfo } from '@/lib/api';
 import { HotelOpportunityDetail } from '@/components/hotel-opportunity-detail';
 
 // ── Helpers ──────────────────────────────────────────────
@@ -72,7 +72,7 @@ function sortOpportunities(
   key: SortKey,
   dir: SortDir,
   userInfoMap: Map<string, UserBasicInfo>,
-  bookingDetailMap: Map<string, HotelBookingDetail>,
+  bookingEnrichmentMap: Map<string, BookingEnrichment>,
 ): EnrichedOpportunity[] {
   return [...opps].sort((a, b) => {
     let aVal: string | number;
@@ -96,10 +96,10 @@ function sortOpportunities(
         bVal = new Date(b.created_at).getTime();
         break;
       case 'original_price': {
-        const aBd = a.old_booking_id ? bookingDetailMap.get(a.old_booking_id) : undefined;
-        const bBd = b.old_booking_id ? bookingDetailMap.get(b.old_booking_id) : undefined;
-        aVal = aBd?.cash_paid?.amount ?? 0;
-        bVal = bBd?.cash_paid?.amount ?? 0;
+        const aBe = a.old_booking_id ? bookingEnrichmentMap.get(a.old_booking_id) : undefined;
+        const bBe = b.old_booking_id ? bookingEnrichmentMap.get(b.old_booking_id) : undefined;
+        aVal = aBe?.total_price?.amount ?? 0;
+        bVal = bBe?.total_price?.amount ?? 0;
         break;
       }
       case 'new_price':
@@ -107,10 +107,10 @@ function sortOpportunities(
         bVal = b.payment_amount ?? 0;
         break;
       case 'savings': {
-        const aBd2 = a.old_booking_id ? bookingDetailMap.get(a.old_booking_id) : undefined;
-        const bBd2 = b.old_booking_id ? bookingDetailMap.get(b.old_booking_id) : undefined;
-        const aOrig = aBd2?.cash_paid?.amount ?? 0;
-        const bOrig = bBd2?.cash_paid?.amount ?? 0;
+        const aBe2 = a.old_booking_id ? bookingEnrichmentMap.get(a.old_booking_id) : undefined;
+        const bBe2 = b.old_booking_id ? bookingEnrichmentMap.get(b.old_booking_id) : undefined;
+        const aOrig = aBe2?.total_price?.amount ?? 0;
+        const bOrig = bBe2?.total_price?.amount ?? 0;
         aVal = aOrig && a.payment_amount ? aOrig - a.payment_amount : 0;
         bVal = bOrig && b.payment_amount ? bOrig - b.payment_amount : 0;
         break;
@@ -139,13 +139,13 @@ function matchesSearch(
   opp: EnrichedOpportunity,
   query: string,
   userInfoMap: Map<string, UserBasicInfo>,
-  bookingDetailMap: Map<string, HotelBookingDetail>,
+  bookingEnrichmentMap: Map<string, BookingEnrichment>,
 ): boolean {
   if (!query) return true;
   const q = query.toLowerCase();
   const u = userInfoMap.get(opp.user_id);
-  const bd = opp.old_booking_id ? bookingDetailMap.get(opp.old_booking_id) : undefined;
-  const guestName = bd?.guests?.find(g => g.is_primary)?.name || bd?.guests?.[0]?.name || '';
+  const be = opp.old_booking_id ? bookingEnrichmentMap.get(opp.old_booking_id) : undefined;
+  const guestName = be?.guests?.[0] || '';
 
   return !!(
     opp.hotel_name?.toLowerCase().includes(q) ||
@@ -155,7 +155,7 @@ function matchesSearch(
     u?.phone?.toLowerCase().includes(q) ||
     u?.name?.toLowerCase().includes(q) ||
     guestName.toLowerCase().includes(q) ||
-    bd?.confirmation_number?.toLowerCase().includes(q)
+    be?.confirmation_code?.toLowerCase().includes(q)
   );
 }
 
@@ -254,23 +254,33 @@ function ResizableHeader({
   );
 }
 
+// ── Loading Shimmer ──────────────────────────────────────
+
+function Shimmer({ className }: { className?: string }) {
+  return (
+    <span className={cn('inline-block bg-muted-foreground/15 rounded animate-pulse', className || 'h-3.5 w-16')} />
+  );
+}
+
 // ── Table Row ────────────────────────────────────────────
 
 function OpportunityRow({
   opp,
   onClick,
   userInfo,
-  bookingDetail,
+  bookingEnrichment,
   columnWidths,
+  enriching,
 }: {
   opp: EnrichedOpportunity;
   onClick: () => void;
   userInfo?: UserBasicInfo;
-  bookingDetail?: HotelBookingDetail;
+  bookingEnrichment?: BookingEnrichment;
   columnWidths: Record<string, number>;
+  enriching: boolean;
 }) {
-  const primaryGuest = bookingDetail?.guests?.find(g => g.is_primary) || bookingDetail?.guests?.[0];
-  const originalPrice = bookingDetail?.cash_paid;
+  const guestName = bookingEnrichment?.guests?.[0] || null;
+  const originalPrice = bookingEnrichment?.total_price || null;
   const newPrice = opp.payment_amount;
   const newCurrency = opp.payment_currency;
 
@@ -286,7 +296,6 @@ function OpportunityRow({
   }
 
   // Axel conf code: the old_booking_confirmation_code is the hotel's code
-  // For the table we show it (prefixed with provider if available)
   const confCode = opp.old_booking_confirmation_code;
 
   return (
@@ -307,7 +316,7 @@ function OpportunityRow({
       </td>
       {/* Account Name (linked) */}
       <td className="px-3 py-3 text-sm" style={{ width: columnWidths.account_name }}>
-        {userInfo?.name ? (
+        {enriching && !userInfo ? <Shimmer className="h-3.5 w-20" /> : userInfo?.name ? (
           <Link
             href={`/users-list/${opp.user_id}`}
             onClick={(e) => e.stopPropagation()}
@@ -321,7 +330,7 @@ function OpportunityRow({
       </td>
       {/* Reservation Name (guest name) */}
       <td className="px-3 py-3 text-xs text-muted-foreground truncate" style={{ width: columnWidths.guest_name }}>
-        {primaryGuest?.name || '—'}
+        {enriching && !bookingEnrichment ? <Shimmer className="h-3 w-24" /> : guestName || '—'}
       </td>
       {/* Hotel */}
       <td className="px-3 py-3 text-sm truncate" style={{ width: columnWidths.hotel }}>
@@ -337,7 +346,7 @@ function OpportunityRow({
       </td>
       {/* Original Price */}
       <td className="px-3 py-3 text-xs whitespace-nowrap text-right" style={{ width: columnWidths.original_price }}>
-        {originalPrice ? (
+        {enriching && !bookingEnrichment ? <Shimmer className="h-3 w-14" /> : originalPrice ? (
           <span className={cn(newPrice ? 'line-through text-muted-foreground' : 'font-mono')}>
             {formatMoney(originalPrice.amount, originalPrice.currency)}
           </span>
@@ -353,7 +362,7 @@ function OpportunityRow({
       </td>
       {/* Savings */}
       <td className="px-3 py-3 text-xs whitespace-nowrap text-right" style={{ width: columnWidths.savings }}>
-        {savingsAmount ? (
+        {enriching && !bookingEnrichment ? <Shimmer className="h-3 w-12" /> : savingsAmount ? (
           <span className="text-green-400 bg-green-500/10 px-1.5 py-0.5 rounded font-medium">
             {formatMoney(savingsAmount, savingsCurrency)}
           </span>
@@ -389,7 +398,8 @@ export default function HotelRepricingTrackingPage() {
 
   // Enrichment
   const [userInfoMap, setUserInfoMap] = useState<Map<string, UserBasicInfo>>(new Map());
-  const [bookingDetailMap, setBookingDetailMap] = useState<Map<string, HotelBookingDetail>>(new Map());
+  const [bookingEnrichmentMap, setBookingEnrichmentMap] = useState<Map<string, BookingEnrichment>>(new Map());
+  const [enriching, setEnriching] = useState(false);
 
   // Detail panel
   const [selectedOpportunity, setSelectedOpportunity] = useState<EnrichedOpportunity | null>(null);
@@ -462,12 +472,16 @@ export default function HotelRepricingTrackingPage() {
 
       setOpportunities(opps);
 
-      // Non-blocking enrichment
+      // Non-blocking enrichment — single batch call extracts both user info + booking data
       const userIds = opps.map(o => o.user_id);
-      const bookingIds = opps.map(o => o.old_booking_id).filter(Boolean) as string[];
-
-      api.batchGetUserBasicInfo(userIds).then(setUserInfoMap).catch(() => {});
-      api.batchGetHotelBookingDetails(bookingIds).then(setBookingDetailMap).catch(() => {});
+      setEnriching(true);
+      api.batchEnrichFromMembers(userIds)
+        .then(({ userInfoMap: uMap, bookingEnrichmentMap: bMap }) => {
+          setUserInfoMap(uMap);
+          setBookingEnrichmentMap(bMap);
+        })
+        .catch(() => {})
+        .finally(() => setEnriching(false));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch data');
       setOpportunities([]);
@@ -523,12 +537,12 @@ export default function HotelRepricingTrackingPage() {
 
   // Search + sort
   const searched = useMemo(
-    () => paymentFiltered.filter(o => matchesSearch(o, search, userInfoMap, bookingDetailMap)),
-    [paymentFiltered, search, userInfoMap, bookingDetailMap]
+    () => paymentFiltered.filter(o => matchesSearch(o, search, userInfoMap, bookingEnrichmentMap)),
+    [paymentFiltered, search, userInfoMap, bookingEnrichmentMap]
   );
   const sorted = useMemo(
-    () => sortOpportunities(searched, sortKey, sortDir, userInfoMap, bookingDetailMap),
-    [searched, sortKey, sortDir, userInfoMap, bookingDetailMap]
+    () => sortOpportunities(searched, sortKey, sortDir, userInfoMap, bookingEnrichmentMap),
+    [searched, sortKey, sortDir, userInfoMap, bookingEnrichmentMap]
   );
 
   // Sort handler
@@ -691,8 +705,9 @@ export default function HotelRepricingTrackingPage() {
                     opp={opp}
                     onClick={() => setSelectedOpportunity(opp)}
                     userInfo={userInfoMap.get(opp.user_id)}
-                    bookingDetail={opp.old_booking_id ? bookingDetailMap.get(opp.old_booking_id) : undefined}
+                    bookingEnrichment={opp.old_booking_id ? bookingEnrichmentMap.get(opp.old_booking_id) : undefined}
                     columnWidths={columnWidths}
+                    enriching={enriching}
                   />
                 ))}
               </tbody>
@@ -719,7 +734,7 @@ export default function HotelRepricingTrackingPage() {
       {selectedOpportunity && (
         <HotelOpportunityDetail
           opportunity={selectedOpportunity}
-          bookingDetail={selectedOpportunity.old_booking_id ? bookingDetailMap.get(selectedOpportunity.old_booking_id) : undefined}
+          bookingEnrichment={selectedOpportunity.old_booking_id ? bookingEnrichmentMap.get(selectedOpportunity.old_booking_id) : undefined}
           userInfo={userInfoMap.get(selectedOpportunity.user_id)}
           variant={selectedOpportunity.opp_type === 'pending_payment' ? 'payment' : 'cancel'}
           onClose={() => setSelectedOpportunity(null)}

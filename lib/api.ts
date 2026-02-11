@@ -447,6 +447,63 @@ class ApiClient {
     return map;
   }
 
+  /**
+   * Batch-fetch full MemberContext for multiple user IDs (deduped, parallel).
+   * Returns both UserBasicInfo and BookingEnrichment maps extracted from the same data,
+   * avoiding the broken GET /bookings/hotel/{id} endpoint.
+   */
+  async batchEnrichFromMembers(userIds: string[]): Promise<{
+    userInfoMap: Map<string, UserBasicInfo>;
+    bookingEnrichmentMap: Map<string, BookingEnrichment>;
+  }> {
+    const unique = [...new Set(userIds.filter(Boolean))];
+    const results = await Promise.allSettled(
+      unique.map(id => this.getMember(id))
+    );
+
+    const userInfoMap = new Map<string, UserBasicInfo>();
+    const bookingEnrichmentMap = new Map<string, BookingEnrichment>();
+
+    results.forEach((r, i) => {
+      if (r.status !== 'fulfilled') return;
+      const ctx = r.value;
+      const userId = unique[i];
+
+      // Extract user info
+      userInfoMap.set(userId, {
+        id: userId,
+        email: ctx.user_extras?.email ?? null,
+        phone: ctx.user_extras?.phone ?? null,
+        name: ctx.user?.first_name ?? ctx.user_extras?.email ?? null,
+      });
+
+      // Extract booking enrichments from trips
+      for (const trip of ctx.trips) {
+        for (const booking of trip.bookings) {
+          if (booking.type === 'HOTEL' && booking.hotel) {
+            const h = booking.hotel;
+            bookingEnrichmentMap.set(booking.id, {
+              id: booking.id,
+              user_id: userId,
+              hotel_name: h.hotel_name,
+              hotel_city: h.hotel_city,
+              room_type: h.room_type,
+              guests: h.guests,
+              total_price: h.total_price,
+              confirmation_code: h.confirmation_code,
+              booked_with: h.booked_with,
+              check_in: h.check_in,
+              check_out: h.check_out,
+              status: booking.status,
+            });
+          }
+        }
+      }
+    });
+
+    return { userInfoMap, bookingEnrichmentMap };
+  }
+
   async listHotelOpportunitiesCompleted(params?: {
     limit?: number;
     offset?: number;
@@ -584,6 +641,26 @@ export interface UserBasicInfo {
   email: string | null;
   phone: string | null;
   name: string | null;
+}
+
+/**
+ * Enriched booking data extracted from MemberContext.trips[].bookings[].hotel.
+ * Used by hotel repricing tracking page to display original price, guest names, etc.
+ * This replaces the broken HotelBookingDetail enrichment (GET /bookings/hotel/{id} doesn't exist).
+ */
+export interface BookingEnrichment {
+  id: string;
+  user_id: string;
+  hotel_name: string;
+  hotel_city: string;
+  room_type: string;
+  guests: string[];           // string[] of guest names from HotelBookingView
+  total_price: MoneyView;     // original booking price
+  confirmation_code: string | null;
+  booked_with: string | null;
+  check_in: string;
+  check_out: string;
+  status: string;
 }
 
 export interface MemberSummary {
