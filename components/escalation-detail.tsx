@@ -666,12 +666,19 @@ export function EscalationDetail({ escalation, onClose, onUpdate }: EscalationDe
         costAmount,
         costAmount ? supplierCostCurrency : undefined,
       );
-      // Refresh the escalation (the API auto-resolves it)
+      // Explicitly resolve the escalation after confirming the booking
       try {
-        const updated = await api.getEscalation(escalation.id);
+        const notes = `Manual booking confirmed — supplier: ${supplier === 'etg' ? 'ETG/RateHawk' : supplier}, ref: ${supplierReference.trim()}${costAmount ? `, cost: ${(costAmount / 100).toFixed(2)} ${supplierCostCurrency}` : ''}`;
+        const updated = await api.resolveEscalation(escalation.id, notes);
         onUpdate(updated);
       } catch {
-        // Escalation might already be resolved
+        // If resolve fails (e.g. already resolved by backend), just refresh
+        try {
+          const updated = await api.getEscalation(escalation.id);
+          onUpdate(updated);
+        } catch {
+          // ignore
+        }
       }
       onClose();
     } catch (err) {
