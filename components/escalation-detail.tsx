@@ -929,8 +929,8 @@ export function EscalationDetail({ escalation, onClose, onUpdate }: EscalationDe
             </div>
           )}
 
-          {/* Actions */}
-          {canAct && !showResolveForm && !showConfirmBookingForm && (
+          {/* Actions — only show resolve if there's no confirm booking path */}
+          {canAct && !canConfirmBooking && !showResolveForm && (
             <button
               onClick={() => setShowResolveForm(true)}
               className="w-full py-2 px-4 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition-colors"
@@ -939,7 +939,7 @@ export function EscalationDetail({ escalation, onClose, onUpdate }: EscalationDe
             </button>
           )}
 
-          {canAct && showResolveForm && (
+          {canAct && !canConfirmBooking && showResolveForm && (
             <div className="space-y-3">
               <div>
                 <label className="block text-sm font-medium mb-1">Resolution Notes *</label>
