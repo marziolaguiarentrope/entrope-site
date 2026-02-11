@@ -355,7 +355,7 @@ function RepricingHistorySection({ userId, currentOpportunityId, bookingId }: { 
     return (
       <section>
         <h3 className="text-sm font-medium text-muted-foreground mb-2">Repricing History</h3>
-        <p className="text-xs text-muted-foreground">No previous repricings for this customer.</p>
+        <p className="text-xs text-muted-foreground">No previous repricings for this booking.</p>
       </section>
     );
   }
