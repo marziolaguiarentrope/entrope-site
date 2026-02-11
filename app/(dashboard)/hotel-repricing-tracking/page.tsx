@@ -23,8 +23,8 @@ function timeAgo(dateString: string): string {
   return date.toLocaleDateString();
 }
 
-function formatMoney(amount: number | null, currency: string | null): string {
-  if (amount === null) return '—';
+function formatMoney(amount: number | null | undefined, currency: string | null | undefined): string {
+  if (amount === null || amount === undefined) return '—';
   return new Intl.NumberFormat('en-US', {
     style: 'currency',
     currency: currency || 'USD',
@@ -35,10 +35,35 @@ function formatMoney(amount: number | null, currency: string | null): string {
 
 type TabFilter = 'all' | 'current' | 'past';
 type OpportunityType = 'pending_payment' | 'pending_cancel' | 'completed';
-type SortKey = 'payment_due' | 'hotel' | 'check_in' | 'created' | 'payment_amount' | 'account_name' | 'payment_status' | 'status';
+type SortKey = 'payment_due' | 'hotel' | 'check_in' | 'created' | 'original_price' | 'new_price' | 'savings' | 'account_name' | 'status';
 type SortDir = 'asc' | 'desc';
 
 type EnrichedOpportunity = HotelOpportunity & { opp_type: OpportunityType };
+
+// ── Column definitions ───────────────────────────────────
+
+interface ColumnDef {
+  id: string;
+  label: string;
+  sortKey?: SortKey;
+  minWidth: number;
+  defaultWidth: number;
+}
+
+const COLUMNS: ColumnDef[] = [
+  { id: 'status', label: 'Status', sortKey: 'status', minWidth: 80, defaultWidth: 110 },
+  { id: 'payment_due', label: 'Payment Due', sortKey: 'payment_due', minWidth: 90, defaultWidth: 110 },
+  { id: 'account_name', label: 'Account', sortKey: 'account_name', minWidth: 100, defaultWidth: 150 },
+  { id: 'guest_name', label: 'Reservation Name', minWidth: 100, defaultWidth: 140 },
+  { id: 'hotel', label: 'Hotel', sortKey: 'hotel', minWidth: 120, defaultWidth: 200 },
+  { id: 'check_in_out', label: 'Check-In / Out', sortKey: 'check_in', minWidth: 140, defaultWidth: 170 },
+  { id: 'conf_code', label: 'Conf Code', minWidth: 100, defaultWidth: 130 },
+  { id: 'original_price', label: 'Original Price', sortKey: 'original_price', minWidth: 90, defaultWidth: 110 },
+  { id: 'new_price', label: 'New Price', sortKey: 'new_price', minWidth: 90, defaultWidth: 110 },
+  { id: 'savings', label: 'Savings', sortKey: 'savings', minWidth: 80, defaultWidth: 100 },
+  { id: 'type', label: 'Type', minWidth: 70, defaultWidth: 90 },
+  { id: 'created', label: 'Created', sortKey: 'created', minWidth: 70, defaultWidth: 90 },
+];
 
 // ── Sort Logic ───────────────────────────────────────────
 
@@ -47,6 +72,7 @@ function sortOpportunities(
   key: SortKey,
   dir: SortDir,
   userInfoMap: Map<string, UserBasicInfo>,
+  bookingDetailMap: Map<string, HotelBookingDetail>,
 ): EnrichedOpportunity[] {
   return [...opps].sort((a, b) => {
     let aVal: string | number;
@@ -69,17 +95,29 @@ function sortOpportunities(
         aVal = new Date(a.created_at).getTime();
         bVal = new Date(b.created_at).getTime();
         break;
-      case 'payment_amount':
+      case 'original_price': {
+        const aBd = a.old_booking_id ? bookingDetailMap.get(a.old_booking_id) : undefined;
+        const bBd = b.old_booking_id ? bookingDetailMap.get(b.old_booking_id) : undefined;
+        aVal = aBd?.cash_paid?.amount ?? 0;
+        bVal = bBd?.cash_paid?.amount ?? 0;
+        break;
+      }
+      case 'new_price':
         aVal = a.payment_amount ?? 0;
         bVal = b.payment_amount ?? 0;
         break;
+      case 'savings': {
+        const aBd2 = a.old_booking_id ? bookingDetailMap.get(a.old_booking_id) : undefined;
+        const bBd2 = b.old_booking_id ? bookingDetailMap.get(b.old_booking_id) : undefined;
+        const aOrig = aBd2?.cash_paid?.amount ?? 0;
+        const bOrig = bBd2?.cash_paid?.amount ?? 0;
+        aVal = aOrig && a.payment_amount ? aOrig - a.payment_amount : 0;
+        bVal = bOrig && b.payment_amount ? bOrig - b.payment_amount : 0;
+        break;
+      }
       case 'account_name':
         aVal = (userInfoMap.get(a.user_id)?.name || '').toLowerCase();
         bVal = (userInfoMap.get(b.user_id)?.name || '').toLowerCase();
-        break;
-      case 'payment_status':
-        aVal = a.payment_status || '';
-        bVal = b.payment_status || '';
         break;
       case 'status':
         aVal = a.status;
@@ -113,32 +151,15 @@ function matchesSearch(
     opp.hotel_name?.toLowerCase().includes(q) ||
     opp.old_booking_confirmation_code?.toLowerCase().includes(q) ||
     opp.status?.toLowerCase().includes(q) ||
-    opp.payment_status?.toLowerCase().includes(q) ||
     u?.email?.toLowerCase().includes(q) ||
     u?.phone?.toLowerCase().includes(q) ||
     u?.name?.toLowerCase().includes(q) ||
     guestName.toLowerCase().includes(q) ||
-    bd?.room_type?.toLowerCase().includes(q)
+    bd?.confirmation_number?.toLowerCase().includes(q)
   );
 }
 
 // ── StatusBadge ──────────────────────────────────────────
-
-function PaymentStatusBadge({ status }: { status: string | null }) {
-  if (!status) return <span className="text-xs text-muted-foreground">—</span>;
-  const colors: Record<string, string> = {
-    pending: 'bg-yellow-500/20 text-yellow-400',
-    awaiting_card: 'bg-yellow-500/20 text-yellow-400',
-    overdue: 'bg-red-500/20 text-red-400',
-    paid: 'bg-green-500/20 text-green-400',
-    refunded: 'bg-blue-500/20 text-blue-400',
-  };
-  return (
-    <span className={cn('px-2 py-0.5 text-xs rounded font-medium whitespace-nowrap', colors[status] || 'bg-zinc-500/20 text-zinc-400')}>
-      {status}
-    </span>
-  );
-}
 
 function StatusBadge({ status }: { status: string }) {
   const colors: Record<string, string> = {
@@ -156,7 +177,7 @@ function StatusBadge({ status }: { status: string }) {
   };
   return (
     <span className={cn('px-2 py-0.5 text-xs rounded font-medium whitespace-nowrap', colors[status] || 'bg-zinc-500/20 text-zinc-400')}>
-      {status}
+      {status.replace(/_/g, ' ')}
     </span>
   );
 }
@@ -167,20 +188,68 @@ function TypeBadge({ type }: { type: OpportunityType }) {
   return <span className="px-2 py-0.5 text-xs bg-zinc-500/20 text-zinc-400 rounded font-medium whitespace-nowrap">Completed</span>;
 }
 
-// ── Sort Header ──────────────────────────────────────────
+// ── Resizable Header ─────────────────────────────────────
 
-function SortHeader({ label, sortKey, currentKey, dir, onSort }: {
-  label: string; sortKey: SortKey; currentKey: SortKey; dir: SortDir;
+function ResizableHeader({
+  column,
+  width,
+  onResize,
+  sortKey: currentSortKey,
+  sortDir,
+  onSort,
+}: {
+  column: ColumnDef;
+  width: number;
+  onResize: (id: string, width: number) => void;
+  sortKey: SortKey;
+  sortDir: SortDir;
   onSort: (key: SortKey) => void;
 }) {
-  const isActive = currentKey === sortKey;
+  const isActive = column.sortKey === currentSortKey;
+  const startX = useRef(0);
+  const startW = useRef(0);
+
+  function handleMouseDown(e: React.MouseEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    startX.current = e.clientX;
+    startW.current = width;
+
+    function handleMouseMove(ev: MouseEvent) {
+      const delta = ev.clientX - startX.current;
+      const newWidth = Math.max(column.minWidth, startW.current + delta);
+      onResize(column.id, newWidth);
+    }
+
+    function handleMouseUp() {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    }
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+  }
+
   return (
     <th
-      className="px-3 py-2 text-left text-xs font-medium text-muted-foreground cursor-pointer hover:text-foreground select-none whitespace-nowrap"
-      onClick={() => onSort(sortKey)}
+      className="relative text-left text-xs font-medium text-muted-foreground select-none whitespace-nowrap group"
+      style={{ width, minWidth: column.minWidth }}
     >
-      {label}
-      {isActive && <span className="ml-1">{dir === 'asc' ? '↑' : '↓'}</span>}
+      <div
+        className={cn(
+          'px-3 py-2',
+          column.sortKey && 'cursor-pointer hover:text-foreground',
+        )}
+        onClick={() => column.sortKey && onSort(column.sortKey)}
+      >
+        {column.label}
+        {isActive && <span className="ml-1">{sortDir === 'asc' ? '↑' : '↓'}</span>}
+      </div>
+      {/* Resize handle */}
+      <div
+        onMouseDown={handleMouseDown}
+        className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-primary/30 group-hover:bg-border/50 transition-colors"
+      />
     </th>
   );
 }
@@ -192,61 +261,111 @@ function OpportunityRow({
   onClick,
   userInfo,
   bookingDetail,
+  columnWidths,
 }: {
   opp: EnrichedOpportunity;
   onClick: () => void;
   userInfo?: UserBasicInfo;
   bookingDetail?: HotelBookingDetail;
+  columnWidths: Record<string, number>;
 }) {
   const primaryGuest = bookingDetail?.guests?.find(g => g.is_primary) || bookingDetail?.guests?.[0];
+  const originalPrice = bookingDetail?.cash_paid;
+  const newPrice = opp.payment_amount;
+  const newCurrency = opp.payment_currency;
+
+  // Calculate savings (only when same currency)
+  let savingsAmount: number | null = null;
+  let savingsCurrency: string | null = null;
+  if (originalPrice && newPrice && originalPrice.currency === (newCurrency || 'USD')) {
+    const diff = originalPrice.amount - newPrice;
+    if (diff > 0) {
+      savingsAmount = diff;
+      savingsCurrency = originalPrice.currency;
+    }
+  }
+
+  // Axel conf code: the old_booking_confirmation_code is the hotel's code
+  // For the table we show it (prefixed with provider if available)
+  const confCode = opp.old_booking_confirmation_code;
 
   return (
     <tr onClick={onClick} className="border-b border-border last:border-0 hover:bg-accent/50 transition-colors cursor-pointer">
-      <td className="px-3 py-3 text-xs whitespace-nowrap">
-        {opp.payment_due_at ? formatDate(opp.payment_due_at) : '—'}
+      {/* Status */}
+      <td className="px-3 py-3" style={{ width: columnWidths.status }}>
+        <StatusBadge status={opp.status} />
       </td>
-      <td className="px-3 py-3 text-sm whitespace-nowrap">
-        {userInfo?.name || '—'}
+      {/* Payment Due */}
+      <td className="px-3 py-3 text-xs whitespace-nowrap" style={{ width: columnWidths.payment_due }}>
+        {opp.payment_due_at ? (
+          <span className={cn(
+            new Date(opp.payment_due_at) < new Date() && opp.status !== 'completed' && 'text-red-400 font-medium',
+          )}>
+            {formatDate(opp.payment_due_at)}
+          </span>
+        ) : '—'}
       </td>
-      <td className="px-3 py-3 text-xs text-muted-foreground whitespace-nowrap">
-        {primaryGuest?.name || '—'}
-      </td>
-      <td className="px-3 py-3 text-sm max-w-[200px] truncate">
-        {opp.hotel_name || '—'}
-      </td>
-      <td className="px-3 py-3 text-xs whitespace-nowrap">
-        {formatDate(opp.check_in)} – {formatDate(opp.check_out)}
-      </td>
-      <td className="px-3 py-3 text-xs text-muted-foreground max-w-[150px] truncate">
-        {bookingDetail?.room_type || '—'}
-      </td>
-      <td className="px-3 py-3 text-xs font-mono text-muted-foreground whitespace-nowrap">
-        {opp.old_booking_confirmation_code || '—'}
-      </td>
-      <td className="px-3 py-3">
-        {userInfo?.email ? (
-          <span className="text-xs text-muted-foreground truncate max-w-[180px] inline-block">{userInfo.email}</span>
+      {/* Account Name (linked) */}
+      <td className="px-3 py-3 text-sm" style={{ width: columnWidths.account_name }}>
+        {userInfo?.name ? (
+          <Link
+            href={`/users-list/${opp.user_id}`}
+            onClick={(e) => e.stopPropagation()}
+            className="text-primary hover:underline truncate block max-w-full"
+          >
+            {userInfo.name}
+          </Link>
         ) : (
-          <span className="text-xs text-muted-foreground">—</span>
+          <span className="text-muted-foreground truncate block">—</span>
         )}
       </td>
-      <td className="px-3 py-3"><PaymentStatusBadge status={opp.payment_status} /></td>
-      <td className="px-3 py-3 text-xs font-mono whitespace-nowrap text-right">
-        {formatMoney(opp.payment_amount, opp.payment_currency)}
+      {/* Reservation Name (guest name) */}
+      <td className="px-3 py-3 text-xs text-muted-foreground truncate" style={{ width: columnWidths.guest_name }}>
+        {primaryGuest?.name || '—'}
       </td>
-      <td className="px-3 py-3"><StatusBadge status={opp.status} /></td>
-      <td className="px-3 py-3"><TypeBadge type={opp.opp_type} /></td>
-      <td className="px-3 py-3 text-xs text-muted-foreground whitespace-nowrap">
+      {/* Hotel */}
+      <td className="px-3 py-3 text-sm truncate" style={{ width: columnWidths.hotel }}>
+        {opp.hotel_name || '—'}
+      </td>
+      {/* Check-In / Out */}
+      <td className="px-3 py-3 text-xs whitespace-nowrap" style={{ width: columnWidths.check_in_out }}>
+        {formatDate(opp.check_in)} – {formatDate(opp.check_out)}
+      </td>
+      {/* Conf Code */}
+      <td className="px-3 py-3 text-xs font-mono text-muted-foreground whitespace-nowrap" style={{ width: columnWidths.conf_code }}>
+        {confCode || '—'}
+      </td>
+      {/* Original Price */}
+      <td className="px-3 py-3 text-xs whitespace-nowrap text-right" style={{ width: columnWidths.original_price }}>
+        {originalPrice ? (
+          <span className={cn(newPrice ? 'line-through text-muted-foreground' : 'font-mono')}>
+            {formatMoney(originalPrice.amount, originalPrice.currency)}
+          </span>
+        ) : '—'}
+      </td>
+      {/* New Price */}
+      <td className="px-3 py-3 text-xs font-mono whitespace-nowrap text-right" style={{ width: columnWidths.new_price }}>
+        {newPrice ? (
+          <span className="text-green-400 font-medium">
+            {formatMoney(newPrice, newCurrency)}
+          </span>
+        ) : '—'}
+      </td>
+      {/* Savings */}
+      <td className="px-3 py-3 text-xs whitespace-nowrap text-right" style={{ width: columnWidths.savings }}>
+        {savingsAmount ? (
+          <span className="text-green-400 bg-green-500/10 px-1.5 py-0.5 rounded font-medium">
+            {formatMoney(savingsAmount, savingsCurrency)}
+          </span>
+        ) : '—'}
+      </td>
+      {/* Type */}
+      <td className="px-3 py-3" style={{ width: columnWidths.type }}>
+        <TypeBadge type={opp.opp_type} />
+      </td>
+      {/* Created */}
+      <td className="px-3 py-3 text-xs text-muted-foreground whitespace-nowrap" style={{ width: columnWidths.created }}>
         {timeAgo(opp.created_at)}
-      </td>
-      <td className="px-3 py-3">
-        <Link
-          href={`/users-list/${opp.user_id}`}
-          onClick={(e) => e.stopPropagation()}
-          className="text-xs text-primary hover:underline whitespace-nowrap"
-        >
-          Profile →
-        </Link>
       </td>
     </tr>
   );
@@ -274,6 +393,17 @@ export default function HotelRepricingTrackingPage() {
 
   // Detail panel
   const [selectedOpportunity, setSelectedOpportunity] = useState<EnrichedOpportunity | null>(null);
+
+  // Column widths (resizable)
+  const [columnWidths, setColumnWidths] = useState<Record<string, number>>(() => {
+    const widths: Record<string, number> = {};
+    COLUMNS.forEach(c => { widths[c.id] = c.defaultWidth; });
+    return widths;
+  });
+
+  function handleColumnResize(id: string, width: number) {
+    setColumnWidths(prev => ({ ...prev, [id]: width }));
+  }
 
   // Auto-refresh
   const refreshTimer = useRef<NodeJS.Timeout | null>(null);
@@ -322,7 +452,6 @@ export default function HotelRepricingTrackingPage() {
           opps = tab === 'all' ? [...opps, ...completedOpps] : completedOpps;
           setCounts(prev => ({ ...prev, completed: completedRes.total }));
         } catch {
-          // Endpoint may not exist yet (ENG-16263) — silently ignore for past tab
           if (tab === 'past') {
             setOpportunities([]);
             setLoading(false);
@@ -398,8 +527,8 @@ export default function HotelRepricingTrackingPage() {
     [paymentFiltered, search, userInfoMap, bookingDetailMap]
   );
   const sorted = useMemo(
-    () => sortOpportunities(searched, sortKey, sortDir, userInfoMap),
-    [searched, sortKey, sortDir, userInfoMap]
+    () => sortOpportunities(searched, sortKey, sortDir, userInfoMap, bookingDetailMap),
+    [searched, sortKey, sortDir, userInfoMap, bookingDetailMap]
   );
 
   // Sort handler
@@ -491,35 +620,9 @@ export default function HotelRepricingTrackingPage() {
         >
           <option value="all">All Payment Status</option>
           {paymentStatuses.map(s => (
-            <option key={s} value={s}>{s}</option>
+            <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>
           ))}
         </select>
-
-        {/* Sort controls */}
-        <div className="flex items-center gap-1">
-          <select
-            value={sortKey}
-            onChange={(e) => {
-              const key = e.target.value as SortKey;
-              setSortKey(key);
-              setSortDir(key === 'payment_due' || key === 'check_in' ? 'asc' : 'desc');
-            }}
-            className="px-3 py-1.5 text-xs font-medium bg-accent/50 text-foreground rounded-lg border border-border focus:outline-none focus:ring-2 focus:ring-primary"
-          >
-            <option value="payment_due">Sort: Payment Due</option>
-            <option value="hotel">Sort: Hotel</option>
-            <option value="check_in">Sort: Check-In</option>
-            <option value="created">Sort: Created</option>
-            <option value="payment_amount">Sort: Amount</option>
-            <option value="account_name">Sort: Account</option>
-          </select>
-          <button
-            onClick={() => setSortDir(d => d === 'asc' ? 'desc' : 'asc')}
-            className="px-3 py-1.5 text-xs font-medium bg-accent/50 text-muted-foreground rounded-lg border border-border hover:bg-accent transition-colors"
-          >
-            {sortDir === 'asc' ? '↑ Asc' : '↓ Desc'}
-          </button>
-        </div>
 
         {/* Search */}
         <div className="flex-1 max-w-sm">
@@ -527,7 +630,7 @@ export default function HotelRepricingTrackingPage() {
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search hotel, name, email, conf code..."
+            placeholder="Search hotel, name, conf code..."
             className="w-full px-3 py-1.5 text-sm bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
           />
         </div>
@@ -565,23 +668,20 @@ export default function HotelRepricingTrackingPage() {
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full">
+            <table className="w-full" style={{ tableLayout: 'fixed' }}>
               <thead className="border-b border-border bg-accent/30">
                 <tr>
-                  <SortHeader label="Payment Due" sortKey="payment_due" currentKey={sortKey} dir={sortDir} onSort={handleSort} />
-                  <SortHeader label="Account Name" sortKey="account_name" currentKey={sortKey} dir={sortDir} onSort={handleSort} />
-                  <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground whitespace-nowrap">Reservation Name</th>
-                  <SortHeader label="Hotel" sortKey="hotel" currentKey={sortKey} dir={sortDir} onSort={handleSort} />
-                  <SortHeader label="Check-In / Out" sortKey="check_in" currentKey={sortKey} dir={sortDir} onSort={handleSort} />
-                  <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground whitespace-nowrap">Room Type</th>
-                  <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground whitespace-nowrap">Conf Code</th>
-                  <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground whitespace-nowrap">Email</th>
-                  <SortHeader label="Pmt Status" sortKey="payment_status" currentKey={sortKey} dir={sortDir} onSort={handleSort} />
-                  <SortHeader label="Amount" sortKey="payment_amount" currentKey={sortKey} dir={sortDir} onSort={handleSort} />
-                  <SortHeader label="Status" sortKey="status" currentKey={sortKey} dir={sortDir} onSort={handleSort} />
-                  <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground whitespace-nowrap">Type</th>
-                  <SortHeader label="Created" sortKey="created" currentKey={sortKey} dir={sortDir} onSort={handleSort} />
-                  <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground whitespace-nowrap">Profile</th>
+                  {COLUMNS.map(col => (
+                    <ResizableHeader
+                      key={col.id}
+                      column={col}
+                      width={columnWidths[col.id]}
+                      onResize={handleColumnResize}
+                      sortKey={sortKey}
+                      sortDir={sortDir}
+                      onSort={handleSort}
+                    />
+                  ))}
                 </tr>
               </thead>
               <tbody>
@@ -592,6 +692,7 @@ export default function HotelRepricingTrackingPage() {
                     onClick={() => setSelectedOpportunity(opp)}
                     userInfo={userInfoMap.get(opp.user_id)}
                     bookingDetail={opp.old_booking_id ? bookingDetailMap.get(opp.old_booking_id) : undefined}
+                    columnWidths={columnWidths}
                   />
                 ))}
               </tbody>
@@ -618,10 +719,11 @@ export default function HotelRepricingTrackingPage() {
       {selectedOpportunity && (
         <HotelOpportunityDetail
           opportunity={selectedOpportunity}
+          bookingDetail={selectedOpportunity.old_booking_id ? bookingDetailMap.get(selectedOpportunity.old_booking_id) : undefined}
+          userInfo={userInfoMap.get(selectedOpportunity.user_id)}
           variant={selectedOpportunity.opp_type === 'pending_payment' ? 'payment' : 'cancel'}
           onClose={() => setSelectedOpportunity(null)}
           onUpdate={(updated) => {
-            // Update the item in-place (cancelling the old booking is a step forward, not removal)
             setOpportunities(prev => prev.map(o => o.id === updated.id ? { ...updated, opp_type: o.opp_type } : o));
             setSelectedOpportunity({ ...updated, opp_type: selectedOpportunity.opp_type });
           }}
