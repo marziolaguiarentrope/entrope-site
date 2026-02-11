@@ -1,9 +1,9 @@
 'use client';
 
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import { cn, formatDate } from '@/lib/utils';
-import { api, Task, Escalation, HotelOpportunity, RawEmail, UserBasicInfo } from '@/lib/api';
+import { api, Task, Escalation, HotelOpportunity, UserBasicInfo } from '@/lib/api';
 import { TaskDetail } from '@/components/task-detail';
 import { EscalationDetail } from '@/components/escalation-detail';
 import { HotelOpportunityDetail } from '@/components/hotel-opportunity-detail';
@@ -32,7 +32,7 @@ const priorityOrder: Record<string, number> = {
 
 // ── Unified queue item type ─────────────────────────────
 
-type QueueItemType = 'flight_reprice' | 'complete_booking' | 'pending_cancel' | 'escalation';
+type QueueItemType = 'flight_reprice' | 'pending_cancel' | 'escalation';
 
 interface QueueItem {
   id: string;
@@ -77,44 +77,6 @@ function buildQueueItems(
         label: `${airline} · ${pnr}`,
         sublabel: `${passenger} · ${task.status} · ${timeAgo(task.created_at)}`,
         badge: task.claimed_by ? { text: `Claimed: ${task.claimed_by}`, color: 'bg-blue-500/20 text-blue-400' } : null,
-        userId: task.user_id,
-        userInfo: userInfoMap.get(task.user_id) || null,
-        task,
-      });
-    }
-  }
-
-  // Complete booking tasks
-  for (const task of tasks) {
-    if (task.capability === 'complete_booking_data') {
-      if (['completed', 'failed', 'blocked'].includes(task.status)) continue;
-      const data = task.request_data as Record<string, unknown>;
-      const bookingType = data.booking_type as string;
-      const missingFields = (data.missing_fields as string[]) || [];
-      const HOTEL_CORE = ['hotel_name', 'check_in_date', 'check_out_date'];
-      const FLIGHT_CORE = ['departure_date', 'origin_airport', 'destination_airport'];
-      const coreFields = bookingType === 'hotel' ? HOTEL_CORE : FLIGHT_CORE;
-      const missingCore = missingFields.filter(f => coreFields.includes(f));
-      const fieldLabels: Record<string, string> = {
-        hotel_name: 'hotel name', check_in_date: 'check-in', check_out_date: 'check-out',
-        cash_paid: 'price', booking_provider: 'provider', cancellation_policy: 'cancel policy',
-        departure_date: 'departure', origin_airport: 'origin', destination_airport: 'destination',
-        airline: 'airline', record_locator: 'PNR', departure_time: 'dep time',
-      };
-      const readable = missingFields.map(f => fieldLabels[f] || f).join(', ');
-      const severity = missingCore.length > 0 ? 'core' : 'enrichment';
-      const typeLabel = bookingType === 'hotel' ? 'Hotel' : 'Flight';
-      items.push({
-        id: `task-${task.id}`,
-        type: 'complete_booking',
-        priority: task.priority,
-        priorityNum: priorityOrder[task.priority] ?? 99,
-        createdAt: task.created_at,
-        label: `${typeLabel} Booking`,
-        sublabel: `Missing: ${readable}`,
-        badge: severity === 'core'
-          ? { text: 'CORE MISSING', color: 'bg-red-500/20 text-red-400' }
-          : { text: 'ENRICHMENT', color: 'bg-yellow-500/20 text-yellow-400' },
         userId: task.user_id,
         userInfo: userInfoMap.get(task.user_id) || null,
         task,
@@ -175,7 +137,6 @@ function buildQueueItems(
 
 const typeConfig: Record<QueueItemType, { label: string; dotColor: string }> = {
   flight_reprice: { label: 'Flight Reprice', dotColor: 'bg-blue-400' },
-  complete_booking: { label: 'Complete Booking', dotColor: 'bg-purple-400' },
   pending_cancel: { label: 'Pending Cancel', dotColor: 'bg-red-400' },
   escalation: { label: 'Escalation', dotColor: 'bg-orange-400' },
 };
@@ -194,7 +155,6 @@ type FilterType = 'all' | QueueItemType;
 const filterOptions: { id: FilterType; label: string }[] = [
   { id: 'all', label: 'All' },
   { id: 'flight_reprice', label: 'Flight Reprice' },
-  { id: 'complete_booking', label: 'Complete Booking' },
   { id: 'pending_cancel', label: 'Pending Cancel' },
   { id: 'escalation', label: 'Escalations' },
 ];
@@ -292,20 +252,8 @@ export default function TasksPage() {
   const [loadingItemId, setLoadingItemId] = useState<string | null>(null);
   const [taskDetailLoading, setTaskDetailLoading] = useState(false);
 
-  // Auto-claim email state (complete_booking optimization)
-  const [autoEmail, setAutoEmail] = useState<RawEmail | null>(null);
-  const [autoEmailLoading, setAutoEmailLoading] = useState(false);
-  const [autoEmailError, setAutoEmailError] = useState<string | null>(null);
-  const advanceTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
   // Expanded detail panel state
   const [detailExpanded, setDetailExpanded] = useState(false);
-
-  function resetEmailState() {
-    setAutoEmail(null);
-    setAutoEmailLoading(false);
-    setAutoEmailError(null);
-  }
 
   // Close any open detail panel
   function closeDetail() {
@@ -313,87 +261,13 @@ export default function TasksPage() {
     setSelectedEscalation(null);
     setSelectedHotelOpportunity(null);
     setDetailExpanded(false);
-    resetEmailState();
   }
 
   // Determine if any detail panel is open
   const hasDetailOpen = !!(selectedTask || selectedEscalation || selectedHotelOpportunity);
 
-  // Auto-claim + fetch email for complete_booking tasks
-  async function handleSelectCompleteBooking(task: Task) {
-    closeDetail();
-    resetEmailState();
-    setLoadingItemId(`task-${task.id}`);
-    setTaskDetailLoading(true);
-
-    if (task.status === 'pending') {
-      try {
-        const [claimedTask, fullTask] = await Promise.all([
-          api.claimTask(task.id),
-          api.getTask(task.id),
-        ]);
-        const merged = { ...fullTask, status: claimedTask.status, claimed_by: claimedTask.claimed_by, claimed_at: claimedTask.claimed_at };
-        setSelectedTask(merged);
-        setTasks(prev => prev.map(t => t.id === task.id ? merged : t));
-        setTaskDetailLoading(false);
-        setLoadingItemId(null);
-
-        setAutoEmailLoading(true);
-        try {
-          const email = await api.getEmailForTask(task.id);
-          setAutoEmail(email);
-        } catch (emailErr) {
-          setAutoEmailError(emailErr instanceof Error ? emailErr.message : 'Failed to load email');
-        } finally {
-          setAutoEmailLoading(false);
-        }
-      } catch (err) {
-        console.error('Auto-claim failed:', err);
-        try {
-          const fullTask = await api.getTask(task.id);
-          setSelectedTask(fullTask);
-        } catch {
-          setSelectedTask(task);
-        }
-        setTaskDetailLoading(false);
-        setLoadingItemId(null);
-      }
-    } else {
-      try {
-        const fullTask = await api.getTask(task.id);
-        setSelectedTask(fullTask);
-        setTaskDetailLoading(false);
-        setLoadingItemId(null);
-
-        setAutoEmailLoading(true);
-        try {
-          const email = await api.getEmailForTask(task.id);
-          setAutoEmail(email);
-        } catch (emailErr) {
-          setAutoEmailError(emailErr instanceof Error ? emailErr.message : 'Failed to load email');
-        } finally {
-          setAutoEmailLoading(false);
-        }
-      } catch (err) {
-        console.error('Failed to fetch task details:', err);
-        setSelectedTask(task);
-        setTaskDetailLoading(false);
-        setLoadingItemId(null);
-      }
-    }
-  }
-
   // Select a task
   async function handleSelectTask(task: Task) {
-    if (advanceTimeoutRef.current) {
-      clearTimeout(advanceTimeoutRef.current);
-      advanceTimeoutRef.current = null;
-    }
-
-    if (task.capability === 'complete_booking_data') {
-      return handleSelectCompleteBooking(task);
-    }
-
     closeDetail();
     setLoadingItemId(`task-${task.id}`);
     setTaskDetailLoading(true);
@@ -421,33 +295,6 @@ export default function TasksPage() {
       setSelectedHotelOpportunity(item.hotelOpportunity);
     }
   }
-
-  // Auto-advance for complete_booking queue
-  const completeBookingTasks = useMemo(
-    () => tasks.filter(t => t.capability === 'complete_booking_data' && !['completed', 'failed', 'blocked'].includes(t.status)),
-    [tasks]
-  );
-
-  const queuePosition = useMemo(() => {
-    if (!selectedTask || selectedTask.capability !== 'complete_booking_data') return null;
-    const idx = completeBookingTasks.findIndex(t => t.id === selectedTask.id);
-    return idx >= 0 ? { current: idx + 1, total: completeBookingTasks.length } : null;
-  }, [selectedTask, completeBookingTasks]);
-
-  const handleAdvanceToNext = useCallback(() => {
-    const currentIdx = completeBookingTasks.findIndex(t => t.id === selectedTask?.id);
-    const remaining = completeBookingTasks.filter((t, i) => i > currentIdx && t.id !== selectedTask?.id);
-
-    if (remaining.length > 0) {
-      advanceTimeoutRef.current = setTimeout(() => {
-        advanceTimeoutRef.current = null;
-        handleSelectCompleteBooking(remaining[0]);
-      }, 500);
-    } else {
-      closeDetail();
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [completeBookingTasks, selectedTask]);
 
   // Build unified queue
   const queueItems = useMemo(
@@ -618,8 +465,7 @@ export default function TasksPage() {
             {/* Expand/collapse bar */}
             <div className="flex items-center justify-between px-3 py-1.5 border-b border-border bg-accent/30 shrink-0">
               <span className="text-xs text-muted-foreground">
-                {selectedTask?.capability === 'flight_reprice' && 'Flight Reprice'}
-                {selectedTask?.capability === 'complete_booking_data' && 'Complete Booking'}
+                {selectedTask && 'Flight Reprice'}
                 {selectedEscalation && 'Escalation'}
                 {selectedHotelOpportunity && 'Pending Cancel'}
               </span>
@@ -660,22 +506,12 @@ export default function TasksPage() {
                   onUpdate={(updated) => {
                     if (updated.status === 'completed' || updated.status === 'failed' || updated.status === 'blocked') {
                       setTasks(prev => prev.filter(t => t.id !== updated.id));
-                      if (selectedTask.capability === 'complete_booking_data') {
-                        handleAdvanceToNext();
-                      } else {
-                        closeDetail();
-                      }
+                      closeDetail();
                     } else {
                       setTasks(prev => prev.map(t => t.id === updated.id ? updated : t));
                       setSelectedTask(updated);
                     }
                   }}
-                  autoClaimedEmail={selectedTask.capability === 'complete_booking_data' ? autoEmail : undefined}
-                  autoClaimedEmailLoading={selectedTask.capability === 'complete_booking_data' ? autoEmailLoading : undefined}
-                  autoClaimedEmailError={selectedTask.capability === 'complete_booking_data' ? autoEmailError : undefined}
-                  onAdvanceToNext={selectedTask.capability === 'complete_booking_data' ? handleAdvanceToNext : undefined}
-                  queuePosition={queuePosition}
-                  defaultFullscreen={selectedTask.capability === 'complete_booking_data'}
                   renderInline
                 />
               )}
