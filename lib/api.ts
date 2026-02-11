@@ -395,6 +395,18 @@ class ApiClient {
     return this.fetch<HotelOpportunityListResponse>(`/hotel-opportunities/pending-cancel${query ? `?${query}` : ''}`);
   }
 
+  async listHotelOpportunitiesActive(params?: {
+    limit?: number;
+    offset?: number;
+  }): Promise<HotelOpportunityListResponse> {
+    const searchParams = new URLSearchParams();
+    if (params?.limit) searchParams.set('limit', params.limit.toString());
+    if (params?.offset) searchParams.set('offset', params.offset.toString());
+
+    const query = searchParams.toString();
+    return this.fetch<HotelOpportunityListResponse>(`/hotel-opportunities/active${query ? `?${query}` : ''}`);
+  }
+
   // Bookings
   async markBookingCancelled(
     bookingType: 'hotel' | 'flight',
