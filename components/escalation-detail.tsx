@@ -584,9 +584,10 @@ interface EscalationDetailProps {
   escalation: Escalation;
   onClose: () => void;
   onUpdate: (escalation: Escalation) => void;
+  renderInline?: boolean;
 }
 
-export function EscalationDetail({ escalation, onClose, onUpdate }: EscalationDetailProps) {
+export function EscalationDetail({ escalation, onClose, onUpdate, renderInline }: EscalationDetailProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [resolutionNotes, setResolutionNotes] = useState('');
@@ -692,29 +693,29 @@ export function EscalationDetail({ escalation, onClose, onUpdate }: EscalationDe
     }
   }
 
-  return (
-    <div className="fixed inset-0 bg-black/50 flex justify-end z-50">
-      <div className="w-full max-w-lg bg-card border-l border-border h-full overflow-y-auto">
-        {/* Header */}
-        <div className="sticky top-0 bg-card border-b border-border p-4 flex items-center justify-between z-10">
-          <div className="flex items-center gap-3">
-            <div>
-              <h2 className="text-lg font-semibold">Escalation</h2>
-              <div className="flex items-center gap-2 mt-0.5">
-                <span className={cn('px-2 py-0.5 text-xs font-medium rounded', statusColors[escalation.status] || 'bg-gray-500/20 text-gray-400')}>
-                  {escalation.status}
+  const content = (
+    <>
+      {/* Header */}
+      <div className="sticky top-0 bg-card border-b border-border p-4 flex items-center justify-between z-10">
+        <div className="flex items-center gap-3">
+          <div>
+            <h2 className="text-lg font-semibold">Escalation</h2>
+            <div className="flex items-center gap-2 mt-0.5">
+              <span className={cn('px-2 py-0.5 text-xs font-medium rounded', statusColors[escalation.status] || 'bg-gray-500/20 text-gray-400')}>
+                {escalation.status}
+              </span>
+              <span className={cn('px-2 py-0.5 text-xs font-medium rounded', priorityColors[escalation.priority] || 'bg-gray-500/20 text-gray-400')}>
+                {escalation.priority}
+              </span>
+              {isResolved && escalation.claimed_by && (
+                <span className="text-xs text-muted-foreground">
+                  by {escalation.claimed_by}
                 </span>
-                <span className={cn('px-2 py-0.5 text-xs font-medium rounded', priorityColors[escalation.priority] || 'bg-gray-500/20 text-gray-400')}>
-                  {escalation.priority}
-                </span>
-                {isResolved && escalation.claimed_by && (
-                  <span className="text-xs text-muted-foreground">
-                    by {escalation.claimed_by}
-                  </span>
-                )}
-              </div>
+              )}
             </div>
           </div>
+        </div>
+        {!renderInline && (
           <button
             onClick={onClose}
             className="p-2 hover:bg-accent rounded-md transition-colors"
@@ -723,288 +724,300 @@ export function EscalationDetail({ escalation, onClose, onUpdate }: EscalationDe
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>
           </button>
+        )}
+      </div>
+
+      <div className="p-4 space-y-4">
+        {/* Type badge */}
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-medium bg-accent/50 px-2 py-1 rounded">{escalation.type.replace(/_/g, ' ')}</span>
+          <span className="text-xs text-muted-foreground">{timeAgo(escalation.created_at)}</span>
         </div>
 
-        <div className="p-4 space-y-4">
-          {/* Type badge */}
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-medium bg-accent/50 px-2 py-1 rounded">{escalation.type.replace(/_/g, ' ')}</span>
-            <span className="text-xs text-muted-foreground">{timeAgo(escalation.created_at)}</span>
+        {/* Action Needed — most prominent */}
+        {actionNeeded && (
+          <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-3">
+            <p className="text-xs font-medium text-yellow-400 mb-1">⚠ Action Needed</p>
+            <p className="text-sm font-medium">{actionNeeded}</p>
           </div>
+        )}
 
-          {/* Action Needed — most prominent */}
-          {actionNeeded && (
-            <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-3">
-              <p className="text-xs font-medium text-yellow-400 mb-1">⚠ Action Needed</p>
-              <p className="text-sm font-medium">{actionNeeded}</p>
-            </div>
-          )}
+        {/* Reason */}
+        <div className="bg-accent/50 rounded-lg p-3">
+          <p className="text-xs font-medium text-muted-foreground mb-1">Reason</p>
+          <p className="text-sm">{escalation.reason}</p>
+        </div>
 
-          {/* Reason */}
-          <div className="bg-accent/50 rounded-lg p-3">
-            <p className="text-xs font-medium text-muted-foreground mb-1">Reason</p>
-            <p className="text-sm">{escalation.reason}</p>
+        {/* Hotel Opportunity Info — primary info card for repricing escalations */}
+        {opportunityId && (
+          <HotelOpportunityInfo
+            userId={escalation.user_id}
+            opportunityId={opportunityId}
+            contextData={ctx}
+            escalationSourceId={escalation.source_id}
+            escalationSourceType={escalation.source_type}
+          />
+        )}
+
+        {/* Customer */}
+        <CustomerInfoSection userId={escalation.user_id} />
+
+        {/* Error */}
+        {error && (
+          <div className="bg-red-500/20 text-red-400 p-3 rounded-lg text-sm">
+            {error}
           </div>
+        )}
 
-          {/* Hotel Opportunity Info — primary info card for repricing escalations */}
-          {opportunityId && (
-            <HotelOpportunityInfo
-              userId={escalation.user_id}
-              opportunityId={opportunityId}
-              contextData={ctx}
-              escalationSourceId={escalation.source_id}
-              escalationSourceType={escalation.source_type}
-            />
-          )}
-
-          {/* Customer */}
-          <CustomerInfoSection userId={escalation.user_id} />
-
-          {/* Error */}
-          {error && (
-            <div className="bg-red-500/20 text-red-400 p-3 rounded-lg text-sm">
-              {error}
-            </div>
-          )}
-
-          {/* Confirm Booking Success Banner */}
-          {confirmBookingSuccess && (
-            <div className="bg-green-500/10 border border-green-500/20 rounded-lg p-3">
-              <div className="flex items-center gap-2">
-                <svg className="w-5 h-5 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                </svg>
-                <div>
-                  <p className="text-sm font-medium text-green-400">Booking Confirmed</p>
-                  <p className="text-xs text-muted-foreground">
-                    Opportunity moved to EXECUTING. The charge cron will process payment automatically.
-                  </p>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Confirm Booking Action (for booking_failure escalations) */}
-          {canConfirmBooking && !showConfirmBookingForm && !confirmBookingSuccess && (
-            <button
-              onClick={() => setShowConfirmBookingForm(true)}
-              className="w-full py-2 px-4 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors text-sm"
-            >
-              Confirm Manual Booking
-            </button>
-          )}
-
-          {canConfirmBooking && showConfirmBookingForm && confirmBookingStep === 'input' && (
-            <div className="space-y-3 bg-blue-500/5 border border-blue-500/20 rounded-lg p-4">
-              <h4 className="text-sm font-medium flex items-center gap-2">
-                <svg className="w-4 h-4 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                Confirm Manual Booking
-              </h4>
-
-              {/* Supplier */}
+        {/* Confirm Booking Success Banner */}
+        {confirmBookingSuccess && (
+          <div className="bg-green-500/10 border border-green-500/20 rounded-lg p-3">
+            <div className="flex items-center gap-2">
+              <svg className="w-5 h-5 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+              </svg>
               <div>
-                <label className="block text-xs text-muted-foreground mb-1">Supplier</label>
-                <select
-                  value={supplier}
-                  onChange={(e) => setSupplier(e.target.value)}
-                  className="w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary text-sm"
-                >
-                  <option value="etg">ETG / RateHawk</option>
-                  <option value="booking_com">Booking.com</option>
-                  <option value="expedia">Expedia</option>
-                  <option value="other">Other</option>
-                </select>
+                <p className="text-sm font-medium text-green-400">Booking Confirmed</p>
+                <p className="text-xs text-muted-foreground">
+                  Opportunity moved to EXECUTING. The charge cron will process payment automatically.
+                </p>
               </div>
+            </div>
+          </div>
+        )}
 
-              {/* Supplier Reference (ETG Order ID) */}
+        {/* Confirm Booking Action (for booking_failure escalations) */}
+        {canConfirmBooking && !showConfirmBookingForm && !confirmBookingSuccess && (
+          <button
+            onClick={() => setShowConfirmBookingForm(true)}
+            className="w-full py-2 px-4 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors text-sm"
+          >
+            Confirm Manual Booking
+          </button>
+        )}
+
+        {canConfirmBooking && showConfirmBookingForm && confirmBookingStep === 'input' && (
+          <div className="space-y-3 bg-blue-500/5 border border-blue-500/20 rounded-lg p-4">
+            <h4 className="text-sm font-medium flex items-center gap-2">
+              <svg className="w-4 h-4 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              Confirm Manual Booking
+            </h4>
+
+            {/* Supplier */}
+            <div>
+              <label className="block text-xs text-muted-foreground mb-1">Supplier</label>
+              <select
+                value={supplier}
+                onChange={(e) => setSupplier(e.target.value)}
+                className="w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary text-sm"
+              >
+                <option value="etg">ETG / RateHawk</option>
+                <option value="booking_com">Booking.com</option>
+                <option value="expedia">Expedia</option>
+                <option value="other">Other</option>
+              </select>
+            </div>
+
+            {/* Supplier Reference (ETG Order ID) */}
+            <div>
+              <label className="block text-xs text-muted-foreground mb-1">
+                Supplier Reference (ETG Order ID) *
+              </label>
+              <input
+                type="text"
+                value={supplierReference}
+                onChange={(e) => setSupplierReference(e.target.value)}
+                placeholder="e.g. 835283355"
+                className="w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary text-sm font-mono"
+              />
+            </div>
+
+            {/* Optional: Supplier Cost */}
+            <div className="grid grid-cols-2 gap-2">
               <div>
                 <label className="block text-xs text-muted-foreground mb-1">
-                  Supplier Reference (ETG Order ID) *
+                  Supplier Cost (optional)
                 </label>
-                <input
-                  type="text"
-                  value={supplierReference}
-                  onChange={(e) => setSupplierReference(e.target.value)}
-                  placeholder="e.g. 835283355"
-                  className="w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary text-sm font-mono"
-                />
-              </div>
-
-              {/* Optional: Supplier Cost */}
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="block text-xs text-muted-foreground mb-1">
-                    Supplier Cost (optional)
-                  </label>
-                  <div className="relative">
-                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">$</span>
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      value={supplierCostAmount}
-                      onChange={(e) => setSupplierCostAmount(e.target.value)}
-                      placeholder="0.00"
-                      className="w-full pl-7 pr-3 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary text-sm"
-                    />
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-xs text-muted-foreground mb-1">Currency</label>
-                  <select
-                    value={supplierCostCurrency}
-                    onChange={(e) => setSupplierCostCurrency(e.target.value)}
-                    className="w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary text-sm"
-                  >
-                    <option value="USD">USD</option>
-                    <option value="EUR">EUR</option>
-                    <option value="GBP">GBP</option>
-                  </select>
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">$</span>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={supplierCostAmount}
+                    onChange={(e) => setSupplierCostAmount(e.target.value)}
+                    placeholder="0.00"
+                    className="w-full pl-7 pr-3 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary text-sm"
+                  />
                 </div>
               </div>
-
-              <div className="flex gap-2">
-                <button
-                  onClick={() => {
-                    if (!supplierReference.trim()) {
-                      setError('Supplier reference is required');
-                      return;
-                    }
-                    setError(null);
-                    setConfirmBookingStep('confirm');
-                  }}
-                  className="flex-1 py-2 px-4 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors text-sm"
-                >
-                  Review & Confirm
-                </button>
-                <button
-                  onClick={() => { setShowConfirmBookingForm(false); setError(null); }}
-                  className="py-2 px-4 bg-accent text-foreground rounded-lg font-medium hover:bg-accent/80 transition-colors text-sm"
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* Confirm Booking — Confirmation Step */}
-          {canConfirmBooking && showConfirmBookingForm && confirmBookingStep === 'confirm' && (
-            <div className="space-y-3 bg-yellow-500/5 border border-yellow-500/20 rounded-lg p-4">
-              <h4 className="text-sm font-medium flex items-center gap-2">
-                <svg className="w-4 h-4 text-yellow-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
-                </svg>
-                Double Check
-              </h4>
-
-              <div className="bg-accent/50 rounded-lg p-3 space-y-1 text-sm">
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Supplier</span>
-                  <span className="font-medium">{supplier === 'etg' ? 'ETG / RateHawk' : supplier}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Reference</span>
-                  <span className="font-mono font-medium">{supplierReference}</span>
-                </div>
-                {supplierCostAmount && (
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Cost</span>
-                    <span>${parseFloat(supplierCostAmount).toFixed(2)} {supplierCostCurrency}</span>
-                  </div>
-                )}
-              </div>
-
-              <div className="text-xs text-yellow-400 space-y-0.5">
-                <p>This will move opportunity to EXECUTING, mark booking CONFIRMED, create savings record, and auto-resolve this escalation.</p>
-              </div>
-
-              <div className="flex gap-2">
-                <button
-                  onClick={handleConfirmBooking}
-                  disabled={loading}
-                  className="flex-1 py-2 px-4 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors text-sm"
-                >
-                  {loading ? 'Confirming…' : 'Confirm Booking'}
-                </button>
-                <button
-                  onClick={() => setConfirmBookingStep('input')}
-                  disabled={loading}
-                  className="py-2 px-4 bg-accent text-foreground rounded-lg font-medium hover:bg-accent/80 transition-colors text-sm"
-                >
-                  Back
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* Resolve — always available as fallback (small link when confirm booking is primary) */}
-          {canAct && !showResolveForm && !canConfirmBooking && (
-            <button
-              onClick={() => setShowResolveForm(true)}
-              className="w-full py-2 px-4 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition-colors"
-            >
-              Resolve Escalation
-            </button>
-          )}
-          {canAct && !showResolveForm && canConfirmBooking && (
-            <button
-              onClick={() => setShowResolveForm(true)}
-              className="text-xs text-muted-foreground hover:text-foreground underline transition-colors"
-            >
-              Or resolve manually…
-            </button>
-          )}
-
-          {canAct && showResolveForm && (
-            <div className="space-y-3">
               <div>
-                <label className="block text-sm font-medium mb-1">Resolution Notes *</label>
-                <textarea
-                  value={resolutionNotes}
-                  onChange={(e) => setResolutionNotes(e.target.value)}
-                  placeholder="Describe how the escalation was resolved…"
-                  rows={3}
-                  className="w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary resize-none text-sm"
-                />
-              </div>
-              <div className="flex gap-2">
-                <button
-                  onClick={handleResolve}
-                  disabled={loading}
-                  className="flex-1 py-2 px-4 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 disabled:opacity-50 transition-colors text-sm"
+                <label className="block text-xs text-muted-foreground mb-1">Currency</label>
+                <select
+                  value={supplierCostCurrency}
+                  onChange={(e) => setSupplierCostCurrency(e.target.value)}
+                  className="w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary text-sm"
                 >
-                  {loading ? 'Resolving…' : 'Confirm Resolution'}
-                </button>
-                <button
-                  onClick={() => setShowResolveForm(false)}
-                  className="py-2 px-4 bg-accent text-foreground rounded-lg font-medium hover:bg-accent/80 transition-colors text-sm"
-                >
-                  Cancel
-                </button>
+                  <option value="USD">USD</option>
+                  <option value="EUR">EUR</option>
+                  <option value="GBP">GBP</option>
+                </select>
               </div>
             </div>
-          )}
 
-          {/* Resolution Notes (if resolved) */}
-          {isResolved && escalation.resolution_notes && (
-            <div className="bg-green-500/10 border border-green-500/20 rounded-lg p-3">
-              <p className="text-xs font-medium text-green-400 mb-1">Resolution</p>
-              <p className="text-sm">{escalation.resolution_notes}</p>
+            <div className="flex gap-2">
+              <button
+                onClick={() => {
+                  if (!supplierReference.trim()) {
+                    setError('Supplier reference is required');
+                    return;
+                  }
+                  setError(null);
+                  setConfirmBookingStep('confirm');
+                }}
+                className="flex-1 py-2 px-4 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors text-sm"
+              >
+                Review & Confirm
+              </button>
+              <button
+                onClick={() => { setShowConfirmBookingForm(false); setError(null); }}
+                className="py-2 px-4 bg-accent text-foreground rounded-lg font-medium hover:bg-accent/80 transition-colors text-sm"
+              >
+                Cancel
+              </button>
             </div>
-          )}
-
-          {/* Timeline — compact */}
-          <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
-            <span>Created {formatDateTime(escalation.created_at)}</span>
-            {escalation.claimed_at && <span>Claimed {formatDateTime(escalation.claimed_at)}</span>}
-            {escalation.resolved_at && <span>Resolved {formatDateTime(escalation.resolved_at)}</span>}
           </div>
+        )}
 
-          {/* Collapsible Details & IDs */}
-          <CollapsibleDetails escalation={escalation} />
+        {/* Confirm Booking — Confirmation Step */}
+        {canConfirmBooking && showConfirmBookingForm && confirmBookingStep === 'confirm' && (
+          <div className="space-y-3 bg-yellow-500/5 border border-yellow-500/20 rounded-lg p-4">
+            <h4 className="text-sm font-medium flex items-center gap-2">
+              <svg className="w-4 h-4 text-yellow-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
+              </svg>
+              Double Check
+            </h4>
+
+            <div className="bg-accent/50 rounded-lg p-3 space-y-1 text-sm">
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Supplier</span>
+                <span className="font-medium">{supplier === 'etg' ? 'ETG / RateHawk' : supplier}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Reference</span>
+                <span className="font-mono font-medium">{supplierReference}</span>
+              </div>
+              {supplierCostAmount && (
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Cost</span>
+                  <span>${parseFloat(supplierCostAmount).toFixed(2)} {supplierCostCurrency}</span>
+                </div>
+              )}
+            </div>
+
+            <div className="text-xs text-yellow-400 space-y-0.5">
+              <p>This will move opportunity to EXECUTING, mark booking CONFIRMED, create savings record, and auto-resolve this escalation.</p>
+            </div>
+
+            <div className="flex gap-2">
+              <button
+                onClick={handleConfirmBooking}
+                disabled={loading}
+                className="flex-1 py-2 px-4 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors text-sm"
+              >
+                {loading ? 'Confirming…' : 'Confirm Booking'}
+              </button>
+              <button
+                onClick={() => setConfirmBookingStep('input')}
+                disabled={loading}
+                className="py-2 px-4 bg-accent text-foreground rounded-lg font-medium hover:bg-accent/80 transition-colors text-sm"
+              >
+                Back
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Resolve — always available as fallback (small link when confirm booking is primary) */}
+        {canAct && !showResolveForm && !canConfirmBooking && (
+          <button
+            onClick={() => setShowResolveForm(true)}
+            className="w-full py-2 px-4 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition-colors"
+          >
+            Resolve Escalation
+          </button>
+        )}
+        {canAct && !showResolveForm && canConfirmBooking && (
+          <button
+            onClick={() => setShowResolveForm(true)}
+            className="text-xs text-muted-foreground hover:text-foreground underline transition-colors"
+          >
+            Or resolve manually…
+          </button>
+        )}
+
+        {canAct && showResolveForm && (
+          <div className="space-y-3">
+            <div>
+              <label className="block text-sm font-medium mb-1">Resolution Notes *</label>
+              <textarea
+                value={resolutionNotes}
+                onChange={(e) => setResolutionNotes(e.target.value)}
+                placeholder="Describe how the escalation was resolved…"
+                rows={3}
+                className="w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary resize-none text-sm"
+              />
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={handleResolve}
+                disabled={loading}
+                className="flex-1 py-2 px-4 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 disabled:opacity-50 transition-colors text-sm"
+              >
+                {loading ? 'Resolving…' : 'Confirm Resolution'}
+              </button>
+              <button
+                onClick={() => setShowResolveForm(false)}
+                className="py-2 px-4 bg-accent text-foreground rounded-lg font-medium hover:bg-accent/80 transition-colors text-sm"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Resolution Notes (if resolved) */}
+        {isResolved && escalation.resolution_notes && (
+          <div className="bg-green-500/10 border border-green-500/20 rounded-lg p-3">
+            <p className="text-xs font-medium text-green-400 mb-1">Resolution</p>
+            <p className="text-sm">{escalation.resolution_notes}</p>
+          </div>
+        )}
+
+        {/* Timeline — compact */}
+        <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+          <span>Created {formatDateTime(escalation.created_at)}</span>
+          {escalation.claimed_at && <span>Claimed {formatDateTime(escalation.claimed_at)}</span>}
+          {escalation.resolved_at && <span>Resolved {formatDateTime(escalation.resolved_at)}</span>}
         </div>
+
+        {/* Collapsible Details & IDs */}
+        <CollapsibleDetails escalation={escalation} />
+      </div>
+    </>
+  );
+
+  if (renderInline) {
+    return <div className="h-full overflow-y-auto">{content}</div>;
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex justify-end z-50">
+      <div className="w-full max-w-lg bg-card border-l border-border h-full overflow-y-auto">
+        {content}
       </div>
     </div>
   );

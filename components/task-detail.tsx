@@ -357,6 +357,7 @@ interface TaskDetailProps {
   onAdvanceToNext?: () => void;
   queuePosition?: { current: number; total: number } | null;
   defaultFullscreen?: boolean;
+  renderInline?: boolean;
 }
 
 function formatMoney(amount: number, currency: string): string {
@@ -428,7 +429,7 @@ function CustomerInfoSection({ userId }: { userId: string }) {
   );
 }
 
-function FlightRepriceDetail({ task, onClose, onUpdate }: TaskDetailProps) {
+function FlightRepriceDetail({ task, onClose, onUpdate, renderInline }: TaskDetailProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -587,23 +588,24 @@ function FlightRepriceDetail({ task, onClose, onUpdate }: TaskDetailProps) {
     }
   }
 
-  return (
-    <div className="fixed inset-0 bg-black/50 flex justify-end z-50">
-      <div className="w-full max-w-lg bg-card border-l border-border h-full overflow-y-auto">
+  const panelContent = (
+    <div className={renderInline ? "h-full overflow-y-auto" : "w-full max-w-lg bg-card border-l border-border h-full overflow-y-auto"}>
         {/* Header */}
         <div className="sticky top-0 bg-card border-b border-border p-4 flex items-center justify-between">
           <div>
             <h2 className="text-lg font-semibold">Flight Reprice</h2>
             <p className="text-sm text-muted-foreground">{data?.airline_code || 'N/A'} · {data?.pnr || 'N/A'}</p>
           </div>
-          <button
-            onClick={onClose}
-            className="p-2 hover:bg-accent rounded-md transition-colors"
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
+          {!renderInline && (
+            <button
+              onClick={onClose}
+              className="p-2 hover:bg-accent rounded-md transition-colors"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          )}
         </div>
 
         <div className="p-4 space-y-6">
@@ -980,6 +982,15 @@ function FlightRepriceDetail({ task, onClose, onUpdate }: TaskDetailProps) {
           )}
         </div>
       </div>
+  );
+
+  if (renderInline) {
+    return panelContent;
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex justify-end z-50">
+      {panelContent}
     </div>
   );
 }
@@ -1193,7 +1204,7 @@ function MissingFieldForm({ fields, fieldValues, currency, onFieldChange, onCurr
 
 // ── CompleteBookingDetail ─────────────────────────────────
 
-function CompleteBookingDetail({ task, onClose, onUpdate, autoClaimedEmail, autoClaimedEmailLoading, autoClaimedEmailError, onAdvanceToNext, queuePosition, defaultFullscreen }: TaskDetailProps) {
+function CompleteBookingDetail({ task, onClose, onUpdate, autoClaimedEmail, autoClaimedEmailLoading, autoClaimedEmailError, onAdvanceToNext, queuePosition, defaultFullscreen, renderInline }: TaskDetailProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [failReason, setFailReason] = useState('');
@@ -1405,7 +1416,7 @@ function CompleteBookingDetail({ task, onClose, onUpdate, autoClaimedEmail, auto
 
   if (isEmailFullscreen && (email || emailLoading || emailError)) {
     return (
-      <div className="fixed inset-0 z-50 bg-background flex relative">
+      <div className={renderInline ? "flex h-full relative" : "fixed inset-0 z-50 bg-background flex relative"}>
         {/* Completion flash overlay */}
         {completionFlash && (
           <div className={cn(
@@ -1580,20 +1591,21 @@ function CompleteBookingDetail({ task, onClose, onUpdate, autoClaimedEmail, auto
 
   // ── Normal Side Panel View ─────────────────────────────
 
-  return (
-    <div className="fixed inset-0 bg-black/50 flex justify-end z-50">
-      <div className="w-full max-w-lg bg-card border-l border-border h-full overflow-y-auto">
+  const sidePanelContent = (
+    <div className={renderInline ? "h-full overflow-y-auto" : "w-full max-w-lg bg-card border-l border-border h-full overflow-y-auto"}>
         {/* Header */}
         <div className="sticky top-0 bg-card border-b border-border p-4 flex items-center justify-between">
           <div>
             <h2 className="text-lg font-semibold">Complete Booking Data</h2>
             <p className="text-sm text-muted-foreground capitalize">{data.booking_type} · {data.booking_id.slice(0, 8)}</p>
           </div>
-          <button onClick={onClose} className="p-2 hover:bg-accent rounded-md transition-colors">
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
+          {!renderInline && (
+            <button onClick={onClose} className="p-2 hover:bg-accent rounded-md transition-colors">
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          )}
         </div>
 
         <div className="p-4 space-y-6">
@@ -1745,14 +1757,23 @@ function CompleteBookingDetail({ task, onClose, onUpdate, autoClaimedEmail, auto
           )}
         </div>
       </div>
+  );
+
+  if (renderInline) {
+    return sidePanelContent;
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex justify-end z-50">
+      {sidePanelContent}
     </div>
   );
 }
 
-export function TaskDetail({ task, onClose, onUpdate, autoClaimedEmail, autoClaimedEmailLoading, autoClaimedEmailError, onAdvanceToNext, queuePosition, defaultFullscreen }: TaskDetailProps) {
+export function TaskDetail({ task, onClose, onUpdate, autoClaimedEmail, autoClaimedEmailLoading, autoClaimedEmailError, onAdvanceToNext, queuePosition, defaultFullscreen, renderInline }: TaskDetailProps) {
   // Route to capability-specific detail view
   if (task.capability === 'flight_reprice') {
-    return <FlightRepriceDetail task={task} onClose={onClose} onUpdate={onUpdate} />;
+    return <FlightRepriceDetail task={task} onClose={onClose} onUpdate={onUpdate} renderInline={renderInline} />;
   }
 
   if (task.capability === 'complete_booking_data') {
@@ -1766,26 +1787,28 @@ export function TaskDetail({ task, onClose, onUpdate, autoClaimedEmail, autoClai
       onAdvanceToNext={onAdvanceToNext}
       queuePosition={queuePosition}
       defaultFullscreen={defaultFullscreen}
+      renderInline={renderInline}
     />;
   }
 
   // Generic fallback for other capabilities
-  return (
-    <div className="fixed inset-0 bg-black/50 flex justify-end z-50">
-      <div className="w-full max-w-lg bg-card border-l border-border h-full overflow-y-auto">
+  const fallbackContent = (
+    <div className={renderInline ? "h-full overflow-y-auto" : "w-full max-w-lg bg-card border-l border-border h-full overflow-y-auto"}>
         <div className="sticky top-0 bg-card border-b border-border p-4 flex items-center justify-between">
           <div>
             <h2 className="text-lg font-semibold">{task.capability}</h2>
             <p className="text-sm text-muted-foreground">{task.id.slice(0, 8)}</p>
           </div>
-          <button
-            onClick={onClose}
-            className="p-2 hover:bg-accent rounded-md transition-colors"
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
+          {!renderInline && (
+            <button
+              onClick={onClose}
+              className="p-2 hover:bg-accent rounded-md transition-colors"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          )}
         </div>
         <div className="p-4 space-y-4">
           <CustomerInfoSection userId={task.user_id} />
@@ -1794,6 +1817,15 @@ export function TaskDetail({ task, onClose, onUpdate, autoClaimedEmail, autoClai
           </pre>
         </div>
       </div>
+  );
+
+  if (renderInline) {
+    return fallbackContent;
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex justify-end z-50">
+      {fallbackContent}
     </div>
   );
 }

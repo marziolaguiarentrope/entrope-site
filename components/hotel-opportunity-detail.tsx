@@ -526,6 +526,7 @@ interface HotelOpportunityDetailProps {
   variant: 'payment' | 'cancel';
   onClose: () => void;
   onUpdate: (opportunity: HotelOpportunity) => void;
+  renderInline?: boolean;
 }
 
 export function HotelOpportunityDetail({
@@ -535,6 +536,7 @@ export function HotelOpportunityDetail({
   variant,
   onClose,
   onUpdate,
+  renderInline = false,
 }: HotelOpportunityDetailProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -579,6 +581,178 @@ export function HotelOpportunityDetail({
     }
   }
 
+  const detailContent = (
+    <>
+      {/* Header */}
+      <div className="sticky top-0 bg-card border-b border-border p-4 flex items-center justify-between z-10">
+        <div>
+          <h2 className="text-lg font-semibold">
+            {variant === 'cancel' ? 'Pending Cancellation' : 'Pending Payment'}
+          </h2>
+          <p className="text-sm text-muted-foreground">
+            {opportunity.hotel_name || 'Unknown Hotel'}
+          </p>
+        </div>
+        {!renderInline && (
+          <button
+            onClick={onClose}
+            className="p-2 hover:bg-accent rounded-md transition-colors"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        )}
+      </div>
+
+      <div className="p-4 space-y-4">
+        {/* Customer Info */}
+        <CustomerInfoSection userId={opportunity.user_id} userInfo={userInfo} />
+
+        {/* Hotel Booking Details Module */}
+        <HotelBookingDetailsModule
+          opportunity={opportunity}
+          bookingEnrichment={bookingEnrichment}
+        />
+
+        {/* View Original Email button */}
+        {opportunity.old_booking_id && (
+          <button
+            onClick={() => setShowEmail(!showEmail)}
+            className={cn(
+              'w-full py-2 px-4 rounded-lg font-medium transition-colors flex items-center justify-center gap-2 text-sm',
+              showEmail
+                ? 'bg-primary/10 text-primary border border-primary/20'
+                : 'bg-accent text-foreground hover:bg-accent/80',
+            )}
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+            </svg>
+            {showEmail ? 'Hide Original Email' : 'View Original Email'}
+          </button>
+        )}
+
+        {/* Inline email section (when renderInline is true, embed email below the button) */}
+        {renderInline && showEmail && opportunity.old_booking_id && (
+          <div className="border border-border rounded-lg overflow-hidden">
+            <EmailSidePanel
+              bookingId={opportunity.old_booking_id}
+              onClose={() => setShowEmail(false)}
+            />
+          </div>
+        )}
+
+        {/* Repricing History */}
+        <RepricingHistorySection
+          userId={opportunity.user_id}
+          currentOpportunityId={opportunity.id}
+        />
+
+        {/* Error */}
+        {error && (
+          <div className="bg-red-500/20 text-red-400 p-3 rounded-lg text-sm">
+            {error}
+          </div>
+        )}
+
+        {/* Actions for cancel variant */}
+        {variant === 'cancel' && opportunity.old_booking_status === 'active' && !showConfirm && (
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium mb-1">
+                Cancellation Notes *
+              </label>
+              <textarea
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                placeholder="e.g., Called hotel, cancelled successfully, ref #12345"
+                rows={3}
+                className="w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary resize-none"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">
+                Hotel Cancellation Reference (optional)
+              </label>
+              <input
+                type="text"
+                value={confirmationCode}
+                onChange={(e) => setConfirmationCode(e.target.value)}
+                placeholder="e.g., cancellation # from the hotel"
+                className="w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
+              />
+            </div>
+            <button
+              onClick={() => {
+                if (!notes.trim()) {
+                  setError('Please enter notes about the cancellation');
+                  return;
+                }
+                setError(null);
+                setShowConfirm(true);
+              }}
+              className="w-full py-2 px-4 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition-colors"
+            >
+              Mark as Cancelled
+            </button>
+          </div>
+        )}
+
+        {/* Confirmation */}
+        {variant === 'cancel' && opportunity.old_booking_status === 'active' && showConfirm && (
+          <div className="space-y-4">
+            <div className="bg-green-500/10 rounded-lg p-4">
+              <h4 className="font-medium text-green-400 mb-2">Confirm Cancellation</h4>
+              <p className="text-sm text-muted-foreground mb-3">
+                You are marking this booking as cancelled:
+              </p>
+              <div className="text-sm space-y-1">
+                <p><span className="text-muted-foreground">Hotel:</span> {opportunity.hotel_name}</p>
+                {opportunity.old_booking_confirmation_code && (
+                  <p><span className="text-muted-foreground">Conf:</span> {opportunity.old_booking_confirmation_code}</p>
+                )}
+                <p><span className="text-muted-foreground">Notes:</span> {notes}</p>
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={handleMarkCancelled}
+                disabled={loading}
+                className="flex-1 py-2 px-4 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 disabled:opacity-50 transition-colors"
+              >
+                {loading ? 'Saving...' : 'Yes, Mark Cancelled'}
+              </button>
+              <button
+                onClick={() => setShowConfirm(false)}
+                disabled={loading}
+                className="py-2 px-4 bg-accent text-foreground rounded-lg font-medium hover:bg-accent/80 transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Old booking cancelled — step complete */}
+        {opportunity.old_booking_status === 'cancelled' && (
+          <div className="bg-green-500/10 rounded-lg p-4">
+            <p className="text-green-400 font-medium">Original booking has been cancelled.</p>
+            <p className="text-sm text-muted-foreground mt-1">This step is complete — the repricing can proceed.</p>
+          </div>
+        )}
+      </div>
+    </>
+  );
+
+  if (renderInline) {
+    return (
+      <div className="h-full overflow-y-auto">
+        {detailContent}
+      </div>
+    );
+  }
+
   return (
     <div className="fixed inset-0 bg-black/50 flex justify-end z-50">
       {/* Email side panel (opens to the left of the detail panel) */}
@@ -591,155 +765,8 @@ export function HotelOpportunityDetail({
 
       {/* Main detail panel */}
       <div className="bg-card border-l border-border h-full overflow-y-auto w-full max-w-lg">
-        {/* Header */}
-        <div className="sticky top-0 bg-card border-b border-border p-4 flex items-center justify-between z-10">
-          <div>
-            <h2 className="text-lg font-semibold">
-              {variant === 'cancel' ? 'Pending Cancellation' : 'Pending Payment'}
-            </h2>
-            <p className="text-sm text-muted-foreground">
-              {opportunity.hotel_name || 'Unknown Hotel'}
-            </p>
-          </div>
-          <button
-            onClick={onClose}
-            className="p-2 hover:bg-accent rounded-md transition-colors"
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-        </div>
-
-        <div className="p-4 space-y-4">
-          {/* Customer Info */}
-          <CustomerInfoSection userId={opportunity.user_id} userInfo={userInfo} />
-
-          {/* Hotel Booking Details Module */}
-          <HotelBookingDetailsModule
-            opportunity={opportunity}
-            bookingEnrichment={bookingEnrichment}
-          />
-
-          {/* View Original Email button */}
-          {opportunity.old_booking_id && (
-            <button
-              onClick={() => setShowEmail(!showEmail)}
-              className={cn(
-                'w-full py-2 px-4 rounded-lg font-medium transition-colors flex items-center justify-center gap-2 text-sm',
-                showEmail
-                  ? 'bg-primary/10 text-primary border border-primary/20'
-                  : 'bg-accent text-foreground hover:bg-accent/80',
-              )}
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-              </svg>
-              {showEmail ? 'Hide Original Email' : 'View Original Email'}
-            </button>
-          )}
-
-          {/* Repricing History */}
-          <RepricingHistorySection
-            userId={opportunity.user_id}
-            currentOpportunityId={opportunity.id}
-          />
-
-          {/* Error */}
-          {error && (
-            <div className="bg-red-500/20 text-red-400 p-3 rounded-lg text-sm">
-              {error}
-            </div>
-          )}
-
-          {/* Actions for cancel variant */}
-          {variant === 'cancel' && opportunity.old_booking_status === 'active' && !showConfirm && (
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium mb-1">
-                  Cancellation Notes *
-                </label>
-                <textarea
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                  placeholder="e.g., Called hotel, cancelled successfully, ref #12345"
-                  rows={3}
-                  className="w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary resize-none"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-1">
-                  Hotel Cancellation Reference (optional)
-                </label>
-                <input
-                  type="text"
-                  value={confirmationCode}
-                  onChange={(e) => setConfirmationCode(e.target.value)}
-                  placeholder="e.g., cancellation # from the hotel"
-                  className="w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
-                />
-              </div>
-              <button
-                onClick={() => {
-                  if (!notes.trim()) {
-                    setError('Please enter notes about the cancellation');
-                    return;
-                  }
-                  setError(null);
-                  setShowConfirm(true);
-                }}
-                className="w-full py-2 px-4 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition-colors"
-              >
-                Mark as Cancelled
-              </button>
-            </div>
-          )}
-
-          {/* Confirmation */}
-          {variant === 'cancel' && opportunity.old_booking_status === 'active' && showConfirm && (
-            <div className="space-y-4">
-              <div className="bg-green-500/10 rounded-lg p-4">
-                <h4 className="font-medium text-green-400 mb-2">Confirm Cancellation</h4>
-                <p className="text-sm text-muted-foreground mb-3">
-                  You are marking this booking as cancelled:
-                </p>
-                <div className="text-sm space-y-1">
-                  <p><span className="text-muted-foreground">Hotel:</span> {opportunity.hotel_name}</p>
-                  {opportunity.old_booking_confirmation_code && (
-                    <p><span className="text-muted-foreground">Conf:</span> {opportunity.old_booking_confirmation_code}</p>
-                  )}
-                  <p><span className="text-muted-foreground">Notes:</span> {notes}</p>
-                </div>
-              </div>
-              <div className="flex gap-2">
-                <button
-                  onClick={handleMarkCancelled}
-                  disabled={loading}
-                  className="flex-1 py-2 px-4 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 disabled:opacity-50 transition-colors"
-                >
-                  {loading ? 'Saving...' : 'Yes, Mark Cancelled'}
-                </button>
-                <button
-                  onClick={() => setShowConfirm(false)}
-                  disabled={loading}
-                  className="py-2 px-4 bg-accent text-foreground rounded-lg font-medium hover:bg-accent/80 transition-colors"
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* Old booking cancelled — step complete */}
-          {opportunity.old_booking_status === 'cancelled' && (
-            <div className="bg-green-500/10 rounded-lg p-4">
-              <p className="text-green-400 font-medium">Original booking has been cancelled.</p>
-              <p className="text-sm text-muted-foreground mt-1">This step is complete — the repricing can proceed.</p>
-            </div>
-          )}
-        </div>
+        {detailContent}
       </div>
-
     </div>
   );
 }

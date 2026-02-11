@@ -23,14 +23,6 @@ function timeAgo(dateString: string): string {
   return date.toLocaleDateString();
 }
 
-const tabs = [
-  { id: 'flight_reprice', label: 'Flight Reprice', type: 'task', capability: 'flight_reprice' },
-  { id: 'complete_booking', label: 'Complete Booking', type: 'task', capability: 'complete_booking_data' },
-  { id: 'pending_payment', label: 'Pending Payment', type: 'hotel_opportunity' },
-  { id: 'pending_cancel', label: 'Pending Cancel', type: 'hotel_opportunity' },
-  { id: 'escalations', label: 'Escalations', type: 'escalation' },
-] as const;
-
 const priorityOrder: Record<string, number> = {
   urgent: 0,
   high: 1,
@@ -38,43 +30,71 @@ const priorityOrder: Record<string, number> = {
   low: 3,
 };
 
-function sortByPriority<T extends { priority: string }>(items: T[]): T[] {
-  return [...items].sort((a, b) => {
-    const aPriority = priorityOrder[a.priority] ?? 99;
-    const bPriority = priorityOrder[b.priority] ?? 99;
-    return aPriority - bPriority;
-  });
+// ── Unified queue item type ─────────────────────────────
+
+type QueueItemType = 'flight_reprice' | 'complete_booking' | 'pending_cancel' | 'escalation';
+
+interface QueueItem {
+  id: string;
+  type: QueueItemType;
+  priority: string;
+  priorityNum: number;
+  createdAt: string;
+  // Display
+  label: string;
+  sublabel: string;
+  badge?: { text: string; color: string } | null;
+  userInfo?: UserBasicInfo | null;
+  userId: string;
+  // Original data
+  task?: Task;
+  escalation?: Escalation;
+  hotelOpportunity?: HotelOpportunity;
 }
 
-type TabId = typeof tabs[number]['id'];
+function buildQueueItems(
+  tasks: Task[],
+  escalations: Escalation[],
+  pendingCancels: HotelOpportunity[],
+  userInfoMap: Map<string, UserBasicInfo>,
+): QueueItem[] {
+  const items: QueueItem[] = [];
 
-function TaskRow({ task, onClick, isSelected, isLoading, userInfo }: { task: Task; onClick: () => void; isSelected?: boolean; isLoading?: boolean; userInfo?: UserBasicInfo }) {
-  const priorityColors: Record<string, string> = {
-    urgent: 'text-red-400',
-    high: 'text-orange-400',
-    normal: 'text-foreground',
-    low: 'text-muted-foreground',
-  };
-
-  // Core fields that make a booking unusable if missing
-  const HOTEL_CORE = ['hotel_name', 'check_in_date', 'check_out_date'];
-  const FLIGHT_CORE = ['departure_date', 'origin_airport', 'destination_airport'];
-
-  // Extract display info based on capability
-  const getDisplayInfo = () => {
-    const data = task.request_data as Record<string, unknown>;
+  // Flight repricings — only actionable (pending or claimed, not completed/failed/blocked)
+  for (const task of tasks) {
     if (task.capability === 'flight_reprice') {
+      if (['completed', 'failed', 'blocked'].includes(task.status)) continue;
+      const data = task.request_data as Record<string, unknown>;
       const airline = data.airline_code as string;
       const pnr = data.pnr as string;
       const passenger = data.passenger_name as string;
-      return { title: `${airline} · ${pnr}`, subtitle: passenger, severity: null as string | null };
+      items.push({
+        id: `task-${task.id}`,
+        type: 'flight_reprice',
+        priority: task.priority,
+        priorityNum: priorityOrder[task.priority] ?? 99,
+        createdAt: task.created_at,
+        label: `${airline} · ${pnr}`,
+        sublabel: `${passenger} · ${task.status} · ${timeAgo(task.created_at)}`,
+        badge: task.claimed_by ? { text: `Claimed: ${task.claimed_by}`, color: 'bg-blue-500/20 text-blue-400' } : null,
+        userId: task.user_id,
+        userInfo: userInfoMap.get(task.user_id) || null,
+        task,
+      });
     }
+  }
+
+  // Complete booking tasks
+  for (const task of tasks) {
     if (task.capability === 'complete_booking_data') {
+      if (['completed', 'failed', 'blocked'].includes(task.status)) continue;
+      const data = task.request_data as Record<string, unknown>;
       const bookingType = data.booking_type as string;
       const missingFields = (data.missing_fields as string[]) || [];
+      const HOTEL_CORE = ['hotel_name', 'check_in_date', 'check_out_date'];
+      const FLIGHT_CORE = ['departure_date', 'origin_airport', 'destination_airport'];
       const coreFields = bookingType === 'hotel' ? HOTEL_CORE : FLIGHT_CORE;
       const missingCore = missingFields.filter(f => coreFields.includes(f));
-      const typeLabel = bookingType === 'hotel' ? 'Hotel' : 'Flight';
       const fieldLabels: Record<string, string> = {
         hotel_name: 'hotel name', check_in_date: 'check-in', check_out_date: 'check-out',
         cash_paid: 'price', booking_provider: 'provider', cancellation_policy: 'cancel policy',
@@ -83,210 +103,194 @@ function TaskRow({ task, onClick, isSelected, isLoading, userInfo }: { task: Tas
       };
       const readable = missingFields.map(f => fieldLabels[f] || f).join(', ');
       const severity = missingCore.length > 0 ? 'core' : 'enrichment';
-      return { title: `${typeLabel} Booking`, subtitle: `Missing: ${readable}`, severity };
+      const typeLabel = bookingType === 'hotel' ? 'Hotel' : 'Flight';
+      items.push({
+        id: `task-${task.id}`,
+        type: 'complete_booking',
+        priority: task.priority,
+        priorityNum: priorityOrder[task.priority] ?? 99,
+        createdAt: task.created_at,
+        label: `${typeLabel} Booking`,
+        sublabel: `Missing: ${readable}`,
+        badge: severity === 'core'
+          ? { text: 'CORE MISSING', color: 'bg-red-500/20 text-red-400' }
+          : { text: 'ENRICHMENT', color: 'bg-yellow-500/20 text-yellow-400' },
+        userId: task.user_id,
+        userInfo: userInfoMap.get(task.user_id) || null,
+        task,
+      });
     }
-    return { title: task.booking_id || task.id.slice(0, 8), subtitle: task.capability, severity: null as string | null };
-  };
+  }
 
-  const { title, subtitle, severity } = getDisplayInfo();
+  // Pending cancels — compact display
+  for (const opp of pendingCancels) {
+    items.push({
+      id: `cancel-${opp.id}`,
+      type: 'pending_cancel',
+      priority: 'normal',
+      priorityNum: 2,
+      createdAt: opp.created_at,
+      label: opp.hotel_name || 'Unknown Hotel',
+      sublabel: [
+        opp.check_in ? formatDate(opp.check_in) : null,
+        opp.check_out ? `→ ${formatDate(opp.check_out)}` : null,
+        opp.old_booking_provider ? `via ${opp.old_booking_provider}` : null,
+        opp.old_booking_confirmation_code ? `Conf: ${opp.old_booking_confirmation_code}` : null,
+        opp.cancellation_scheduled_at ? `Cancel by ${formatDate(opp.cancellation_scheduled_at)}` : null,
+      ].filter(Boolean).join(' · '),
+      badge: { text: 'Pending Cancel', color: 'bg-red-500/20 text-red-400' },
+      userId: opp.user_id,
+      userInfo: userInfoMap.get(opp.user_id) || null,
+      hotelOpportunity: opp,
+    });
+  }
+
+  // Escalations
+  for (const esc of escalations) {
+    items.push({
+      id: `esc-${esc.id}`,
+      type: 'escalation',
+      priority: esc.priority,
+      priorityNum: priorityOrder[esc.priority] ?? 99,
+      createdAt: esc.created_at,
+      label: esc.type.replace(/_/g, ' '),
+      sublabel: `${esc.reason} · ${esc.status} · ${timeAgo(esc.created_at)}`,
+      badge: esc.claimed_by ? { text: `Claimed: ${esc.claimed_by}`, color: 'bg-blue-500/20 text-blue-400' } : null,
+      userId: esc.user_id,
+      userInfo: null,
+      escalation: esc,
+    });
+  }
+
+  // Sort by priority, then creation date (oldest first within same priority)
+  items.sort((a, b) => {
+    if (a.priorityNum !== b.priorityNum) return a.priorityNum - b.priorityNum;
+    return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+  });
+
+  return items;
+}
+
+// ── Type colors and icons ─────────────────────────────
+
+const typeConfig: Record<QueueItemType, { label: string; dotColor: string }> = {
+  flight_reprice: { label: 'Flight Reprice', dotColor: 'bg-blue-400' },
+  complete_booking: { label: 'Complete Booking', dotColor: 'bg-purple-400' },
+  pending_cancel: { label: 'Pending Cancel', dotColor: 'bg-red-400' },
+  escalation: { label: 'Escalation', dotColor: 'bg-orange-400' },
+};
+
+const priorityColors: Record<string, string> = {
+  urgent: 'text-red-400',
+  high: 'text-orange-400',
+  normal: 'text-foreground',
+  low: 'text-muted-foreground',
+};
+
+// ── Filter types ────────────────────────────────────────
+
+type FilterType = 'all' | QueueItemType;
+
+const filterOptions: { id: FilterType; label: string }[] = [
+  { id: 'all', label: 'All' },
+  { id: 'flight_reprice', label: 'Flight Reprice' },
+  { id: 'complete_booking', label: 'Complete Booking' },
+  { id: 'pending_cancel', label: 'Pending Cancel' },
+  { id: 'escalation', label: 'Escalations' },
+];
+
+// ── Queue Row ───────────────────────────────────────────
+
+function QueueRow({
+  item,
+  isSelected,
+  isLoading,
+  onClick,
+}: {
+  item: QueueItem;
+  isSelected: boolean;
+  isLoading: boolean;
+  onClick: () => void;
+}) {
+  const config = typeConfig[item.type];
 
   return (
     <div
       onClick={onClick}
       className={cn(
-        "flex items-center justify-between py-3 px-4 border-b border-border last:border-0 transition-colors cursor-pointer",
+        "flex items-center gap-3 py-2.5 px-4 border-b border-border last:border-0 transition-colors cursor-pointer",
         isSelected
           ? 'bg-accent border-l-2 border-l-primary'
           : 'hover:bg-accent/50'
       )}
     >
+      {/* Type dot */}
+      <div className={cn('w-2 h-2 rounded-full shrink-0', config.dotColor)} title={config.label} />
+
+      {/* Priority */}
+      <span className={cn('text-[10px] font-semibold uppercase w-12 shrink-0', priorityColors[item.priority] || 'text-foreground')}>
+        {item.priority}
+      </span>
+
+      {/* Main content */}
       <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-3">
-          <span className={cn('text-xs font-medium uppercase', priorityColors[task.priority] || 'text-foreground')}>
-            {task.priority}
-          </span>
-          <span className="text-sm font-medium truncate">
-            {title}
-          </span>
-          {severity === 'core' && (
-            <span className="px-1.5 py-0.5 text-[10px] bg-red-500/20 text-red-400 rounded font-medium">CORE MISSING</span>
-          )}
-          {severity === 'enrichment' && (
-            <span className="px-1.5 py-0.5 text-[10px] bg-yellow-500/20 text-yellow-400 rounded font-medium">ENRICHMENT</span>
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-medium truncate">{item.label}</span>
+          {item.badge && (
+            <span className={cn('px-1.5 py-0.5 text-[10px] rounded font-medium shrink-0', item.badge.color)}>
+              {item.badge.text}
+            </span>
           )}
           {isLoading && (
-            <svg className="animate-spin h-3.5 w-3.5 text-muted-foreground" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+            <svg className="animate-spin h-3.5 w-3.5 text-muted-foreground shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
               <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
               <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
             </svg>
           )}
         </div>
-        <div className="text-xs text-muted-foreground mt-1 truncate">
-          {subtitle} · {task.status} · {timeAgo(task.created_at)}
-          {userInfo && (
-            <>
-              {userInfo.email && <> · {userInfo.email}</>}
-              {userInfo.phone && <> · {userInfo.phone}</>}
-            </>
-          )}
+        <div className="text-xs text-muted-foreground mt-0.5 truncate">
+          {item.sublabel}
+          {item.userInfo?.email && <> · {item.userInfo.email}</>}
         </div>
       </div>
-      <div className="flex items-center gap-3">
-        <Link
-          href={`/users-list/${task.user_id}`}
-          onClick={(e) => e.stopPropagation()}
-          className="text-xs text-primary hover:underline whitespace-nowrap"
-        >
-          Profile →
-        </Link>
-        <div className="text-xs text-muted-foreground whitespace-nowrap">
-          {task.claimed_by ? `Claimed by ${task.claimed_by}` : 'Unclaimed'}
-        </div>
-      </div>
+
+      {/* Type label */}
+      <span className="text-[10px] text-muted-foreground/60 uppercase tracking-wide shrink-0 hidden sm:block">
+        {config.label}
+      </span>
+
+      {/* Profile link */}
+      <Link
+        href={`/users-list/${item.userId}`}
+        onClick={(e) => e.stopPropagation()}
+        className="text-xs text-primary hover:underline whitespace-nowrap shrink-0"
+      >
+        Profile
+      </Link>
     </div>
   );
 }
 
-function EscalationRow({ escalation, onClick }: { escalation: Escalation; onClick: () => void }) {
-  const priorityColors: Record<string, string> = {
-    urgent: 'text-red-400',
-    high: 'text-orange-400',
-    normal: 'text-foreground',
-    low: 'text-muted-foreground',
-  };
-
-  return (
-    <div
-      onClick={onClick}
-      className="flex items-center justify-between py-3 px-4 border-b border-border last:border-0 hover:bg-accent/50 transition-colors cursor-pointer"
-    >
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-3">
-          <span className={cn('text-xs font-medium uppercase', priorityColors[escalation.priority] || 'text-foreground')}>
-            {escalation.priority}
-          </span>
-          <span className="text-sm font-medium truncate">
-            {escalation.type}
-          </span>
-        </div>
-        <div className="text-xs text-muted-foreground mt-1 truncate">
-          {escalation.reason}
-        </div>
-        <div className="text-xs text-muted-foreground mt-1">
-          {escalation.status} · {timeAgo(escalation.created_at)}
-        </div>
-      </div>
-      <div className="text-xs text-muted-foreground">
-        {escalation.claimed_by ? `Claimed by ${escalation.claimed_by}` : 'Unclaimed'}
-      </div>
-    </div>
-  );
-}
-
-function HotelOpportunityRow({ opportunity, variant, onClick, userInfo }: { opportunity: HotelOpportunity; variant: 'payment' | 'cancel'; onClick: () => void; userInfo?: UserBasicInfo }) {
-
-  const formatMoney = (amount: number | null, currency: string | null) => {
-    if (amount === null) return 'N/A';
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: currency || 'USD',
-    }).format(amount / 100); // Assuming amount is in cents
-  };
-
-  return (
-    <div
-      onClick={onClick}
-      className="flex items-center justify-between py-3 px-4 border-b border-border last:border-0 hover:bg-accent/50 transition-colors cursor-pointer"
-    >
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-3">
-          <span className="text-sm font-medium truncate">
-            {opportunity.hotel_name || 'Unknown Hotel'}
-          </span>
-          {variant === 'payment' && opportunity.payment_status && (
-            <span className={cn(
-              'px-2 py-0.5 text-xs rounded',
-              opportunity.payment_status === 'pending' ? 'bg-yellow-500/20 text-yellow-400' : 'bg-orange-500/20 text-orange-400'
-            )}>
-              {opportunity.payment_status}
-            </span>
-          )}
-          {variant === 'cancel' && (
-            <span className="px-2 py-0.5 text-xs bg-red-500/20 text-red-400 rounded">
-              Pending Cancel
-            </span>
-          )}
-        </div>
-        <div className="text-xs text-muted-foreground mt-1">
-          {formatDate(opportunity.check_in)} - {formatDate(opportunity.check_out)}
-        </div>
-        {variant === 'payment' && (
-          <div className="text-xs text-muted-foreground mt-1">
-            {formatMoney(opportunity.payment_amount, opportunity.payment_currency)}
-            {opportunity.payment_due_at && ` · Due ${formatDate(opportunity.payment_due_at)}`}
-          </div>
-        )}
-        {variant === 'cancel' && (
-          <div className="text-xs text-muted-foreground mt-1">
-            {opportunity.old_booking_provider && (
-              <span>Booked via {opportunity.old_booking_provider}</span>
-            )}
-            {opportunity.old_booking_confirmation_code && (
-              <span>{opportunity.old_booking_provider ? ' · ' : ''}Conf: {opportunity.old_booking_confirmation_code}</span>
-            )}
-            {opportunity.cancellation_scheduled_at && (
-              <span className="text-orange-400">
-                {(opportunity.old_booking_provider || opportunity.old_booking_confirmation_code) ? ' · ' : ''}
-                Cancel by {formatDate(opportunity.cancellation_scheduled_at)}
-              </span>
-            )}
-          </div>
-        )}
-        {userInfo && (
-          <div className="text-xs text-muted-foreground mt-1">
-            {userInfo.email && <span>{userInfo.email}</span>}
-            {userInfo.email && userInfo.phone && <span> · </span>}
-            {userInfo.phone && <span>{userInfo.phone}</span>}
-          </div>
-        )}
-      </div>
-      <div className="flex items-center gap-3">
-        <Link
-          href={`/users-list/${opportunity.user_id}`}
-          onClick={(e) => e.stopPropagation()}
-          className="text-xs text-primary hover:underline whitespace-nowrap"
-        >
-          Profile →
-        </Link>
-        <div className="text-right">
-          <div className="text-xs text-muted-foreground">
-            {opportunity.status}
-          </div>
-          <div className="text-xs text-muted-foreground mt-1">
-            {timeAgo(opportunity.created_at)}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
+// ── Main Page ───────────────────────────────────────────
 
 export default function TasksPage() {
-  const [activeTab, setActiveTab] = useState<TabId>('flight_reprice');
   const [tasks, setTasks] = useState<Task[]>([]);
   const [escalations, setEscalations] = useState<Escalation[]>([]);
-  const [hotelOpportunities, setHotelOpportunities] = useState<HotelOpportunity[]>([]);
+  const [pendingCancels, setPendingCancels] = useState<HotelOpportunity[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [filter, setFilter] = useState<FilterType>('all');
+
+  // User info
+  const [userInfoMap, setUserInfoMap] = useState<Map<string, UserBasicInfo>>(new Map());
+
+  // Selected items
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [selectedEscalation, setSelectedEscalation] = useState<Escalation | null>(null);
-  const [taskDetailLoading, setTaskDetailLoading] = useState(false);
-  const [loadingTaskId, setLoadingTaskId] = useState<string | null>(null);
   const [selectedHotelOpportunity, setSelectedHotelOpportunity] = useState<HotelOpportunity | null>(null);
-
-  // User info lookup for customer contact details
-  const [userInfoMap, setUserInfoMap] = useState<Map<string, UserBasicInfo>>(new Map());
+  const [loadingItemId, setLoadingItemId] = useState<string | null>(null);
+  const [taskDetailLoading, setTaskDetailLoading] = useState(false);
 
   // Auto-claim email state (complete_booking optimization)
   const [autoEmail, setAutoEmail] = useState<RawEmail | null>(null);
@@ -294,34 +298,46 @@ export default function TasksPage() {
   const [autoEmailError, setAutoEmailError] = useState<string | null>(null);
   const advanceTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Expanded detail panel state
+  const [detailExpanded, setDetailExpanded] = useState(false);
+
   function resetEmailState() {
     setAutoEmail(null);
     setAutoEmailLoading(false);
     setAutoEmailError(null);
   }
 
+  // Close any open detail panel
+  function closeDetail() {
+    setSelectedTask(null);
+    setSelectedEscalation(null);
+    setSelectedHotelOpportunity(null);
+    setDetailExpanded(false);
+    resetEmailState();
+  }
+
+  // Determine if any detail panel is open
+  const hasDetailOpen = !!(selectedTask || selectedEscalation || selectedHotelOpportunity);
+
   // Auto-claim + fetch email for complete_booking tasks
   async function handleSelectCompleteBooking(task: Task) {
+    closeDetail();
     resetEmailState();
-    setLoadingTaskId(task.id);
+    setLoadingItemId(`task-${task.id}`);
     setTaskDetailLoading(true);
 
     if (task.status === 'pending') {
-      // Auto-claim + getTask in parallel
       try {
         const [claimedTask, fullTask] = await Promise.all([
           api.claimTask(task.id),
           api.getTask(task.id),
         ]);
-        // Merge: hydrated booking from fullTask, claimed status from claimedTask
         const merged = { ...fullTask, status: claimedTask.status, claimed_by: claimedTask.claimed_by, claimed_at: claimedTask.claimed_at };
         setSelectedTask(merged);
-        // Update list to show claimed status
         setTasks(prev => prev.map(t => t.id === task.id ? merged : t));
         setTaskDetailLoading(false);
-        setLoadingTaskId(null);
+        setLoadingItemId(null);
 
-        // Now fetch email in background (requires claimed status)
         setAutoEmailLoading(true);
         try {
           const email = await api.getEmailForTask(task.id);
@@ -332,7 +348,6 @@ export default function TasksPage() {
           setAutoEmailLoading(false);
         }
       } catch (err) {
-        // Auto-claim failed — try to show task anyway
         console.error('Auto-claim failed:', err);
         try {
           const fullTask = await api.getTask(task.id);
@@ -341,17 +356,15 @@ export default function TasksPage() {
           setSelectedTask(task);
         }
         setTaskDetailLoading(false);
-        setLoadingTaskId(null);
+        setLoadingItemId(null);
       }
     } else {
-      // Already claimed — just fetch details + email
       try {
         const fullTask = await api.getTask(task.id);
         setSelectedTask(fullTask);
         setTaskDetailLoading(false);
-        setLoadingTaskId(null);
+        setLoadingItemId(null);
 
-        // Fetch email in background
         setAutoEmailLoading(true);
         try {
           const email = await api.getEmailForTask(task.id);
@@ -365,24 +378,24 @@ export default function TasksPage() {
         console.error('Failed to fetch task details:', err);
         setSelectedTask(task);
         setTaskDetailLoading(false);
-        setLoadingTaskId(null);
+        setLoadingItemId(null);
       }
     }
   }
 
-  // Standard task selection (non-booking tasks)
+  // Select a task
   async function handleSelectTask(task: Task) {
-    // Cancel any pending auto-advance
     if (advanceTimeoutRef.current) {
       clearTimeout(advanceTimeoutRef.current);
       advanceTimeoutRef.current = null;
     }
 
-    if (activeTab === 'complete_booking') {
+    if (task.capability === 'complete_booking_data') {
       return handleSelectCompleteBooking(task);
     }
 
-    setLoadingTaskId(task.id);
+    closeDetail();
+    setLoadingItemId(`task-${task.id}`);
     setTaskDetailLoading(true);
     try {
       const fullTask = await api.getTask(task.id);
@@ -392,22 +405,38 @@ export default function TasksPage() {
       setSelectedTask(task);
     } finally {
       setTaskDetailLoading(false);
-      setLoadingTaskId(null);
+      setLoadingItemId(null);
     }
   }
 
-  // Queue position for complete_booking tab
-  const queuePosition = useMemo(() => {
-    if (activeTab !== 'complete_booking' || !selectedTask) return null;
-    const idx = tasks.findIndex(t => t.id === selectedTask.id);
-    return { current: idx + 1, total: tasks.length };
-  }, [activeTab, selectedTask, tasks]);
+  // Select a queue item
+  function handleSelectItem(item: QueueItem) {
+    if (item.task) {
+      handleSelectTask(item.task);
+    } else if (item.escalation) {
+      closeDetail();
+      setSelectedEscalation(item.escalation);
+    } else if (item.hotelOpportunity) {
+      closeDetail();
+      setSelectedHotelOpportunity(item.hotelOpportunity);
+    }
+  }
 
-  // Auto-advance to next task in queue
+  // Auto-advance for complete_booking queue
+  const completeBookingTasks = useMemo(
+    () => tasks.filter(t => t.capability === 'complete_booking_data' && !['completed', 'failed', 'blocked'].includes(t.status)),
+    [tasks]
+  );
+
+  const queuePosition = useMemo(() => {
+    if (!selectedTask || selectedTask.capability !== 'complete_booking_data') return null;
+    const idx = completeBookingTasks.findIndex(t => t.id === selectedTask.id);
+    return idx >= 0 ? { current: idx + 1, total: completeBookingTasks.length } : null;
+  }, [selectedTask, completeBookingTasks]);
+
   const handleAdvanceToNext = useCallback(() => {
-    const currentIdx = tasks.findIndex(t => t.id === selectedTask?.id);
-    // Find next task (any status — pending will be auto-claimed)
-    const remaining = tasks.filter((t, i) => i > currentIdx && t.id !== selectedTask?.id);
+    const currentIdx = completeBookingTasks.findIndex(t => t.id === selectedTask?.id);
+    const remaining = completeBookingTasks.filter((t, i) => i > currentIdx && t.id !== selectedTask?.id);
 
     if (remaining.length > 0) {
       advanceTimeoutRef.current = setTimeout(() => {
@@ -415,54 +444,63 @@ export default function TasksPage() {
         handleSelectCompleteBooking(remaining[0]);
       }, 500);
     } else {
-      // No more tasks
-      setSelectedTask(null);
-      resetEmailState();
+      closeDetail();
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tasks, selectedTask]);
+  }, [completeBookingTasks, selectedTask]);
 
+  // Build unified queue
+  const queueItems = useMemo(
+    () => buildQueueItems(tasks, escalations, pendingCancels, userInfoMap),
+    [tasks, escalations, pendingCancels, userInfoMap]
+  );
+
+  // Filtered items
+  const filteredItems = useMemo(
+    () => filter === 'all' ? queueItems : queueItems.filter(i => i.type === filter),
+    [queueItems, filter]
+  );
+
+  // Count per type
+  const typeCounts = useMemo(() => {
+    const counts: Record<string, number> = { all: queueItems.length };
+    for (const item of queueItems) {
+      counts[item.type] = (counts[item.type] || 0) + 1;
+    }
+    return counts;
+  }, [queueItems]);
+
+  // Determine selected item ID for highlighting
+  const selectedItemId = useMemo(() => {
+    if (selectedTask) return `task-${selectedTask.id}`;
+    if (selectedEscalation) return `esc-${selectedEscalation.id}`;
+    if (selectedHotelOpportunity) return `cancel-${selectedHotelOpportunity.id}`;
+    return null;
+  }, [selectedTask, selectedEscalation, selectedHotelOpportunity]);
+
+  // Fetch all data in parallel
   useEffect(() => {
     async function fetchData() {
       setLoading(true);
       setError(null);
 
       try {
-        const tab = tabs.find(t => t.id === activeTab);
+        const [taskRes, escalationRes, cancelRes] = await Promise.all([
+          api.listTasks({ limit: 100 }),
+          api.listEscalations({ limit: 50 }),
+          api.listHotelOpportunitiesPendingCancel({ limit: 50 }),
+        ]);
 
-        if (tab?.type === 'escalation') {
-          const response = await api.listEscalations({ limit: 50 });
-          setEscalations(sortByPriority(response.escalations));
-          setTasks([]);
-          setHotelOpportunities([]);
-        } else if (tab?.type === 'hotel_opportunity') {
-          let opps: HotelOpportunity[] = [];
-          if (activeTab === 'pending_payment') {
-            const response = await api.listHotelOpportunitiesPendingPayment({ limit: 50 });
-            opps = response.opportunities;
-          } else if (activeTab === 'pending_cancel') {
-            const response = await api.listHotelOpportunitiesPendingCancel({ limit: 50 });
-            opps = response.opportunities;
-          }
-          setHotelOpportunities(opps);
-          setTasks([]);
-          setEscalations([]);
-          // Fetch user info for customer contact details (non-blocking)
-          const oppUserIds = opps.map(o => o.user_id);
-          api.batchGetUserBasicInfo(oppUserIds).then(setUserInfoMap).catch(() => {});
-        } else if (tab?.type === 'task' && tab.capability) {
-          // Don't filter by status - show pending and claimed tasks
-          const response = await api.listTasks({
-            capability: tab.capability,
-            limit: 50
-          });
-          setTasks(sortByPriority(response.tasks));
-          setEscalations([]);
-          setHotelOpportunities([]);
-          // Fetch user info for customer contact details (non-blocking)
-          const userIds = response.tasks.map(t => t.user_id);
-          api.batchGetUserBasicInfo(userIds).then(setUserInfoMap).catch(() => {});
-        }
+        setTasks(taskRes.tasks);
+        setEscalations(escalationRes.escalations);
+        setPendingCancels(cancelRes.opportunities);
+
+        // Batch fetch user info (non-blocking)
+        const allUserIds = [
+          ...taskRes.tasks.map(t => t.user_id),
+          ...cancelRes.opportunities.map(o => o.user_id),
+        ];
+        api.batchGetUserBasicInfo(allUserIds).then(setUserInfoMap).catch(() => {});
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to fetch data');
       } finally {
@@ -471,174 +509,210 @@ export default function TasksPage() {
     }
 
     fetchData();
-  }, [activeTab, refreshKey]);
+  }, [refreshKey]);
 
   return (
-    <div>
+    <div className="flex flex-col h-[calc(100vh-2rem)]">
       {/* Header */}
-      <div className="mb-6">
-        <h1 className="text-2xl font-semibold">Tasks</h1>
-      </div>
-
-      {/* Tabs */}
-      <div className="border-b border-border mb-6">
-        <div className="flex gap-1">
-          {tabs.map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={cn(
-                'px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors',
-                activeTab === tab.id
-                  ? 'border-primary text-foreground'
-                  : 'border-transparent text-muted-foreground hover:text-foreground'
-              )}
-            >
-              {tab.label}
-            </button>
-          ))}
+      <div className="flex items-center justify-between mb-4 shrink-0">
+        <div>
+          <h1 className="text-2xl font-semibold">Tasks</h1>
+          <p className="text-sm text-muted-foreground mt-0.5">
+            {queueItems.length} actionable item{queueItems.length !== 1 ? 's' : ''}
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Link
+            href="/complete-repricings"
+            className="text-xs text-muted-foreground hover:text-foreground transition-colors px-3 py-1.5 rounded-lg border border-border hover:border-foreground/20"
+          >
+            Repricings History
+          </Link>
+          <button
+            onClick={() => setRefreshKey(k => k + 1)}
+            className="text-xs text-muted-foreground hover:text-foreground transition-colors px-3 py-1.5 rounded-lg border border-border hover:border-foreground/20"
+          >
+            Refresh
+          </button>
         </div>
       </div>
 
-      {/* Tab content */}
-      <div className="bg-card border border-border rounded-lg overflow-hidden">
-        {loading ? (
-          <div className="p-6 text-center text-muted-foreground">
-            Loading...
-          </div>
-        ) : error ? (
-          <div className="p-6 text-center">
-            <p className="text-red-400 mb-2">{error}</p>
-            <p className="text-muted-foreground text-sm mb-3">The backend may be under heavy load. Retries are automatic, but you can try again manually.</p>
-            <button
-              onClick={() => setRefreshKey(k => k + 1)}
-              className="px-4 py-2 bg-primary text-primary-foreground rounded-md text-sm hover:bg-primary/90 transition-colors"
-            >
-              Retry
-            </button>
-          </div>
-        ) : activeTab === 'escalations' ? (
-          escalations.length === 0 ? (
-            <div className="p-6 text-center text-muted-foreground">
-              No escalations found
-            </div>
-          ) : (
-            <div>
-              {escalations.map((escalation) => (
-                <EscalationRow
-                  key={escalation.id}
-                  escalation={escalation}
-                  onClick={() => setSelectedEscalation(escalation)}
-                />
-              ))}
-            </div>
-          )
-        ) : activeTab === 'pending_payment' || activeTab === 'pending_cancel' ? (
-          hotelOpportunities.length === 0 ? (
-            <div className="p-6 text-center text-muted-foreground">
-              No {activeTab === 'pending_payment' ? 'pending payments' : 'pending cancellations'} found
-            </div>
-          ) : (
-            <div>
-              {hotelOpportunities.map((opp) => (
-                <HotelOpportunityRow
-                  key={opp.id}
-                  opportunity={opp}
-                  variant={activeTab === 'pending_payment' ? 'payment' : 'cancel'}
-                  onClick={() => setSelectedHotelOpportunity(opp)}
-                  userInfo={userInfoMap.get(opp.user_id)}
-                />
-              ))}
-            </div>
-          )
-        ) : tasks.length === 0 ? (
-          <div className="p-6 text-center text-muted-foreground">
-            No tasks found
-          </div>
-        ) : (
-          <div>
-            {activeTab === 'flight_reprice' && (
-              <Link
-                href="/complete-repricings"
-                className="flex items-center justify-between px-4 py-2 bg-accent/30 border-b border-border text-sm text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors"
-              >
-                <span>View full repricings page with search, sort, and history →</span>
-              </Link>
+      {/* Filter pills */}
+      <div className="flex gap-1.5 mb-4 shrink-0 flex-wrap">
+        {filterOptions.map((opt) => (
+          <button
+            key={opt.id}
+            onClick={() => setFilter(opt.id)}
+            className={cn(
+              'px-3 py-1.5 text-xs font-medium rounded-full transition-colors',
+              filter === opt.id
+                ? 'bg-primary text-primary-foreground'
+                : 'bg-accent/50 text-muted-foreground hover:text-foreground hover:bg-accent'
             )}
-            {tasks.map((task) => (
-              <TaskRow
-                key={task.id}
-                task={task}
-                onClick={() => handleSelectTask(task)}
-                isSelected={selectedTask?.id === task.id || loadingTaskId === task.id}
-                isLoading={loadingTaskId === task.id}
-                userInfo={userInfoMap.get(task.user_id)}
-              />
-            ))}
+          >
+            {opt.label}
+            {(typeCounts[opt.id] ?? 0) > 0 && (
+              <span className={cn(
+                'ml-1.5 px-1.5 py-0.5 text-[10px] rounded-full',
+                filter === opt.id ? 'bg-primary-foreground/20' : 'bg-accent'
+              )}>
+                {typeCounts[opt.id]}
+              </span>
+            )}
+          </button>
+        ))}
+      </div>
+
+      {/* Main content area — list + optional detail panel side by side */}
+      <div className={cn(
+        "flex-1 min-h-0 flex gap-0",
+        hasDetailOpen && !detailExpanded && 'gap-0',
+      )}>
+        {/* Queue list — shrinks when detail is open, hides when expanded */}
+        {!detailExpanded && (
+          <div className={cn(
+            "bg-card border border-border rounded-lg overflow-hidden flex flex-col transition-all",
+            hasDetailOpen ? 'w-2/5 shrink-0' : 'flex-1',
+          )}>
+            <div className="flex-1 overflow-y-auto">
+              {loading ? (
+                <div className="p-6 text-center text-muted-foreground">
+                  Loading...
+                </div>
+              ) : error ? (
+                <div className="p-6 text-center">
+                  <p className="text-red-400 mb-2">{error}</p>
+                  <p className="text-muted-foreground text-sm mb-3">The backend may be under heavy load.</p>
+                  <button
+                    onClick={() => setRefreshKey(k => k + 1)}
+                    className="px-4 py-2 bg-primary text-primary-foreground rounded-md text-sm hover:bg-primary/90 transition-colors"
+                  >
+                    Retry
+                  </button>
+                </div>
+              ) : filteredItems.length === 0 ? (
+                <div className="p-6 text-center text-muted-foreground">
+                  {filter === 'all' ? 'No actionable tasks' : `No ${filterOptions.find(o => o.id === filter)?.label} items`}
+                </div>
+              ) : (
+                filteredItems.map((item) => (
+                  <QueueRow
+                    key={item.id}
+                    item={item}
+                    isSelected={selectedItemId === item.id}
+                    isLoading={loadingItemId === item.id}
+                    onClick={() => handleSelectItem(item)}
+                  />
+                ))
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Detail panel — inline, takes remaining space or full width when expanded */}
+        {hasDetailOpen && (
+          <div className={cn(
+            "bg-card border border-border rounded-lg overflow-hidden flex flex-col",
+            detailExpanded ? 'flex-1' : 'flex-1',
+          )}>
+            {/* Expand/collapse bar */}
+            <div className="flex items-center justify-between px-3 py-1.5 border-b border-border bg-accent/30 shrink-0">
+              <span className="text-xs text-muted-foreground">
+                {selectedTask?.capability === 'flight_reprice' && 'Flight Reprice'}
+                {selectedTask?.capability === 'complete_booking_data' && 'Complete Booking'}
+                {selectedEscalation && 'Escalation'}
+                {selectedHotelOpportunity && 'Pending Cancel'}
+              </span>
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => setDetailExpanded(!detailExpanded)}
+                  className="p-1 text-muted-foreground hover:text-foreground transition-colors"
+                  title={detailExpanded ? 'Collapse' : 'Expand'}
+                >
+                  {detailExpanded ? (
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 9V4.5M9 9H4.5M9 9L3.75 3.75M9 15v4.5M9 15H4.5M9 15l-5.25 5.25M15 9h4.5M15 9V4.5M15 9l5.25-5.25M15 15h4.5M15 15v4.5m0-4.5l5.25 5.25" />
+                    </svg>
+                  ) : (
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15" />
+                    </svg>
+                  )}
+                </button>
+                <button
+                  onClick={closeDetail}
+                  className="p-1 text-muted-foreground hover:text-foreground transition-colors"
+                  title="Close"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+
+            {/* Detail content — rendered inline, not as overlay */}
+            <div className="flex-1 overflow-y-auto">
+              {selectedTask && (
+                <TaskDetail
+                  task={selectedTask}
+                  onClose={closeDetail}
+                  onUpdate={(updated) => {
+                    if (updated.status === 'completed' || updated.status === 'failed' || updated.status === 'blocked') {
+                      setTasks(prev => prev.filter(t => t.id !== updated.id));
+                      if (selectedTask.capability === 'complete_booking_data') {
+                        handleAdvanceToNext();
+                      } else {
+                        closeDetail();
+                      }
+                    } else {
+                      setTasks(prev => prev.map(t => t.id === updated.id ? updated : t));
+                      setSelectedTask(updated);
+                    }
+                  }}
+                  autoClaimedEmail={selectedTask.capability === 'complete_booking_data' ? autoEmail : undefined}
+                  autoClaimedEmailLoading={selectedTask.capability === 'complete_booking_data' ? autoEmailLoading : undefined}
+                  autoClaimedEmailError={selectedTask.capability === 'complete_booking_data' ? autoEmailError : undefined}
+                  onAdvanceToNext={selectedTask.capability === 'complete_booking_data' ? handleAdvanceToNext : undefined}
+                  queuePosition={queuePosition}
+                  defaultFullscreen={selectedTask.capability === 'complete_booking_data'}
+                  renderInline
+                />
+              )}
+
+              {selectedEscalation && (
+                <EscalationDetail
+                  escalation={selectedEscalation}
+                  onClose={closeDetail}
+                  onUpdate={(updated) => {
+                    setEscalations(prev => prev.map(e => e.id === updated.id ? updated : e));
+                    setSelectedEscalation(updated);
+                  }}
+                  renderInline
+                />
+              )}
+
+              {selectedHotelOpportunity && (
+                <HotelOpportunityDetail
+                  opportunity={selectedHotelOpportunity}
+                  variant="cancel"
+                  onClose={closeDetail}
+                  onUpdate={(updated) => {
+                    if (updated.old_booking_status === 'cancelled') {
+                      setPendingCancels(prev => prev.filter(o => o.id !== updated.id));
+                      closeDetail();
+                    } else {
+                      setPendingCancels(prev => prev.map(o => o.id === updated.id ? updated : o));
+                      setSelectedHotelOpportunity(updated);
+                    }
+                  }}
+                  renderInline
+                />
+              )}
+            </div>
           </div>
         )}
       </div>
-
-      {/* Task Detail Panel */}
-      {selectedTask && (
-        <TaskDetail
-          task={selectedTask}
-          onClose={() => { setSelectedTask(null); resetEmailState(); }}
-          onUpdate={(updated) => {
-            // Remove completed/failed/blocked tasks from list, update others
-            if (updated.status === 'completed' || updated.status === 'failed' || updated.status === 'blocked') {
-              setTasks(prev => prev.filter(t => t.id !== updated.id));
-              // Auto-advance for complete_booking queue
-              if (activeTab === 'complete_booking') {
-                handleAdvanceToNext();
-              } else {
-                setSelectedTask(null);
-              }
-            } else {
-              setTasks(prev => prev.map(t => t.id === updated.id ? updated : t));
-              setSelectedTask(updated);
-            }
-          }}
-          // Queue optimization props for complete_booking
-          autoClaimedEmail={activeTab === 'complete_booking' ? autoEmail : undefined}
-          autoClaimedEmailLoading={activeTab === 'complete_booking' ? autoEmailLoading : undefined}
-          autoClaimedEmailError={activeTab === 'complete_booking' ? autoEmailError : undefined}
-          onAdvanceToNext={activeTab === 'complete_booking' ? handleAdvanceToNext : undefined}
-          queuePosition={queuePosition}
-          defaultFullscreen={activeTab === 'complete_booking'}
-        />
-      )}
-
-      {/* Escalation Detail Panel */}
-      {selectedEscalation && (
-        <EscalationDetail
-          escalation={selectedEscalation}
-          onClose={() => setSelectedEscalation(null)}
-          onUpdate={(updated) => {
-            setEscalations(escalations.map(e => e.id === updated.id ? updated : e));
-            setSelectedEscalation(updated);
-          }}
-        />
-      )}
-
-      {/* Hotel Opportunity Detail Panel */}
-      {selectedHotelOpportunity && (
-        <HotelOpportunityDetail
-          opportunity={selectedHotelOpportunity}
-          variant={activeTab === 'pending_payment' ? 'payment' : 'cancel'}
-          onClose={() => setSelectedHotelOpportunity(null)}
-          onUpdate={(updated) => {
-            // Remove from list if cancelled
-            if (updated.old_booking_status === 'cancelled') {
-              setHotelOpportunities(prev => prev.filter(o => o.id !== updated.id));
-              setSelectedHotelOpportunity(null);
-            } else {
-              setHotelOpportunities(prev => prev.map(o => o.id === updated.id ? updated : o));
-              setSelectedHotelOpportunity(updated);
-            }
-          }}
-        />
-      )}
     </div>
   );
 }
