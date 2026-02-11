@@ -434,53 +434,74 @@ export default function HotelRepricingTrackingPage() {
     setSearch('');
   }, [tab]);
 
-  // Fetch data — always pull from all three endpoints and classify on the frontend
+  // Fetch data
   const fetchData = useCallback(async () => {
     setLoading(true);
     setError(null);
 
     try {
-      // Always fetch all three lists so no opportunity falls through the cracks
-      const [paymentRes, cancelRes, completedRes] = await Promise.allSettled([
+      // Always fetch pending-payment + pending-cancel for opp_type tagging + counts
+      const [paymentRes, cancelRes] = await Promise.all([
         api.listHotelOpportunitiesPendingPayment({ limit: 100 }),
         api.listHotelOpportunitiesPendingCancel({ limit: 100 }),
-        api.listHotelOpportunitiesCompleted({ limit: 100 }),
       ]);
 
-      const paymentOpps = paymentRes.status === 'fulfilled' ? paymentRes.value.opportunities : [];
-      const cancelOpps = cancelRes.status === 'fulfilled' ? cancelRes.value.opportunities : [];
-      const completedOpps = completedRes.status === 'fulfilled' ? completedRes.value.opportunities : [];
+      const paymentIds = new Set(paymentRes.opportunities.map(o => o.id));
+      const cancelIds = new Set(cancelRes.opportunities.map(o => o.id));
 
-      // Deduplicate by id — pending-payment and pending-cancel take priority for opp_type tagging
-      const seen = new Set<string>();
-      const allOpps: EnrichedOpportunity[] = [];
+      setCounts(prev => ({
+        ...prev,
+        payment: paymentRes.total,
+        cancel: cancelRes.total,
+      }));
 
-      for (const o of paymentOpps) {
-        if (!seen.has(o.id)) { seen.add(o.id); allOpps.push({ ...o, opp_type: 'pending_payment' }); }
+      // Classify opp_type based on which sub-list the opportunity appears in
+      function classify(o: HotelOpportunity): OpportunityType {
+        if (paymentIds.has(o.id)) return 'pending_payment';
+        if (cancelIds.has(o.id)) return 'pending_cancel';
+        if (TERMINAL_STATUSES.has(o.status)) return 'completed';
+        // Active but not in a specific sub-list (e.g. card_saved + cancelled old booking)
+        return 'pending_cancel';
       }
-      for (const o of cancelOpps) {
-        if (!seen.has(o.id)) { seen.add(o.id); allOpps.push({ ...o, opp_type: 'pending_cancel' }); }
-      }
-      for (const o of completedOpps) {
-        if (!seen.has(o.id)) { seen.add(o.id); allOpps.push({ ...o, opp_type: 'completed' }); }
-      }
 
-      // Update counts
-      setCounts({
-        payment: paymentRes.status === 'fulfilled' ? paymentRes.value.total : 0,
-        cancel: cancelRes.status === 'fulfilled' ? cancelRes.value.total : 0,
-        completed: completedRes.status === 'fulfilled' ? completedRes.value.total : 0,
-      });
-
-      // Filter by tab
       let opps: EnrichedOpportunity[];
+
       if (tab === 'current') {
-        // Show every repricing that is NOT in a terminal state
-        opps = allOpps.filter(o => !TERMINAL_STATUSES.has(o.status));
+        // Use the /active endpoint — returns ALL non-terminal opportunities
+        const activeRes = await api.listHotelOpportunitiesActive({ limit: 100 });
+        opps = activeRes.opportunities.map(o => ({ ...o, opp_type: classify(o) }));
       } else if (tab === 'past') {
-        opps = allOpps.filter(o => TERMINAL_STATUSES.has(o.status));
+        // Completed endpoint (may 404 if not deployed yet)
+        try {
+          const completedRes = await api.listHotelOpportunitiesCompleted({ limit: 100 });
+          opps = completedRes.opportunities.map(o => ({ ...o, opp_type: 'completed' as OpportunityType }));
+          setCounts(prev => ({ ...prev, completed: completedRes.total }));
+        } catch {
+          opps = [];
+        }
       } else {
-        opps = allOpps;
+        // "all" tab — fetch active + completed and merge
+        const [activeRes, completedRes] = await Promise.allSettled([
+          api.listHotelOpportunitiesActive({ limit: 100 }),
+          api.listHotelOpportunitiesCompleted({ limit: 100 }),
+        ]);
+
+        const activeOpps = activeRes.status === 'fulfilled'
+          ? activeRes.value.opportunities.map(o => ({ ...o, opp_type: classify(o) }))
+          : [];
+        const completedOpps = completedRes.status === 'fulfilled'
+          ? completedRes.value.opportunities.map(o => ({ ...o, opp_type: 'completed' as OpportunityType }))
+          : [];
+
+        if (completedRes.status === 'fulfilled') {
+          setCounts(prev => ({ ...prev, completed: completedRes.value.total }));
+        }
+
+        // Deduplicate (active takes priority)
+        const seen = new Set<string>();
+        opps = [];
+        for (const o of activeOpps) { if (!seen.has(o.id)) { seen.add(o.id); opps.push(o); } }
+        for (const o of completedOpps) { if (!seen.has(o.id)) { seen.add(o.id); opps.push(o); } }
       }
 
       setOpportunities(opps);
