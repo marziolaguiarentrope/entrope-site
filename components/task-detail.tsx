@@ -1145,14 +1145,18 @@ const FIELD_CONFIG: Record<string, { label: string; type: 'text' | 'date' | 'mon
   inbound_flight_numbers: { label: 'Return Flight Numbers', type: 'text', placeholder: 'e.g., DL 1547, AA 101' },
 };
 
-// Maps each optional field to the required field it should appear after
+// Maps each optional field to the field it should appear after
 const OPTIONAL_FIELD_POSITION: Record<string, string> = {
   return_date: 'departure_date',
-  outbound_flight_numbers: 'destination_airport',
-  inbound_flight_numbers: 'outbound_flight_numbers',  // chains after outbound
+  inbound_flight_numbers: 'return_date',  // auto-added with return_date
 };
 
-function MissingFieldForm({ fields, fieldValues, currency, onFieldChange, onCurrencyChange, optionalFields, addedOptionalFields, onAddOptionalField, onRemoveOptionalField }: {
+// Extra fields always rendered for a booking type, positioned after a specific field
+const EXTRA_REQUIRED_FIELDS: Record<string, { after: string; bookingType: string }> = {
+  outbound_flight_numbers: { after: 'destination_airport', bookingType: 'flight' },
+};
+
+function MissingFieldForm({ fields, fieldValues, currency, onFieldChange, onCurrencyChange, optionalFields, addedOptionalFields, onAddOptionalField, onRemoveOptionalField, bookingType }: {
   fields: string[];
   fieldValues: Record<string, string>;
   currency: string;
@@ -1162,6 +1166,7 @@ function MissingFieldForm({ fields, fieldValues, currency, onFieldChange, onCurr
   addedOptionalFields?: string[];
   onAddOptionalField?: (field: string) => void;
   onRemoveOptionalField?: (field: string) => void;
+  bookingType?: string;
 }) {
   // Replace cancellation_policy with refundability + free_cancellation_until
   const resolvedFields = fields.flatMap(f =>
@@ -1302,45 +1307,49 @@ function MissingFieldForm({ fields, fieldValues, currency, onFieldChange, onCurr
     return [...(optionalFields || [])].filter(f => OPTIONAL_FIELD_POSITION[f] === anchorField);
   }
 
-  // Build the rendered elements: required field, then any positioned optionals after it
-  const elements: React.ReactNode[] = [];
-  for (const field of uniqueFields) {
-    elements.push(renderField(field, false));
+  // Get extra required fields for this booking type, positioned after a given field
+  function getExtrasAfter(anchorField: string): string[] {
+    return Object.entries(EXTRA_REQUIRED_FIELDS)
+      .filter(([, cfg]) => cfg.after === anchorField && cfg.bookingType === bookingType)
+      .map(([field]) => field);
+  }
 
-    // After this field, render any positioned optional fields (added or available)
+  // Recursively render a field and everything that should follow it
+  function renderFieldAndFollowers(field: string, isOptional: boolean) {
+    elements.push(renderField(field, isOptional));
+
+    // Extra required fields after this one
+    for (const extraField of getExtrasAfter(field)) {
+      elements.push(renderField(extraField, false));
+    }
+
+    // Optional fields after this one
     for (const optField of getOptionalsAfter(field)) {
       if (added.includes(optField)) {
-        elements.push(renderField(optField, true));
-        // If this added field is itself an anchor for another optional, handle chaining
-        for (const chainedOpt of getOptionalsAfter(optField)) {
-          if (added.includes(chainedOpt)) {
-            elements.push(renderField(chainedOpt, true));
-          } else if (available.includes(chainedOpt)) {
-            elements.push(renderAddButton(chainedOpt));
-          }
-        }
+        // Render the added optional and recurse for anything chained after it
+        renderFieldAndFollowers(optField, true);
       } else if (available.includes(optField)) {
         elements.push(renderAddButton(optField));
       }
     }
   }
 
+  // Build the rendered elements
+  const elements: React.ReactNode[] = [];
+  for (const field of uniqueFields) {
+    renderFieldAndFollowers(field, false);
+  }
+
   // Any optional fields whose anchor isn't in the required fields — render at end
-  const unpositioned = available.filter(f => {
-    const anchor = OPTIONAL_FIELD_POSITION[f];
-    // Show at end if anchor is not in uniqueFields and not in added
-    return !uniqueFields.includes(anchor) && !added.includes(anchor);
-  });
+  const allRenderedAnchors = [...uniqueFields, ...added];
   const unpositionedAdded = added.filter(f => {
     const anchor = OPTIONAL_FIELD_POSITION[f];
+    return !allRenderedAnchors.includes(anchor) || !uniqueFields.includes(anchor);
+  }).filter(f => !elements.some(el => el && typeof el === 'object' && 'key' in el && el.key === f));
+  const unpositioned = available.filter(f => {
+    const anchor = OPTIONAL_FIELD_POSITION[f];
     return !uniqueFields.includes(anchor) && !added.includes(anchor);
   });
-  for (const field of unpositionedAdded) {
-    elements.push(renderField(field, true));
-  }
-  for (const field of unpositioned) {
-    elements.push(renderAddButton(field));
-  }
 
   return (
     <div className="space-y-3">
@@ -1427,33 +1436,61 @@ function CompleteBookingDetail({ task, onClose, onUpdate, autoClaimedEmail, auto
     const initial: Record<string, string> = {};
     data.missing_fields.forEach(field => {
       if (field === 'cancellation_policy' || field === 'refundability') {
-        // Replace with structured fields
         initial['refundability'] = '';
         initial['free_cancellation_until'] = '';
       } else {
         initial[field] = '';
       }
     });
+    // Always include outbound flight numbers for flights
+    if (data.booking_type === 'flight') {
+      initial['outbound_flight_numbers'] = '';
+      initial['inbound_flight_numbers'] = '';
+    }
     return initial;
   });
   const [currency, setCurrency] = useState('USD');
 
   // Optional fields that contractors can add beyond what's in missing_fields
-  const optionalFields = data.booking_type === 'flight' ? ['return_date', 'outbound_flight_numbers', 'inbound_flight_numbers'] : [];
-  // Filter out any that are already in missing_fields
+  // outbound_flight_numbers is always required for flights (not optional)
+  // inbound_flight_numbers auto-appears when return_date is added (not separately addable)
+  const optionalFields = data.booking_type === 'flight' ? ['return_date'] : [];
   const availableOptionalFields = optionalFields.filter(f => !data.missing_fields.includes(f));
   const [addedOptionalFields, setAddedOptionalFields] = useState<string[]>([]);
 
   const handleAddOptionalField = useCallback((field: string) => {
-    setAddedOptionalFields(prev => [...prev, field]);
-    setFieldValues(prev => ({ ...prev, [field]: '' }));
+    setAddedOptionalFields(prev => {
+      const next = [...prev, field];
+      // Adding return_date also brings in inbound_flight_numbers
+      if (field === 'return_date' && !next.includes('inbound_flight_numbers')) {
+        next.push('inbound_flight_numbers');
+      }
+      return next;
+    });
+    setFieldValues(prev => {
+      const next = { ...prev, [field]: '' };
+      if (field === 'return_date') {
+        next['inbound_flight_numbers'] = '';
+      }
+      return next;
+    });
   }, []);
 
   const handleRemoveOptionalField = useCallback((field: string) => {
-    setAddedOptionalFields(prev => prev.filter(f => f !== field));
+    setAddedOptionalFields(prev => {
+      let next = prev.filter(f => f !== field);
+      // Removing return_date also removes inbound_flight_numbers
+      if (field === 'return_date') {
+        next = next.filter(f => f !== 'inbound_flight_numbers');
+      }
+      return next;
+    });
     setFieldValues(prev => {
       const next = { ...prev };
       delete next[field];
+      if (field === 'return_date') {
+        next['inbound_flight_numbers'] = '';
+      }
       return next;
     });
   }, []);
@@ -1495,10 +1532,22 @@ function CompleteBookingDetail({ task, onClose, onUpdate, autoClaimedEmail, auto
       }
       return !fieldValues[f]?.trim();
     });
+    // Validate extra required fields for flights
+    if (data.booking_type === 'flight') {
+      if (!fieldValues['outbound_flight_numbers']?.trim()) {
+        emptyFields.push('outbound_flight_numbers');
+      }
+      if (addedOptionalFields.includes('return_date')) {
+        if (!fieldValues['return_date']?.trim()) emptyFields.push('return_date');
+        if (!fieldValues['inbound_flight_numbers']?.trim()) emptyFields.push('inbound_flight_numbers');
+      }
+    }
     if (emptyFields.length > 0) {
-      const labels = emptyFields.map(f =>
-        f === 'cancellation_policy' || f === 'refundability' ? 'refundability' : f
-      );
+      const labels = emptyFields.map(f => {
+        if (f === 'cancellation_policy' || f === 'refundability') return 'refundability';
+        const config = FIELD_CONFIG[f];
+        return config?.label || f;
+      });
       setError(`Missing values for: ${[...new Set(labels)].join(', ')}`);
       return;
     }
@@ -1522,7 +1571,11 @@ function CompleteBookingDetail({ task, onClose, onUpdate, autoClaimedEmail, auto
           responseData[field] = value;
         }
       });
-      // Include any added optional fields with values
+      // Always include outbound flight numbers for flights
+      if (data.booking_type === 'flight' && fieldValues['outbound_flight_numbers']?.trim()) {
+        responseData['outbound_flight_numbers'] = fieldValues['outbound_flight_numbers'].trim();
+      }
+      // Include optional fields
       addedOptionalFields.forEach(field => {
         const value = fieldValues[field]?.trim();
         if (value) {
@@ -1740,6 +1793,7 @@ function CompleteBookingDetail({ task, onClose, onUpdate, autoClaimedEmail, auto
                   addedOptionalFields={addedOptionalFields}
                   onAddOptionalField={handleAddOptionalField}
                   onRemoveOptionalField={handleRemoveOptionalField}
+                  bookingType={data.booking_type}
                 />
                 <div className="flex gap-2 pt-2">
                   <button onClick={handleComplete} disabled={loading}
