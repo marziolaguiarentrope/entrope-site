@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { cn } from '@/lib/utils';
 import { api, Task } from '@/lib/api';
 import { TaskDetail } from '@/components/task-detail';
+import { useAuth } from '@/contexts/auth-context';
 
 function timeAgo(dateString: string): string {
   const now = new Date();
@@ -73,10 +74,12 @@ function TaskRow({ task, onClick }: { task: Task; onClick: () => void }) {
 }
 
 export default function ManualImportPage() {
+  const { user } = useAuth();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
+  const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
     async function fetchData() {
@@ -84,12 +87,14 @@ export default function ManualImportPage() {
       setError(null);
 
       try {
-        const response = await api.listTasks({
-          capability: 'complete_booking_data',
-          status: 'pending',
-          limit: 50
-        });
-        setTasks(sortByPriority(response.tasks));
+        const [pendingRes, claimedRes] = await Promise.all([
+          api.listTasks({ capability: 'complete_booking_data', status: 'pending', limit: 50 }),
+          api.listTasks({ capability: 'complete_booking_data', status: 'claimed', limit: 50 }),
+        ]);
+        // Show all pending + only my claimed tasks
+        const myEmail = user?.email;
+        const myClaimed = claimedRes.tasks.filter(t => t.claimed_by === myEmail);
+        setTasks(sortByPriority([...myClaimed, ...pendingRes.tasks]));
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to fetch data');
       } finally {
@@ -98,15 +103,23 @@ export default function ManualImportPage() {
     }
 
     fetchData();
-  }, []);
+  }, [refreshKey, user?.email]);
 
   return (
     <div>
-      <div className="mb-6">
-        <h1 className="text-2xl font-semibold">Manual Import</h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          Bookings that need manual data completion
-        </p>
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h1 className="text-2xl font-semibold">Manual Import</h1>
+          <p className="text-sm text-muted-foreground mt-1">
+            Bookings that need manual data completion
+          </p>
+        </div>
+        <button
+          onClick={() => setRefreshKey(k => k + 1)}
+          className="text-xs text-muted-foreground hover:text-foreground transition-colors px-3 py-1.5 rounded-lg border border-border hover:border-foreground/20"
+        >
+          Refresh
+        </button>
       </div>
 
       <div className="bg-card border border-border rounded-lg overflow-hidden">
@@ -136,8 +149,13 @@ export default function ManualImportPage() {
           task={selectedTask}
           onClose={() => setSelectedTask(null)}
           onUpdate={(updated) => {
-            setTasks(tasks.map(t => t.id === updated.id ? updated : t));
-            setSelectedTask(updated);
+            if (updated.status === 'completed' || updated.status === 'failed') {
+              setTasks(prev => prev.filter(t => t.id !== updated.id));
+              setSelectedTask(null);
+            } else {
+              setTasks(prev => prev.map(t => t.id === updated.id ? updated : t));
+              setSelectedTask(updated);
+            }
           }}
         />
       )}
