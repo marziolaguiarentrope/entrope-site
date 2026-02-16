@@ -75,7 +75,7 @@ const PIPELINE_STAGES: PipelineStage[] = [
     label: 'Observation',
     description: 'Price check execution and delivery',
     icon: Telescope,
-    issueTypes: ['watch_no_observations', 'email_not_delivered'],
+    issueTypes: ['watch_no_observations', 'email_not_delivered', 'threshold_met_no_opportunity'],
     color: 'text-blue-400 border-blue-500/20',
     bgColor: 'bg-blue-500/15',
     headerColor: 'border-l-blue-500',
@@ -1276,6 +1276,8 @@ function StageSection({
   onRequestContext,
   collapsed,
   onToggleCollapse,
+  expandedIssueTypes,
+  onToggleIssueType,
 }: {
   stage: PipelineStage;
   issues: RepricingPipelineIssue[];
@@ -1287,8 +1289,28 @@ function StageSection({
   onRequestContext: (userId: string) => void;
   collapsed: boolean;
   onToggleCollapse: () => void;
+  expandedIssueTypes: Record<string, boolean>;
+  onToggleIssueType: (key: string) => void;
 }) {
   const Icon = stage.icon;
+
+  // Group issues by issue_type, sorted by count descending
+  const issueGroups = useMemo(() => {
+    const groups = new Map<string, { issueType: string; label: string; issues: { issue: RepricingPipelineIssue; originalIndex: number }[] }>();
+    issues.forEach((issue, idx) => {
+      const existing = groups.get(issue.issue_type);
+      if (existing) {
+        existing.issues.push({ issue, originalIndex: idx });
+      } else {
+        groups.set(issue.issue_type, {
+          issueType: issue.issue_type,
+          label: issue.label,
+          issues: [{ issue, originalIndex: idx }],
+        });
+      }
+    });
+    return Array.from(groups.values()).sort((a, b) => b.issues.length - a.issues.length);
+  }, [issues]);
 
   return (
     <div className="mb-6">
@@ -1321,35 +1343,65 @@ function StageSection({
               <p className="text-xs text-muted-foreground">No issues — this stage is healthy</p>
             </div>
           ) : (
-            <table className="w-full">
-              <thead>
-                <tr className="border-b border-border bg-card/50">
-                  <th className="py-2 px-4 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">Issue</th>
-                  <th className="py-2 px-4 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">User</th>
-                  <th className="py-2 px-4 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">Booking</th>
-                  <th className="py-2 px-4 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">Reason</th>
-                  <th className="py-2 px-4 text-right text-xs font-medium text-muted-foreground uppercase tracking-wider">Created</th>
-                </tr>
-              </thead>
-              <tbody>
-                {issues.map((issue, idx) => {
-                  const key = getRowKey(issue, idx);
-                  return (
-                    <IssueRow
-                      key={key}
-                      issue={issue}
-                      stage={stage}
-                      isExpanded={expandedId === key}
-                      onToggle={() => setExpandedId(expandedId === key ? null : key)}
-                      onActionComplete={onActionComplete}
-                      memberContext={getMemberContext(issue.user_id)}
-                      onRequestContext={onRequestContext}
-                      issueKey={key}
-                    />
-                  );
-                })}
-              </tbody>
-            </table>
+            <div>
+              {issueGroups.map((group) => {
+                const groupKey = `${stage.key}-${group.issueType}`;
+                const isGroupExpanded = expandedIssueTypes[groupKey] ?? false;
+
+                return (
+                  <div key={group.issueType}>
+                    {/* Issue type sub-header */}
+                    <button
+                      onClick={() => onToggleIssueType(groupKey)}
+                      className="w-full flex items-center gap-2 px-4 py-2.5 hover:bg-accent/50 transition-colors border-b border-border"
+                    >
+                      {isGroupExpanded ? (
+                        <ChevronDown className="size-3.5 text-muted-foreground" />
+                      ) : (
+                        <ChevronRight className="size-3.5 text-muted-foreground" />
+                      )}
+                      <span className="text-sm">{group.label}</span>
+                      <span className={cn('text-xs font-semibold px-1.5 py-0.5 rounded-full border', stage.color, stage.bgColor)}>
+                        {group.issues.length}
+                      </span>
+                    </button>
+
+                    {/* Expanded issue rows */}
+                    {isGroupExpanded && (
+                      <table className="w-full">
+                        <thead>
+                          <tr className="border-b border-border bg-card/50">
+                            <th className="py-2 px-4 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">Issue</th>
+                            <th className="py-2 px-4 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">User</th>
+                            <th className="py-2 px-4 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">Booking</th>
+                            <th className="py-2 px-4 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">Reason</th>
+                            <th className="py-2 px-4 text-right text-xs font-medium text-muted-foreground uppercase tracking-wider">Created</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {group.issues.map(({ issue, originalIndex }) => {
+                            const key = getRowKey(issue, originalIndex);
+                            return (
+                              <IssueRow
+                                key={key}
+                                issue={issue}
+                                stage={stage}
+                                isExpanded={expandedId === key}
+                                onToggle={() => setExpandedId(expandedId === key ? null : key)}
+                                onActionComplete={onActionComplete}
+                                memberContext={getMemberContext(issue.user_id)}
+                                onRequestContext={onRequestContext}
+                                issueKey={key}
+                              />
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
           )}
         </div>
       )}
@@ -1373,12 +1425,19 @@ export default function BookingIssuesPage() {
   // Track which stages are collapsed — persists across data refreshes
   const [collapsedStages, setCollapsedStages] = useState<Record<string, boolean>>(() => {
     const initial: Record<string, boolean> = {};
-    PIPELINE_STAGES.forEach(s => { initial[s.key] = true; });
+    PIPELINE_STAGES.forEach(s => { initial[s.key] = false; });
     return initial;
   });
 
   const toggleStageCollapse = useCallback((stageKey: string) => {
     setCollapsedStages(prev => ({ ...prev, [stageKey]: !prev[stageKey] }));
+  }, []);
+
+  // Track which issue type sub-groups have their rows expanded
+  const [expandedIssueTypes, setExpandedIssueTypes] = useState<Record<string, boolean>>({});
+
+  const toggleIssueType = useCallback((key: string) => {
+    setExpandedIssueTypes(prev => ({ ...prev, [key]: !prev[key] }));
   }, []);
 
   // Member context cache — keyed by user_id
@@ -1662,8 +1721,10 @@ export default function BookingIssuesPage() {
           onActionComplete={handleActionComplete}
           getMemberContext={getMemberContext}
           onRequestContext={fetchMemberContext}
-          collapsed={collapsedStages[stage.key] ?? true}
+          collapsed={collapsedStages[stage.key] ?? false}
           onToggleCollapse={() => toggleStageCollapse(stage.key)}
+          expandedIssueTypes={expandedIssueTypes}
+          onToggleIssueType={toggleIssueType}
         />
       ))}
     </div>
