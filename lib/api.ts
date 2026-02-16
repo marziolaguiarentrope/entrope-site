@@ -1215,6 +1215,7 @@ export interface RepricingPipelineIssue {
 export interface RepricingPipelineResponse {
   issue_types: RepricingIssueTypeInfo[];
   issues: RepricingPipelineIssue[];
+  healthy_bookings: number;
 }
 
 // Customer.io types

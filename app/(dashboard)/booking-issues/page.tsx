@@ -1570,6 +1570,18 @@ export default function BookingIssuesPage() {
           <p className="text-muted-foreground mt-1">
             Repricing pipeline health — bookings needing attention
           </p>
+          {!loading && data && (() => {
+            const uniqueIssueBookings = new Set(data.issues.map(i => i.booking_id).filter(Boolean)).size;
+            const total = data.healthy_bookings + uniqueIssueBookings;
+            return total > 0 ? (
+              <p className="text-sm mt-1">
+                <span className="font-semibold text-green-400">{data.healthy_bookings}</span>
+                <span className="text-muted-foreground"> of </span>
+                <span className="font-semibold">{total}</span>
+                <span className="text-muted-foreground"> bookings actively repricing</span>
+              </p>
+            ) : null;
+          })()}
         </div>
         <button
           onClick={handleRefresh}
