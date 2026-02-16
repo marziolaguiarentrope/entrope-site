@@ -1132,7 +1132,6 @@ const FIELD_CONFIG: Record<string, { label: string; type: 'text' | 'date' | 'mon
   check_out_date: { label: 'Check-out Date', type: 'date', placeholder: '' },
   cash_paid: { label: 'Cash Paid', type: 'money', placeholder: '0.00' },
   booking_provider: { label: 'Booking Provider', type: 'text', placeholder: 'e.g., Expedia, Hotels.com' },
-  cancellation_policy: { label: 'Cancellation Policy', type: 'text', placeholder: 'e.g., Free cancellation until...' },
   airline: { label: 'Airline', type: 'text', placeholder: 'e.g., Delta' },
   airline_code: { label: 'Airline Code', type: 'text', placeholder: 'e.g., DL' },
   departure_date: { label: 'Departure Date', type: 'date', placeholder: '' },
@@ -1142,24 +1141,96 @@ const FIELD_CONFIG: Record<string, { label: string; type: 'text' | 'date' | 'mon
   record_locator: { label: 'Record Locator', type: 'text', placeholder: 'e.g., ABC123' },
   origin_airport: { label: 'Origin Airport', type: 'text', placeholder: 'e.g., JFK' },
   destination_airport: { label: 'Destination Airport', type: 'text', placeholder: 'e.g., LAX' },
+  outbound_flight_number: { label: 'Outbound Flight Number', type: 'text', placeholder: 'e.g., DL 2606' },
+  inbound_flight_number: { label: 'Inbound Flight Number', type: 'text', placeholder: 'e.g., DL 1547' },
 };
 
-function MissingFieldForm({ fields, fieldValues, currency, onFieldChange, onCurrencyChange }: {
+function MissingFieldForm({ fields, fieldValues, currency, onFieldChange, onCurrencyChange, optionalFields, addedOptionalFields, onAddOptionalField, onRemoveOptionalField }: {
   fields: string[];
   fieldValues: Record<string, string>;
   currency: string;
   onFieldChange: (field: string, value: string) => void;
   onCurrencyChange: (c: string) => void;
+  optionalFields?: string[];
+  addedOptionalFields?: string[];
+  onAddOptionalField?: (field: string) => void;
+  onRemoveOptionalField?: (field: string) => void;
 }) {
+  // Replace cancellation_policy with refundability + free_cancellation_until
+  const resolvedFields = fields.flatMap(f =>
+    f === 'cancellation_policy' ? ['refundability', 'free_cancellation_until'] :
+    f === 'refundability' ? ['refundability', 'free_cancellation_until'] :
+    [f]
+  );
+  // Deduplicate (in case both cancellation_policy and refundability were listed)
+  const uniqueFields = [...new Set(resolvedFields)];
+  // Append any added optional fields
+  const allFields = [...uniqueFields, ...(addedOptionalFields || [])];
+  // Available optional fields that haven't been added yet
+  const availableOptional = (optionalFields || []).filter(f => !uniqueFields.includes(f) && !(addedOptionalFields || []).includes(f));
+
   return (
     <div className="space-y-3">
-      {fields.map(field => {
+      {allFields.map(field => {
+        const isOptional = (addedOptionalFields || []).includes(field);
+        // Refundability toggle
+        if (field === 'refundability') {
+          return (
+            <div key={field}>
+              <label className="block text-sm font-medium mb-1">Refundable?</label>
+              <div className="flex items-center gap-2">
+                {([
+                  { value: 'refundable', label: 'Yes', activeClass: 'bg-green-500/20 text-green-400 border-green-500/30' },
+                  { value: 'non_refundable', label: 'No', activeClass: 'bg-red-500/20 text-red-400 border-red-500/30' },
+                  { value: 'unknown', label: 'Unknown', activeClass: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30' },
+                ] as const).map(opt => (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    onClick={() => onFieldChange('refundability', opt.value)}
+                    className={cn(
+                      'px-3 py-1.5 text-xs font-medium rounded border transition-colors',
+                      fieldValues['refundability'] === opt.value
+                        ? opt.activeClass
+                        : 'border-border text-muted-foreground hover:text-foreground hover:bg-accent'
+                    )}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          );
+        }
+
+        // Free cancellation date — only show when refundable
+        if (field === 'free_cancellation_until') {
+          if (fieldValues['refundability'] !== 'refundable') return null;
+          return (
+            <div key={field}>
+              <label className="block text-sm font-medium mb-1">Free Cancellation Until</label>
+              <input
+                type="date"
+                value={fieldValues[field] || ''}
+                onChange={(e) => onFieldChange(field, e.target.value)}
+                className="w-full px-3 py-1.5 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary text-sm"
+              />
+            </div>
+          );
+        }
+
         const config = FIELD_CONFIG[field] || { label: field, type: 'text' as const, placeholder: '' };
 
         if (config.type === 'money') {
           return (
             <div key={field}>
-              <label className="block text-sm font-medium mb-1">{config.label}</label>
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-sm font-medium">{config.label}</label>
+                {isOptional && onRemoveOptionalField && (
+                  <button type="button" onClick={() => onRemoveOptionalField(field)}
+                    className="text-xs text-muted-foreground hover:text-red-400 transition-colors">Remove</button>
+                )}
+              </div>
               <div className="flex gap-2">
                 <select
                   value={currency}
@@ -1187,10 +1258,16 @@ function MissingFieldForm({ fields, fieldValues, currency, onFieldChange, onCurr
 
         return (
           <div key={field}>
-            <label className="block text-sm font-medium mb-1">{config.label}</label>
+            <div className="flex items-center justify-between mb-1">
+              <label className="block text-sm font-medium">{config.label}</label>
+              {isOptional && onRemoveOptionalField && (
+                <button type="button" onClick={() => onRemoveOptionalField(field)}
+                  className="text-xs text-muted-foreground hover:text-red-400 transition-colors">Remove</button>
+              )}
+            </div>
             <input
               type={config.type === 'date' ? 'date' : 'text'}
-              value={fieldValues[field]}
+              value={fieldValues[field] || ''}
               onChange={(e) => onFieldChange(field, e.target.value)}
               placeholder={config.placeholder}
               className="w-full px-3 py-1.5 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary text-sm"
@@ -1198,6 +1275,28 @@ function MissingFieldForm({ fields, fieldValues, currency, onFieldChange, onCurr
           </div>
         );
       })}
+
+      {/* Add optional field button */}
+      {availableOptional.length > 0 && onAddOptionalField && (
+        <div className="pt-1">
+          {availableOptional.map(field => {
+            const config = FIELD_CONFIG[field];
+            return (
+              <button
+                key={field}
+                type="button"
+                onClick={() => onAddOptionalField(field)}
+                className="text-xs text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1"
+              >
+                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                </svg>
+                Add {config?.label || field}
+              </button>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -1278,10 +1377,38 @@ function CompleteBookingDetail({ task, onClose, onUpdate, autoClaimedEmail, auto
   // Form state for each missing field
   const [fieldValues, setFieldValues] = useState<Record<string, string>>(() => {
     const initial: Record<string, string> = {};
-    data.missing_fields.forEach(field => { initial[field] = ''; });
+    data.missing_fields.forEach(field => {
+      if (field === 'cancellation_policy' || field === 'refundability') {
+        // Replace with structured fields
+        initial['refundability'] = '';
+        initial['free_cancellation_until'] = '';
+      } else {
+        initial[field] = '';
+      }
+    });
     return initial;
   });
   const [currency, setCurrency] = useState('USD');
+
+  // Optional fields that contractors can add beyond what's in missing_fields
+  const optionalFields = data.booking_type === 'flight' ? ['return_date', 'outbound_flight_number', 'inbound_flight_number'] : [];
+  // Filter out any that are already in missing_fields
+  const availableOptionalFields = optionalFields.filter(f => !data.missing_fields.includes(f));
+  const [addedOptionalFields, setAddedOptionalFields] = useState<string[]>([]);
+
+  const handleAddOptionalField = useCallback((field: string) => {
+    setAddedOptionalFields(prev => [...prev, field]);
+    setFieldValues(prev => ({ ...prev, [field]: '' }));
+  }, []);
+
+  const handleRemoveOptionalField = useCallback((field: string) => {
+    setAddedOptionalFields(prev => prev.filter(f => f !== field));
+    setFieldValues(prev => {
+      const next = { ...prev };
+      delete next[field];
+      return next;
+    });
+  }, []);
 
   const isClaimed = task.status === 'claimed';
   const isPending = task.status === 'pending';
@@ -1313,9 +1440,18 @@ function CompleteBookingDetail({ task, onClose, onUpdate, autoClaimedEmail, auto
   }
 
   const handleComplete = useCallback(async () => {
-    const emptyFields = data.missing_fields.filter(f => !fieldValues[f]?.trim());
+    // Validate — refundability replaces cancellation_policy
+    const emptyFields = data.missing_fields.filter(f => {
+      if (f === 'cancellation_policy' || f === 'refundability') {
+        return !fieldValues['refundability'];
+      }
+      return !fieldValues[f]?.trim();
+    });
     if (emptyFields.length > 0) {
-      setError(`Missing values for: ${emptyFields.join(', ')}`);
+      const labels = emptyFields.map(f =>
+        f === 'cancellation_policy' || f === 'refundability' ? 'refundability' : f
+      );
+      setError(`Missing values for: ${[...new Set(labels)].join(', ')}`);
       return;
     }
     setLoading(true);
@@ -1323,10 +1459,25 @@ function CompleteBookingDetail({ task, onClose, onUpdate, autoClaimedEmail, auto
     try {
       const responseData: Record<string, unknown> = {};
       data.missing_fields.forEach(field => {
+        if (field === 'cancellation_policy' || field === 'refundability') {
+          // Send structured refundability data
+          responseData['refundability'] = fieldValues['refundability'];
+          responseData['free_cancellation_until'] = fieldValues['refundability'] === 'refundable' && fieldValues['free_cancellation_until']
+            ? fieldValues['free_cancellation_until']
+            : null;
+          return;
+        }
         const value = fieldValues[field].trim();
         if (field === 'cash_paid') {
           responseData[field] = { amount: Math.round(parseFloat(value) * 100), currency };
         } else {
+          responseData[field] = value;
+        }
+      });
+      // Include any added optional fields with values
+      addedOptionalFields.forEach(field => {
+        const value = fieldValues[field]?.trim();
+        if (value) {
           responseData[field] = value;
         }
       });
@@ -1338,7 +1489,7 @@ function CompleteBookingDetail({ task, onClose, onUpdate, autoClaimedEmail, auto
     } finally {
       setLoading(false);
     }
-  }, [data.missing_fields, fieldValues, currency, task.id, onUpdate]);
+  }, [data.missing_fields, fieldValues, currency, task.id, onUpdate, addedOptionalFields]);
 
   function getFailReasonText(): string {
     if (failReason === 'other') return failReasonOther.trim();
@@ -1537,6 +1688,10 @@ function CompleteBookingDetail({ task, onClose, onUpdate, autoClaimedEmail, auto
                   currency={currency}
                   onFieldChange={handleFieldChange}
                   onCurrencyChange={setCurrency}
+                  optionalFields={availableOptionalFields}
+                  addedOptionalFields={addedOptionalFields}
+                  onAddOptionalField={handleAddOptionalField}
+                  onRemoveOptionalField={handleRemoveOptionalField}
                 />
                 <div className="flex gap-2 pt-2">
                   <button onClick={handleComplete} disabled={loading}
@@ -1691,6 +1846,10 @@ function CompleteBookingDetail({ task, onClose, onUpdate, autoClaimedEmail, auto
                 currency={currency}
                 onFieldChange={handleFieldChange}
                 onCurrencyChange={setCurrency}
+                optionalFields={availableOptionalFields}
+                addedOptionalFields={addedOptionalFields}
+                onAddOptionalField={handleAddOptionalField}
+                onRemoveOptionalField={handleRemoveOptionalField}
               />
               <div className="flex gap-2 pt-2">
                 <button onClick={handleComplete} disabled={loading}
