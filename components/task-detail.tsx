@@ -1141,8 +1141,15 @@ const FIELD_CONFIG: Record<string, { label: string; type: 'text' | 'date' | 'mon
   record_locator: { label: 'Record Locator', type: 'text', placeholder: 'e.g., ABC123' },
   origin_airport: { label: 'Origin Airport', type: 'text', placeholder: 'e.g., JFK' },
   destination_airport: { label: 'Destination Airport', type: 'text', placeholder: 'e.g., LAX' },
-  outbound_flight_number: { label: 'Outbound Flight Number', type: 'text', placeholder: 'e.g., DL 2606' },
-  inbound_flight_number: { label: 'Inbound Flight Number', type: 'text', placeholder: 'e.g., DL 1547' },
+  outbound_flight_numbers: { label: 'Outbound Flight Numbers', type: 'text', placeholder: 'e.g., DL 2606, AA 100' },
+  inbound_flight_numbers: { label: 'Return Flight Numbers', type: 'text', placeholder: 'e.g., DL 1547, AA 101' },
+};
+
+// Maps each optional field to the required field it should appear after
+const OPTIONAL_FIELD_POSITION: Record<string, string> = {
+  return_date: 'departure_date',
+  outbound_flight_numbers: 'destination_airport',
+  inbound_flight_numbers: 'outbound_flight_numbers',  // chains after outbound
 };
 
 function MissingFieldForm({ fields, fieldValues, currency, onFieldChange, onCurrencyChange, optionalFields, addedOptionalFields, onAddOptionalField, onRemoveOptionalField }: {
@@ -1162,141 +1169,182 @@ function MissingFieldForm({ fields, fieldValues, currency, onFieldChange, onCurr
     f === 'refundability' ? ['refundability', 'free_cancellation_until'] :
     [f]
   );
-  // Deduplicate (in case both cancellation_policy and refundability were listed)
   const uniqueFields = [...new Set(resolvedFields)];
-  // Append any added optional fields
-  const allFields = [...uniqueFields, ...(addedOptionalFields || [])];
-  // Available optional fields that haven't been added yet
-  const availableOptional = (optionalFields || []).filter(f => !uniqueFields.includes(f) && !(addedOptionalFields || []).includes(f));
+  const added = addedOptionalFields || [];
+  const available = (optionalFields || []).filter(f => !uniqueFields.includes(f) && !added.includes(f));
+
+  // Render a single field (required or optional)
+  function renderField(field: string, isOptional: boolean) {
+    // Refundability toggle
+    if (field === 'refundability') {
+      return (
+        <div key={field}>
+          <label className="block text-sm font-medium mb-1">Refundable?</label>
+          <div className="flex items-center gap-2">
+            {([
+              { value: 'refundable', label: 'Yes', activeClass: 'bg-green-500/20 text-green-400 border-green-500/30' },
+              { value: 'non_refundable', label: 'No', activeClass: 'bg-red-500/20 text-red-400 border-red-500/30' },
+              { value: 'unknown', label: 'Unknown', activeClass: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30' },
+            ] as const).map(opt => (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => onFieldChange('refundability', opt.value)}
+                className={cn(
+                  'px-3 py-1.5 text-xs font-medium rounded border transition-colors',
+                  fieldValues['refundability'] === opt.value
+                    ? opt.activeClass
+                    : 'border-border text-muted-foreground hover:text-foreground hover:bg-accent'
+                )}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      );
+    }
+
+    // Free cancellation date — only show when refundable
+    if (field === 'free_cancellation_until') {
+      if (fieldValues['refundability'] !== 'refundable') return null;
+      return (
+        <div key={field}>
+          <label className="block text-sm font-medium mb-1">Free Cancellation Until</label>
+          <input
+            type="date"
+            value={fieldValues[field] || ''}
+            onChange={(e) => onFieldChange(field, e.target.value)}
+            className="w-full px-3 py-1.5 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary text-sm"
+          />
+        </div>
+      );
+    }
+
+    const config = FIELD_CONFIG[field] || { label: field, type: 'text' as const, placeholder: '' };
+
+    if (config.type === 'money') {
+      return (
+        <div key={field}>
+          <div className="flex items-center justify-between mb-1">
+            <label className="block text-sm font-medium">{config.label}</label>
+            {isOptional && onRemoveOptionalField && (
+              <button type="button" onClick={() => onRemoveOptionalField(field)}
+                className="text-xs text-muted-foreground hover:text-red-400 transition-colors">Remove</button>
+            )}
+          </div>
+          <div className="flex gap-2">
+            <select
+              value={currency}
+              onChange={(e) => onCurrencyChange(e.target.value)}
+              className="px-2 py-1.5 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary text-sm"
+            >
+              <option value="USD">USD</option>
+              <option value="EUR">EUR</option>
+              <option value="GBP">GBP</option>
+              <option value="CAD">CAD</option>
+            </select>
+            <input
+              type="number"
+              step="0.01"
+              min="0"
+              value={fieldValues[field]}
+              onChange={(e) => onFieldChange(field, e.target.value)}
+              placeholder={config.placeholder}
+              className="flex-1 px-3 py-1.5 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary font-mono text-sm"
+            />
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div key={field}>
+        <div className="flex items-center justify-between mb-1">
+          <label className="block text-sm font-medium">{config.label}</label>
+          {isOptional && onRemoveOptionalField && (
+            <button type="button" onClick={() => onRemoveOptionalField(field)}
+              className="text-xs text-muted-foreground hover:text-red-400 transition-colors">Remove</button>
+          )}
+        </div>
+        <input
+          type={config.type === 'date' ? 'date' : 'text'}
+          value={fieldValues[field] || ''}
+          onChange={(e) => onFieldChange(field, e.target.value)}
+          placeholder={config.placeholder}
+          className="w-full px-3 py-1.5 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary text-sm"
+        />
+      </div>
+    );
+  }
+
+  // Render an "add" button for an optional field
+  function renderAddButton(field: string) {
+    if (!onAddOptionalField) return null;
+    const config = FIELD_CONFIG[field];
+    return (
+      <button
+        key={`add-${field}`}
+        type="button"
+        onClick={() => onAddOptionalField(field)}
+        className="w-full py-1.5 px-3 border border-dashed border-border rounded-lg text-sm text-muted-foreground hover:text-foreground hover:border-foreground/30 transition-colors flex items-center justify-center gap-1.5"
+      >
+        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+        </svg>
+        Add {config?.label || field}
+      </button>
+    );
+  }
+
+  // Get optional fields that should appear after a given field
+  function getOptionalsAfter(anchorField: string): string[] {
+    return [...(optionalFields || [])].filter(f => OPTIONAL_FIELD_POSITION[f] === anchorField);
+  }
+
+  // Build the rendered elements: required field, then any positioned optionals after it
+  const elements: React.ReactNode[] = [];
+  for (const field of uniqueFields) {
+    elements.push(renderField(field, false));
+
+    // After this field, render any positioned optional fields (added or available)
+    for (const optField of getOptionalsAfter(field)) {
+      if (added.includes(optField)) {
+        elements.push(renderField(optField, true));
+        // If this added field is itself an anchor for another optional, handle chaining
+        for (const chainedOpt of getOptionalsAfter(optField)) {
+          if (added.includes(chainedOpt)) {
+            elements.push(renderField(chainedOpt, true));
+          } else if (available.includes(chainedOpt)) {
+            elements.push(renderAddButton(chainedOpt));
+          }
+        }
+      } else if (available.includes(optField)) {
+        elements.push(renderAddButton(optField));
+      }
+    }
+  }
+
+  // Any optional fields whose anchor isn't in the required fields — render at end
+  const unpositioned = available.filter(f => {
+    const anchor = OPTIONAL_FIELD_POSITION[f];
+    // Show at end if anchor is not in uniqueFields and not in added
+    return !uniqueFields.includes(anchor) && !added.includes(anchor);
+  });
+  const unpositionedAdded = added.filter(f => {
+    const anchor = OPTIONAL_FIELD_POSITION[f];
+    return !uniqueFields.includes(anchor) && !added.includes(anchor);
+  });
+  for (const field of unpositionedAdded) {
+    elements.push(renderField(field, true));
+  }
+  for (const field of unpositioned) {
+    elements.push(renderAddButton(field));
+  }
 
   return (
     <div className="space-y-3">
-      {allFields.map(field => {
-        const isOptional = (addedOptionalFields || []).includes(field);
-        // Refundability toggle
-        if (field === 'refundability') {
-          return (
-            <div key={field}>
-              <label className="block text-sm font-medium mb-1">Refundable?</label>
-              <div className="flex items-center gap-2">
-                {([
-                  { value: 'refundable', label: 'Yes', activeClass: 'bg-green-500/20 text-green-400 border-green-500/30' },
-                  { value: 'non_refundable', label: 'No', activeClass: 'bg-red-500/20 text-red-400 border-red-500/30' },
-                  { value: 'unknown', label: 'Unknown', activeClass: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30' },
-                ] as const).map(opt => (
-                  <button
-                    key={opt.value}
-                    type="button"
-                    onClick={() => onFieldChange('refundability', opt.value)}
-                    className={cn(
-                      'px-3 py-1.5 text-xs font-medium rounded border transition-colors',
-                      fieldValues['refundability'] === opt.value
-                        ? opt.activeClass
-                        : 'border-border text-muted-foreground hover:text-foreground hover:bg-accent'
-                    )}
-                  >
-                    {opt.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-          );
-        }
-
-        // Free cancellation date — only show when refundable
-        if (field === 'free_cancellation_until') {
-          if (fieldValues['refundability'] !== 'refundable') return null;
-          return (
-            <div key={field}>
-              <label className="block text-sm font-medium mb-1">Free Cancellation Until</label>
-              <input
-                type="date"
-                value={fieldValues[field] || ''}
-                onChange={(e) => onFieldChange(field, e.target.value)}
-                className="w-full px-3 py-1.5 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary text-sm"
-              />
-            </div>
-          );
-        }
-
-        const config = FIELD_CONFIG[field] || { label: field, type: 'text' as const, placeholder: '' };
-
-        if (config.type === 'money') {
-          return (
-            <div key={field}>
-              <div className="flex items-center justify-between mb-1">
-                <label className="block text-sm font-medium">{config.label}</label>
-                {isOptional && onRemoveOptionalField && (
-                  <button type="button" onClick={() => onRemoveOptionalField(field)}
-                    className="text-xs text-muted-foreground hover:text-red-400 transition-colors">Remove</button>
-                )}
-              </div>
-              <div className="flex gap-2">
-                <select
-                  value={currency}
-                  onChange={(e) => onCurrencyChange(e.target.value)}
-                  className="px-2 py-1.5 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary text-sm"
-                >
-                  <option value="USD">USD</option>
-                  <option value="EUR">EUR</option>
-                  <option value="GBP">GBP</option>
-                  <option value="CAD">CAD</option>
-                </select>
-                <input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  value={fieldValues[field]}
-                  onChange={(e) => onFieldChange(field, e.target.value)}
-                  placeholder={config.placeholder}
-                  className="flex-1 px-3 py-1.5 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary font-mono text-sm"
-                />
-              </div>
-            </div>
-          );
-        }
-
-        return (
-          <div key={field}>
-            <div className="flex items-center justify-between mb-1">
-              <label className="block text-sm font-medium">{config.label}</label>
-              {isOptional && onRemoveOptionalField && (
-                <button type="button" onClick={() => onRemoveOptionalField(field)}
-                  className="text-xs text-muted-foreground hover:text-red-400 transition-colors">Remove</button>
-              )}
-            </div>
-            <input
-              type={config.type === 'date' ? 'date' : 'text'}
-              value={fieldValues[field] || ''}
-              onChange={(e) => onFieldChange(field, e.target.value)}
-              placeholder={config.placeholder}
-              className="w-full px-3 py-1.5 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary text-sm"
-            />
-          </div>
-        );
-      })}
-
-      {/* Add optional field button */}
-      {availableOptional.length > 0 && onAddOptionalField && (
-        <div className="pt-1">
-          {availableOptional.map(field => {
-            const config = FIELD_CONFIG[field];
-            return (
-              <button
-                key={field}
-                type="button"
-                onClick={() => onAddOptionalField(field)}
-                className="text-xs text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1"
-              >
-                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                </svg>
-                Add {config?.label || field}
-              </button>
-            );
-          })}
-        </div>
-      )}
+      {elements}
     </div>
   );
 }
@@ -1391,7 +1439,7 @@ function CompleteBookingDetail({ task, onClose, onUpdate, autoClaimedEmail, auto
   const [currency, setCurrency] = useState('USD');
 
   // Optional fields that contractors can add beyond what's in missing_fields
-  const optionalFields = data.booking_type === 'flight' ? ['return_date', 'outbound_flight_number', 'inbound_flight_number'] : [];
+  const optionalFields = data.booking_type === 'flight' ? ['return_date', 'outbound_flight_numbers', 'inbound_flight_numbers'] : [];
   // Filter out any that are already in missing_fields
   const availableOptionalFields = optionalFields.filter(f => !data.missing_fields.includes(f));
   const [addedOptionalFields, setAddedOptionalFields] = useState<string[]>([]);
