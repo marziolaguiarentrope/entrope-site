@@ -28,6 +28,7 @@ export interface FlightBookingDetail {
   user_id: string;
   status: string;
   source: string;
+  source_email_id?: string | null;
   booking_channel: string | null;
   booking_provider: string | null;
   airline: string | null;
@@ -59,6 +60,7 @@ export interface HotelBookingDetail {
   user_id: string;
   status: string;
   source: string;
+  source_email_id?: string | null;
   hotel_name: string | null;
   hotel_chain: string | null;
   hotel_id: string | null;
