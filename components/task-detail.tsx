@@ -1528,7 +1528,8 @@ function CompleteBookingDetail({ task, onClose, onUpdate, autoClaimedEmail, auto
     return () => {
       cancelled = true;
     };
-  }, [task.id, needsLegacyHydration, legacyHydrationLoading, legacyHydratedTask, legacyHydrationAttempted]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- guard condition prevents duplicate calls; including state vars causes cleanup to cancel in-flight requests
+  }, [task.id, needsLegacyHydration]);
 
   const hydratedFlightBooking = legacyHydratedTask?.flight_booking || task.flight_booking || null;
   const hydratedHotelBooking = legacyHydratedTask?.hotel_booking || task.hotel_booking || null;
