@@ -487,7 +487,14 @@ function FlightRepriceDetail({ task, onClose, onUpdate, renderInline }: TaskDeta
       const result = await api.getEmailForTask(task.id);
       setEmail(result);
     } catch (err) {
-      setEmailError(err instanceof Error ? err.message : 'Failed to load email');
+      if ((err as { status?: number })?.status === 404) {
+        // Some task types (e.g. confirmation code imports) legitimately have no email.
+        setEmail(null);
+        setEmailError(null);
+        setShowEmail(false);
+      } else {
+        setEmailError(err instanceof Error ? err.message : 'Failed to load email');
+      }
     } finally {
       setEmailLoading(false);
     }
@@ -1476,7 +1483,14 @@ function CompleteBookingDetail({ task, onClose, onUpdate, autoClaimedEmail, auto
       const result = await api.getEmailForTask(task.id);
       setEmail(result);
     } catch (err) {
-      setEmailError(err instanceof Error ? err.message : 'Failed to load email');
+      if ((err as { status?: number })?.status === 404) {
+        // Some task types (e.g. confirmation code imports) legitimately have no email.
+        setEmail(null);
+        setEmailError(null);
+        setShowEmail(false);
+      } else {
+        setEmailError(err instanceof Error ? err.message : 'Failed to load email');
+      }
     } finally {
       setEmailLoading(false);
     }
