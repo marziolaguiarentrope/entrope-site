@@ -1126,21 +1126,30 @@ function KnownBookingData({ task, missingFields, bookingType }: { task: Task; mi
 
 // ── Missing Field Form ────────────────────────────────────
 
-const FIELD_CONFIG: Record<string, { label: string; type: 'text' | 'date' | 'money'; placeholder: string }> = {
+const FIELD_CONFIG: Record<string, { label: string; type: 'text' | 'date' | 'money' | 'select'; placeholder?: string; options?: { value: string; label: string }[] }> = {
   hotel_name: { label: 'Hotel Name', type: 'text', placeholder: 'e.g., Marriott Downtown' },
-  check_in_date: { label: 'Check-in Date', type: 'date', placeholder: '' },
-  check_out_date: { label: 'Check-out Date', type: 'date', placeholder: '' },
+  city: { label: 'City', type: 'text', placeholder: 'e.g., Seattle' },
+  address: { label: 'Hotel Address', type: 'text', placeholder: 'e.g., 123 Main St' },
+  country: { label: 'Country', type: 'text', placeholder: 'e.g., United States' },
+  check_in_date: { label: 'Check-in Date', type: 'date' },
+  check_out_date: { label: 'Check-out Date', type: 'date' },
   cash_paid: { label: 'Cash Paid', type: 'money', placeholder: '0.00' },
   booking_provider: { label: 'Booking Provider', type: 'text', placeholder: 'e.g., Expedia, Hotels.com' },
   airline: { label: 'Airline', type: 'text', placeholder: 'e.g., Delta' },
   airline_code: { label: 'Airline Code', type: 'text', placeholder: 'e.g., DL' },
-  departure_date: { label: 'Departure Date', type: 'date', placeholder: '' },
-  return_date: { label: 'Return Date', type: 'date', placeholder: '' },
+  departure_date: { label: 'Departure Date', type: 'date' },
+  return_date: { label: 'Return Date', type: 'date' },
   pnr: { label: 'PNR / Confirmation', type: 'text', placeholder: 'e.g., ABC123' },
   departure_time: { label: 'Departure Time', type: 'text', placeholder: 'e.g., 2024-03-15T14:00' },
   record_locator: { label: 'Record Locator', type: 'text', placeholder: 'e.g., ABC123' },
   origin_airport: { label: 'Origin Airport', type: 'text', placeholder: 'e.g., JFK' },
   destination_airport: { label: 'Destination Airport', type: 'text', placeholder: 'e.g., LAX' },
+  cabin_class: { label: 'Cabin Class', type: 'select', options: [
+    { value: 'economy', label: 'Economy' },
+    { value: 'premium_economy', label: 'Premium Economy' },
+    { value: 'business', label: 'Business' },
+    { value: 'first', label: 'First' },
+  ]},
 };
 
 // ── Multi-input flight numbers ────────────────────────────
@@ -1270,6 +1279,24 @@ function MissingFieldForm({ fields, fieldValues, currency, onFieldChange, onCurr
     }
 
     const config = FIELD_CONFIG[field] || { label: field, type: 'text' as const, placeholder: '' };
+
+    if (config.type === 'select' && config.options) {
+      return (
+        <div key={field}>
+          <label className="block text-sm font-medium mb-1">{config.label}</label>
+          <select
+            value={fieldValues[field] || ''}
+            onChange={(e) => onFieldChange(field, e.target.value)}
+            className="w-full px-3 py-1.5 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary text-sm"
+          >
+            <option value="">Select...</option>
+            {config.options.map(opt => (
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
+            ))}
+          </select>
+        </div>
+      );
+    }
 
     if (config.type === 'money') {
       return (
