@@ -1153,9 +1153,11 @@ function FlightNumbersInput({ label, values, onChange }: {
   return (
     <div>
       <label className="block text-sm font-medium mb-1">{label}</label>
+      <p className="text-xs text-muted-foreground mb-1.5">One flight per row. Add a row for each connecting flight.</p>
       <div className="space-y-1.5">
         {values.map((v, i) => (
-          <div key={i} className="flex gap-1.5">
+          <div key={i} className="flex gap-1.5 items-center">
+            <span className="text-xs text-muted-foreground w-5 text-right shrink-0">{i + 1}.</span>
             <input
               type="text"
               value={v}
@@ -1164,7 +1166,7 @@ function FlightNumbersInput({ label, values, onChange }: {
                 next[i] = e.target.value;
                 onChange(next);
               }}
-              placeholder={i === 0 ? 'e.g., DL 2606' : 'e.g., AA 100'}
+              placeholder="e.g., DL 2606"
               className="flex-1 px-3 py-1.5 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary text-sm"
             />
             {values.length > 1 && (
@@ -1184,12 +1186,12 @@ function FlightNumbersInput({ label, values, onChange }: {
         <button
           type="button"
           onClick={() => onChange([...values, ''])}
-          className="text-xs text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1 pt-0.5"
+          className="text-xs text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1 pt-0.5 ml-6"
         >
           <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
           </svg>
-          Add flight
+          Add connecting flight
         </button>
       </div>
     </div>
