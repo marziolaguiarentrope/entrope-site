@@ -1141,31 +1141,75 @@ const FIELD_CONFIG: Record<string, { label: string; type: 'text' | 'date' | 'mon
   record_locator: { label: 'Record Locator', type: 'text', placeholder: 'e.g., ABC123' },
   origin_airport: { label: 'Origin Airport', type: 'text', placeholder: 'e.g., JFK' },
   destination_airport: { label: 'Destination Airport', type: 'text', placeholder: 'e.g., LAX' },
-  outbound_flight_numbers: { label: 'Outbound Flight Numbers', type: 'text', placeholder: 'e.g., DL 2606, AA 100' },
-  inbound_flight_numbers: { label: 'Return Flight Numbers', type: 'text', placeholder: 'e.g., DL 1547, AA 101' },
 };
 
-// Maps each optional field to the field it should appear after
-const OPTIONAL_FIELD_POSITION: Record<string, string> = {
-  return_date: 'departure_date',
-  inbound_flight_numbers: 'return_date',  // auto-added with return_date
-};
+// ── Multi-input flight numbers ────────────────────────────
 
-// Extra fields always rendered for a booking type, positioned after a specific field
-const EXTRA_REQUIRED_FIELDS: Record<string, { after: string; bookingType: string }> = {
-  outbound_flight_numbers: { after: 'destination_airport', bookingType: 'flight' },
-};
+function FlightNumbersInput({ label, values, onChange }: {
+  label: string;
+  values: string[];
+  onChange: (values: string[]) => void;
+}) {
+  return (
+    <div>
+      <label className="block text-sm font-medium mb-1">{label}</label>
+      <div className="space-y-1.5">
+        {values.map((v, i) => (
+          <div key={i} className="flex gap-1.5">
+            <input
+              type="text"
+              value={v}
+              onChange={(e) => {
+                const next = [...values];
+                next[i] = e.target.value;
+                onChange(next);
+              }}
+              placeholder={i === 0 ? 'e.g., DL 2606' : 'e.g., AA 100'}
+              className="flex-1 px-3 py-1.5 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary text-sm"
+            />
+            {values.length > 1 && (
+              <button
+                type="button"
+                onClick={() => onChange(values.filter((_, j) => j !== i))}
+                className="px-2 text-muted-foreground hover:text-red-400 transition-colors"
+                title="Remove"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            )}
+          </div>
+        ))}
+        <button
+          type="button"
+          onClick={() => onChange([...values, ''])}
+          className="text-xs text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1 pt-0.5"
+        >
+          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+          </svg>
+          Add flight
+        </button>
+      </div>
+    </div>
+  );
+}
 
-function MissingFieldForm({ fields, fieldValues, currency, onFieldChange, onCurrencyChange, optionalFields, addedOptionalFields, onAddOptionalField, onRemoveOptionalField, bookingType }: {
+// ── MissingFieldForm ──────────────────────────────────────
+
+function MissingFieldForm({ fields, fieldValues, currency, onFieldChange, onCurrencyChange, hasReturnDate, onToggleReturnDate, outboundFlights, inboundFlights, onOutboundFlightsChange, onInboundFlightsChange, bookingType }: {
   fields: string[];
   fieldValues: Record<string, string>;
   currency: string;
   onFieldChange: (field: string, value: string) => void;
   onCurrencyChange: (c: string) => void;
-  optionalFields?: string[];
-  addedOptionalFields?: string[];
-  onAddOptionalField?: (field: string) => void;
-  onRemoveOptionalField?: (field: string) => void;
+  hasReturnDate?: boolean;
+  onToggleReturnDate?: () => void;
+  outboundFlights?: string[];
+  inboundFlights?: string[];
+  onOutboundFlightsChange?: (values: string[]) => void;
+  onInboundFlightsChange?: (values: string[]) => void;
   bookingType?: string;
 }) {
   // Replace cancellation_policy with refundability + free_cancellation_until
@@ -1175,11 +1219,9 @@ function MissingFieldForm({ fields, fieldValues, currency, onFieldChange, onCurr
     [f]
   );
   const uniqueFields = [...new Set(resolvedFields)];
-  const added = addedOptionalFields || [];
-  const available = (optionalFields || []).filter(f => !uniqueFields.includes(f) && !added.includes(f));
+  const isFlight = bookingType === 'flight';
 
-  // Render a single field (required or optional)
-  function renderField(field: string, isOptional: boolean) {
+  function renderField(field: string) {
     // Refundability toggle
     if (field === 'refundability') {
       return (
@@ -1210,7 +1252,6 @@ function MissingFieldForm({ fields, fieldValues, currency, onFieldChange, onCurr
       );
     }
 
-    // Free cancellation date — only show when refundable
     if (field === 'free_cancellation_until') {
       if (fieldValues['refundability'] !== 'refundable') return null;
       return (
@@ -1231,13 +1272,7 @@ function MissingFieldForm({ fields, fieldValues, currency, onFieldChange, onCurr
     if (config.type === 'money') {
       return (
         <div key={field}>
-          <div className="flex items-center justify-between mb-1">
-            <label className="block text-sm font-medium">{config.label}</label>
-            {isOptional && onRemoveOptionalField && (
-              <button type="button" onClick={() => onRemoveOptionalField(field)}
-                className="text-xs text-muted-foreground hover:text-red-400 transition-colors">Remove</button>
-            )}
-          </div>
+          <label className="block text-sm font-medium mb-1">{config.label}</label>
           <div className="flex gap-2">
             <select
               value={currency}
@@ -1265,13 +1300,7 @@ function MissingFieldForm({ fields, fieldValues, currency, onFieldChange, onCurr
 
     return (
       <div key={field}>
-        <div className="flex items-center justify-between mb-1">
-          <label className="block text-sm font-medium">{config.label}</label>
-          {isOptional && onRemoveOptionalField && (
-            <button type="button" onClick={() => onRemoveOptionalField(field)}
-              className="text-xs text-muted-foreground hover:text-red-400 transition-colors">Remove</button>
-          )}
-        </div>
+        <label className="block text-sm font-medium mb-1">{config.label}</label>
         <input
           type={config.type === 'date' ? 'date' : 'text'}
           value={fieldValues[field] || ''}
@@ -1283,73 +1312,67 @@ function MissingFieldForm({ fields, fieldValues, currency, onFieldChange, onCurr
     );
   }
 
-  // Render an "add" button for an optional field
-  function renderAddButton(field: string) {
-    if (!onAddOptionalField) return null;
-    const config = FIELD_CONFIG[field];
-    return (
-      <button
-        key={`add-${field}`}
-        type="button"
-        onClick={() => onAddOptionalField(field)}
-        className="w-full py-1.5 px-3 border border-dashed border-border rounded-lg text-sm text-muted-foreground hover:text-foreground hover:border-foreground/30 transition-colors flex items-center justify-center gap-1.5"
-      >
-        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-        </svg>
-        Add {config?.label || field}
-      </button>
-    );
-  }
+  const elements: React.ReactNode[] = [];
+  for (const field of uniqueFields) {
+    elements.push(renderField(field));
 
-  // Get optional fields that should appear after a given field
-  function getOptionalsAfter(anchorField: string): string[] {
-    return [...(optionalFields || [])].filter(f => OPTIONAL_FIELD_POSITION[f] === anchorField);
-  }
-
-  // Get extra required fields for this booking type, positioned after a given field
-  function getExtrasAfter(anchorField: string): string[] {
-    return Object.entries(EXTRA_REQUIRED_FIELDS)
-      .filter(([, cfg]) => cfg.after === anchorField && cfg.bookingType === bookingType)
-      .map(([field]) => field);
-  }
-
-  // Recursively render a field and everything that should follow it
-  function renderFieldAndFollowers(field: string, isOptional: boolean) {
-    elements.push(renderField(field, isOptional));
-
-    // Extra required fields after this one
-    for (const extraField of getExtrasAfter(field)) {
-      elements.push(renderField(extraField, false));
+    // After departure_date: return date toggle
+    if (field === 'departure_date' && isFlight && onToggleReturnDate) {
+      if (hasReturnDate) {
+        elements.push(
+          <div key="return_date">
+            <div className="flex items-center justify-between mb-1">
+              <label className="block text-sm font-medium">Return Date</label>
+              <button type="button" onClick={onToggleReturnDate}
+                className="text-xs text-muted-foreground hover:text-red-400 transition-colors">Remove</button>
+            </div>
+            <input
+              type="date"
+              value={fieldValues['return_date'] || ''}
+              onChange={(e) => onFieldChange('return_date', e.target.value)}
+              className="w-full px-3 py-1.5 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary text-sm"
+            />
+          </div>
+        );
+      } else {
+        elements.push(
+          <button
+            key="add-return-date"
+            type="button"
+            onClick={onToggleReturnDate}
+            className="w-full py-1.5 px-3 border border-dashed border-border rounded-lg text-sm text-muted-foreground hover:text-foreground hover:border-foreground/30 transition-colors flex items-center justify-center gap-1.5"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+            </svg>
+            Add Return Date
+          </button>
+        );
+      }
     }
 
-    // Optional fields after this one
-    for (const optField of getOptionalsAfter(field)) {
-      if (added.includes(optField)) {
-        // Render the added optional and recurse for anything chained after it
-        renderFieldAndFollowers(optField, true);
-      } else if (available.includes(optField)) {
-        elements.push(renderAddButton(optField));
+    // After destination_airport: outbound flight numbers, then inbound if return trip
+    if (field === 'destination_airport' && isFlight && outboundFlights && onOutboundFlightsChange) {
+      elements.push(
+        <FlightNumbersInput
+          key="outbound_flights"
+          label="Outbound Flight Numbers"
+          values={outboundFlights}
+          onChange={onOutboundFlightsChange}
+        />
+      );
+      if (hasReturnDate && inboundFlights && onInboundFlightsChange) {
+        elements.push(
+          <FlightNumbersInput
+            key="inbound_flights"
+            label="Return Flight Numbers"
+            values={inboundFlights}
+            onChange={onInboundFlightsChange}
+          />
+        );
       }
     }
   }
-
-  // Build the rendered elements
-  const elements: React.ReactNode[] = [];
-  for (const field of uniqueFields) {
-    renderFieldAndFollowers(field, false);
-  }
-
-  // Any optional fields whose anchor isn't in the required fields — render at end
-  const allRenderedAnchors = [...uniqueFields, ...added];
-  const unpositionedAdded = added.filter(f => {
-    const anchor = OPTIONAL_FIELD_POSITION[f];
-    return !allRenderedAnchors.includes(anchor) || !uniqueFields.includes(anchor);
-  }).filter(f => !elements.some(el => el && typeof el === 'object' && 'key' in el && el.key === f));
-  const unpositioned = available.filter(f => {
-    const anchor = OPTIONAL_FIELD_POSITION[f];
-    return !uniqueFields.includes(anchor) && !added.includes(anchor);
-  });
 
   return (
     <div className="space-y-3">
@@ -1442,56 +1465,26 @@ function CompleteBookingDetail({ task, onClose, onUpdate, autoClaimedEmail, auto
         initial[field] = '';
       }
     });
-    // Always include outbound flight numbers for flights
-    if (data.booking_type === 'flight') {
-      initial['outbound_flight_numbers'] = '';
-      initial['inbound_flight_numbers'] = '';
-    }
     return initial;
   });
   const [currency, setCurrency] = useState('USD');
 
-  // Optional fields that contractors can add beyond what's in missing_fields
-  // outbound_flight_numbers is always required for flights (not optional)
-  // inbound_flight_numbers auto-appears when return_date is added (not separately addable)
-  const optionalFields = data.booking_type === 'flight' ? ['return_date'] : [];
-  const availableOptionalFields = optionalFields.filter(f => !data.missing_fields.includes(f));
-  const [addedOptionalFields, setAddedOptionalFields] = useState<string[]>([]);
+  // Flight-specific state
+  const isFlight = data.booking_type === 'flight';
+  const [hasReturnDate, setHasReturnDate] = useState(false);
+  const [outboundFlights, setOutboundFlights] = useState<string[]>(['']);
+  const [inboundFlights, setInboundFlights] = useState<string[]>(['']);
 
-  const handleAddOptionalField = useCallback((field: string) => {
-    setAddedOptionalFields(prev => {
-      const next = [...prev, field];
-      // Adding return_date also brings in inbound_flight_numbers
-      if (field === 'return_date' && !next.includes('inbound_flight_numbers')) {
-        next.push('inbound_flight_numbers');
+  const handleToggleReturnDate = useCallback(() => {
+    setHasReturnDate(prev => {
+      if (prev) {
+        // Removing return date — clear the field and reset inbound flights
+        setFieldValues(fv => { const next = { ...fv }; delete next['return_date']; return next; });
+        setInboundFlights(['']);
+      } else {
+        setFieldValues(fv => ({ ...fv, return_date: '' }));
       }
-      return next;
-    });
-    setFieldValues(prev => {
-      const next = { ...prev, [field]: '' };
-      if (field === 'return_date') {
-        next['inbound_flight_numbers'] = '';
-      }
-      return next;
-    });
-  }, []);
-
-  const handleRemoveOptionalField = useCallback((field: string) => {
-    setAddedOptionalFields(prev => {
-      let next = prev.filter(f => f !== field);
-      // Removing return_date also removes inbound_flight_numbers
-      if (field === 'return_date') {
-        next = next.filter(f => f !== 'inbound_flight_numbers');
-      }
-      return next;
-    });
-    setFieldValues(prev => {
-      const next = { ...prev };
-      delete next[field];
-      if (field === 'return_date') {
-        next['inbound_flight_numbers'] = '';
-      }
-      return next;
+      return !prev;
     });
   }, []);
 
@@ -1526,29 +1519,26 @@ function CompleteBookingDetail({ task, onClose, onUpdate, autoClaimedEmail, auto
 
   const handleComplete = useCallback(async () => {
     // Validate — refundability replaces cancellation_policy
-    const emptyFields = data.missing_fields.filter(f => {
+    const emptyLabels: string[] = [];
+    data.missing_fields.forEach(f => {
       if (f === 'cancellation_policy' || f === 'refundability') {
-        return !fieldValues['refundability'];
+        if (!fieldValues['refundability']) emptyLabels.push('Refundable?');
+      } else if (!fieldValues[f]?.trim()) {
+        emptyLabels.push(FIELD_CONFIG[f]?.label || f);
       }
-      return !fieldValues[f]?.trim();
     });
-    // Validate extra required fields for flights
-    if (data.booking_type === 'flight') {
-      if (!fieldValues['outbound_flight_numbers']?.trim()) {
-        emptyFields.push('outbound_flight_numbers');
-      }
-      if (addedOptionalFields.includes('return_date')) {
-        if (!fieldValues['return_date']?.trim()) emptyFields.push('return_date');
-        if (!fieldValues['inbound_flight_numbers']?.trim()) emptyFields.push('inbound_flight_numbers');
+    // Validate flight-specific fields
+    if (isFlight) {
+      const filledOutbound = outboundFlights.filter(v => v.trim());
+      if (filledOutbound.length === 0) emptyLabels.push('Outbound Flight Numbers');
+      if (hasReturnDate) {
+        if (!fieldValues['return_date']?.trim()) emptyLabels.push('Return Date');
+        const filledInbound = inboundFlights.filter(v => v.trim());
+        if (filledInbound.length === 0) emptyLabels.push('Return Flight Numbers');
       }
     }
-    if (emptyFields.length > 0) {
-      const labels = emptyFields.map(f => {
-        if (f === 'cancellation_policy' || f === 'refundability') return 'refundability';
-        const config = FIELD_CONFIG[f];
-        return config?.label || f;
-      });
-      setError(`Missing values for: ${[...new Set(labels)].join(', ')}`);
+    if (emptyLabels.length > 0) {
+      setError(`Missing values for: ${[...new Set(emptyLabels)].join(', ')}`);
       return;
     }
     setLoading(true);
@@ -1557,7 +1547,6 @@ function CompleteBookingDetail({ task, onClose, onUpdate, autoClaimedEmail, auto
       const responseData: Record<string, unknown> = {};
       data.missing_fields.forEach(field => {
         if (field === 'cancellation_policy' || field === 'refundability') {
-          // Send structured refundability data
           responseData['refundability'] = fieldValues['refundability'];
           responseData['free_cancellation_until'] = fieldValues['refundability'] === 'refundable' && fieldValues['free_cancellation_until']
             ? fieldValues['free_cancellation_until']
@@ -1571,17 +1560,14 @@ function CompleteBookingDetail({ task, onClose, onUpdate, autoClaimedEmail, auto
           responseData[field] = value;
         }
       });
-      // Always include outbound flight numbers for flights
-      if (data.booking_type === 'flight' && fieldValues['outbound_flight_numbers']?.trim()) {
-        responseData['outbound_flight_numbers'] = fieldValues['outbound_flight_numbers'].trim();
-      }
-      // Include optional fields
-      addedOptionalFields.forEach(field => {
-        const value = fieldValues[field]?.trim();
-        if (value) {
-          responseData[field] = value;
+      // Flight-specific data
+      if (isFlight) {
+        responseData['outbound_flight_numbers'] = outboundFlights.filter(v => v.trim()).map(v => v.trim());
+        if (hasReturnDate) {
+          responseData['return_date'] = fieldValues['return_date'];
+          responseData['inbound_flight_numbers'] = inboundFlights.filter(v => v.trim()).map(v => v.trim());
         }
-      });
+      }
       const updated = await api.completeTask(task.id, 'success', responseData);
       setCompletionFlash('success');
       onUpdate(updated);
@@ -1590,7 +1576,7 @@ function CompleteBookingDetail({ task, onClose, onUpdate, autoClaimedEmail, auto
     } finally {
       setLoading(false);
     }
-  }, [data.missing_fields, fieldValues, currency, task.id, onUpdate, addedOptionalFields]);
+  }, [data.missing_fields, fieldValues, currency, task.id, onUpdate, isFlight, outboundFlights, inboundFlights, hasReturnDate]);
 
   function getFailReasonText(): string {
     if (failReason === 'other') return failReasonOther.trim();
@@ -1789,10 +1775,12 @@ function CompleteBookingDetail({ task, onClose, onUpdate, autoClaimedEmail, auto
                   currency={currency}
                   onFieldChange={handleFieldChange}
                   onCurrencyChange={setCurrency}
-                  optionalFields={availableOptionalFields}
-                  addedOptionalFields={addedOptionalFields}
-                  onAddOptionalField={handleAddOptionalField}
-                  onRemoveOptionalField={handleRemoveOptionalField}
+                  hasReturnDate={hasReturnDate}
+                  onToggleReturnDate={handleToggleReturnDate}
+                  outboundFlights={outboundFlights}
+                  inboundFlights={inboundFlights}
+                  onOutboundFlightsChange={setOutboundFlights}
+                  onInboundFlightsChange={setInboundFlights}
                   bookingType={data.booking_type}
                 />
                 <div className="flex gap-2 pt-2">
@@ -1948,10 +1936,12 @@ function CompleteBookingDetail({ task, onClose, onUpdate, autoClaimedEmail, auto
                 currency={currency}
                 onFieldChange={handleFieldChange}
                 onCurrencyChange={setCurrency}
-                optionalFields={availableOptionalFields}
-                addedOptionalFields={addedOptionalFields}
-                onAddOptionalField={handleAddOptionalField}
-                onRemoveOptionalField={handleRemoveOptionalField}
+                hasReturnDate={hasReturnDate}
+                onToggleReturnDate={handleToggleReturnDate}
+                outboundFlights={outboundFlights}
+                inboundFlights={inboundFlights}
+                onOutboundFlightsChange={setOutboundFlights}
+                onInboundFlightsChange={setInboundFlights}
                 bookingType={data.booking_type}
               />
               <div className="flex gap-2 pt-2">
