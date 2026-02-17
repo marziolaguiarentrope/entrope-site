@@ -1952,6 +1952,7 @@ function CompleteBookingDetail({ task, onClose, onUpdate, autoClaimedEmail, auto
                 addedOptionalFields={addedOptionalFields}
                 onAddOptionalField={handleAddOptionalField}
                 onRemoveOptionalField={handleRemoveOptionalField}
+                bookingType={data.booking_type}
               />
               <div className="flex gap-2 pt-2">
                 <button onClick={handleComplete} disabled={loading}
