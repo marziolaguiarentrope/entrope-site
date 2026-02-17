@@ -476,6 +476,7 @@ function FlightRepriceDetail({ task, onClose, onUpdate, renderInline }: TaskDeta
 
   const isClaimed = task.status === 'claimed';
   const isPending = task.status === 'pending';
+  const canShowEmailButton = task.flight_booking?.source_email_id === null ? false : true;
 
   async function handleViewEmail() {
     setShowEmail(true);
@@ -726,7 +727,7 @@ function FlightRepriceDetail({ task, onClose, onUpdate, renderInline }: TaskDeta
           )}
 
           {/* View Original Email - only show when claimed (backend enforces via 403) */}
-          {isClaimed && (
+          {isClaimed && canShowEmailButton && (
             <section>
               {!showEmail ? (
                 <button
@@ -1472,7 +1473,101 @@ function CompleteBookingDetail({ task, onClose, onUpdate, autoClaimedEmail, auto
     missing_fields: string[];
     email_storage_path: string | null;
     email_id?: string;
+    record_locator?: string | null;
+    confirmation_number?: string | null;
+    booking_provider?: string | null;
+    passenger_names?: string[] | null;
+    has_email?: boolean | null;
   };
+
+  const [legacyHydratedTask, setLegacyHydratedTask] = useState<Task | null>(null);
+  const [legacyHydrationLoading, setLegacyHydrationLoading] = useState(false);
+  const [legacyHydrationAttempted, setLegacyHydrationAttempted] = useState(false);
+
+  const requestPassengerNames = useMemo(
+    () => (data.passenger_names || []).map(name => (name || '').trim()).filter(Boolean),
+    [data.passenger_names]
+  );
+  const hasRequestLookupFields = (
+    (data.booking_type === 'flight' ? !!data.record_locator : !!data.confirmation_number)
+    && !!data.booking_provider
+    && requestPassengerNames.length > 0
+    && typeof data.has_email === 'boolean'
+  );
+  const needsLegacyHydration = !hasRequestLookupFields;
+
+  useEffect(() => {
+    setLegacyHydratedTask(null);
+    setLegacyHydrationLoading(false);
+    setLegacyHydrationAttempted(false);
+  }, [task.id]);
+
+  useEffect(() => {
+    if (!needsLegacyHydration || legacyHydrationLoading || legacyHydratedTask || legacyHydrationAttempted) {
+      return;
+    }
+
+    let cancelled = false;
+    setLegacyHydrationLoading(true);
+    api.getTask(task.id)
+      .then((hydratedTask) => {
+        if (!cancelled) {
+          setLegacyHydratedTask(hydratedTask);
+        }
+      })
+      .catch(() => {
+        // Keep legacy behavior if hydration fails.
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLegacyHydrationLoading(false);
+          setLegacyHydrationAttempted(true);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [task.id, needsLegacyHydration, legacyHydrationLoading, legacyHydratedTask, legacyHydrationAttempted]);
+
+  const hydratedFlightBooking = legacyHydratedTask?.flight_booking || task.flight_booking || null;
+  const hydratedHotelBooking = legacyHydratedTask?.hotel_booking || task.hotel_booking || null;
+  const displayTask = useMemo(
+    () => ({
+      ...task,
+      flight_booking: hydratedFlightBooking,
+      hotel_booking: hydratedHotelBooking,
+    }),
+    [task, hydratedFlightBooking, hydratedHotelBooking]
+  );
+  const confirmationCode = (
+    data.booking_type === 'flight'
+      ? (data.record_locator || hydratedFlightBooking?.record_locator || null)
+      : (data.confirmation_number || hydratedHotelBooking?.confirmation_number || null)
+  );
+  const bookingProvider = data.booking_provider || (
+    data.booking_type === 'flight'
+      ? hydratedFlightBooking?.booking_provider
+      : hydratedHotelBooking?.booking_provider
+  ) || null;
+  const passengerNames = (
+    requestPassengerNames.length > 0
+      ? requestPassengerNames
+      : data.booking_type === 'flight'
+        ? (hydratedFlightBooking?.passengers || []).map(p => p.name).filter(Boolean)
+        : (hydratedHotelBooking?.guests || []).map(g => g.name).filter(Boolean)
+  );
+  const hydratedSourceEmailId = (
+    data.booking_type === 'flight'
+      ? hydratedFlightBooking?.source_email_id
+      : hydratedHotelBooking?.source_email_id
+  );
+  const hasEmail = typeof data.has_email === 'boolean'
+    ? data.has_email
+    : hydratedSourceEmailId === undefined
+      ? null
+      : hydratedSourceEmailId !== null;
+  const canShowOriginalEmailButton = hasEmail !== false;
 
   async function handleViewEmail() {
     setShowEmail(true);
@@ -1800,8 +1895,29 @@ function CompleteBookingDetail({ task, onClose, onUpdate, autoClaimedEmail, auto
             )}
           </div>
           <div className="flex-1 overflow-y-auto p-4 space-y-4">
+            <section>
+              <h5 className="text-sm font-medium text-muted-foreground mb-2">Booking Lookup Details</h5>
+              <div className="bg-accent/50 rounded-lg p-3 space-y-1.5">
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">Confirmation</span>
+                  <span className="font-mono text-right truncate max-w-[60%]">{confirmationCode || '—'}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">Provider</span>
+                  <span className="text-right truncate max-w-[60%]">{bookingProvider || '—'}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">{data.booking_type === 'flight' ? 'Passenger(s)' : 'Guest(s)'}</span>
+                  <span className="text-right truncate max-w-[60%]">{passengerNames.length > 0 ? passengerNames.join(', ') : '—'}</span>
+                </div>
+                {legacyHydrationLoading && (
+                  <p className="text-xs text-muted-foreground">Loading missing booking details...</p>
+                )}
+              </div>
+            </section>
+
             {/* Compact known data in fullscreen */}
-            <KnownBookingData task={task} missingFields={data.missing_fields} bookingType={data.booking_type} />
+            <KnownBookingData task={displayTask} missingFields={data.missing_fields} bookingType={data.booking_type} />
 
             {/* Error */}
             {error && (
@@ -1931,11 +2047,32 @@ function CompleteBookingDetail({ task, onClose, onUpdate, autoClaimedEmail, auto
             </div>
           </section>
 
+          <section>
+            <h3 className="text-sm font-medium text-muted-foreground mb-2">Booking Lookup Details</h3>
+            <div className="bg-accent/50 rounded-lg p-3 space-y-1.5">
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">Confirmation</span>
+                <span className="font-mono text-right truncate max-w-[60%]">{confirmationCode || '—'}</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">Provider</span>
+                <span className="text-right truncate max-w-[60%]">{bookingProvider || '—'}</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">{data.booking_type === 'flight' ? 'Passenger(s)' : 'Guest(s)'}</span>
+                <span className="text-right truncate max-w-[60%]">{passengerNames.length > 0 ? passengerNames.join(', ') : '—'}</span>
+              </div>
+              {legacyHydrationLoading && (
+                <p className="text-xs text-muted-foreground">Loading missing booking details...</p>
+              )}
+            </div>
+          </section>
+
           {/* Known Booking Data */}
-          <KnownBookingData task={task} missingFields={data.missing_fields} bookingType={data.booking_type} />
+          <KnownBookingData task={displayTask} missingFields={data.missing_fields} bookingType={data.booking_type} />
 
           {/* View Original Email - only show when claimed */}
-          {isClaimed && (
+          {isClaimed && canShowOriginalEmailButton && (
             <section>
               {!showEmail ? (
                 <button onClick={handleViewEmail}
