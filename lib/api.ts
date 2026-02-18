@@ -327,6 +327,13 @@ class ApiClient {
     return this.fetch<MemberContext>(`/members/${userId}`);
   }
 
+  async updateMemberEmail(userId: string, data: UpdateMemberEmailRequest): Promise<UpdateMemberEmailResponse> {
+    return this.fetch<UpdateMemberEmailResponse>(`/members/${userId}/email`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  }
+
   /** Lightweight user info (email, phone, name) extracted from full member context */
   async getUserBasicInfo(userId: string): Promise<UserBasicInfo> {
     const ctx = await this.getMember(userId);
@@ -1147,6 +1154,21 @@ export interface HotelMatchResponse {
   matches: HotelMatchResult[];
   total_matches: number;
   search_id: string;
+}
+
+// Member email update types
+export interface UpdateMemberEmailRequest {
+  new_email: string;
+  reason: string;
+  operator_email: string;
+}
+
+export interface UpdateMemberEmailResponse {
+  success: boolean;
+  user_id: string;
+  old_email: string | null;
+  new_email: string;
+  updated_at: string;
 }
 
 // Credit adjustment types

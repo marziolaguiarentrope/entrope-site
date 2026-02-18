@@ -20,6 +20,7 @@ import {
   api,
   RawEmail,
   CreditAdjustmentRequest,
+  UpdateMemberEmailRequest,
   IntercomContact,
   IntercomConversation,
   CustomerIoPerson,
@@ -2117,7 +2118,70 @@ export function MemberDetail({
   loading: boolean;
   error: string | null;
 }) {
+  const { user: authUser } = useAuth();
   const openEscalations = context?.escalations.filter(e => e.status === 'open').length || 0;
+
+  // Email edit state
+  const [editingEmail, setEditingEmail] = useState(false);
+  const [newEmail, setNewEmail] = useState(member.email || '');
+  const [emailReason, setEmailReason] = useState('');
+  const [emailSaving, setEmailSaving] = useState(false);
+  const [emailError, setEmailError] = useState<string | null>(null);
+  const [emailConfirm, setEmailConfirm] = useState(false);
+
+  function handleEmailEditStart() {
+    setNewEmail(member.email || '');
+    setEmailReason('');
+    setEmailError(null);
+    setEmailConfirm(false);
+    setEditingEmail(true);
+  }
+
+  function handleEmailEditCancel() {
+    setEditingEmail(false);
+    setEmailError(null);
+    setEmailConfirm(false);
+  }
+
+  async function handleEmailSave() {
+    const trimmed = newEmail.trim().toLowerCase();
+
+    if (!trimmed || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
+      setEmailError('Please enter a valid email address');
+      return;
+    }
+    if (trimmed === (member.email || '').toLowerCase()) {
+      setEmailError('New email is the same as current email');
+      return;
+    }
+    if (!emailReason.trim()) {
+      setEmailError('Please provide a reason for the change');
+      return;
+    }
+
+    if (!emailConfirm) {
+      setEmailConfirm(true);
+      return;
+    }
+
+    setEmailSaving(true);
+    setEmailError(null);
+    try {
+      await api.updateMemberEmail(member.id, {
+        new_email: trimmed,
+        reason: emailReason.trim(),
+        operator_email: authUser?.email || 'unknown',
+      });
+      setEditingEmail(false);
+      setEmailConfirm(false);
+      onRefresh?.();
+    } catch (err) {
+      setEmailError(err instanceof Error ? err.message : 'Failed to update email');
+      setEmailConfirm(false);
+    } finally {
+      setEmailSaving(false);
+    }
+  }
 
   return (
     <div className="w-full">
@@ -2149,7 +2213,72 @@ export function MemberDetail({
       {/* Member header info */}
       <div className="mb-6">
         <h1 className="text-2xl font-semibold">{member.name || 'Unknown'}</h1>
-        <p className="text-muted-foreground">{member.email}</p>
+
+        {!editingEmail ? (
+          <div className="flex items-center gap-2 group">
+            <p className="text-muted-foreground">{member.email || 'No email'}</p>
+            <button
+              onClick={handleEmailEditStart}
+              title="Edit email"
+              className="p-1 rounded hover:bg-accent transition-colors text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+              </svg>
+            </button>
+          </div>
+        ) : (
+          <div className="mt-2 space-y-2 max-w-md">
+            <div>
+              <label className="block text-xs text-muted-foreground mb-1">New Email</label>
+              <input
+                type="email"
+                value={newEmail}
+                onChange={(e) => { setNewEmail(e.target.value); setEmailConfirm(false); }}
+                placeholder="new@example.com"
+                autoFocus
+                className="w-full px-3 py-2 bg-background border border-border rounded focus:outline-none focus:ring-2 focus:ring-primary text-sm"
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-muted-foreground mb-1">Reason for change</label>
+              <input
+                type="text"
+                value={emailReason}
+                onChange={(e) => { setEmailReason(e.target.value); setEmailConfirm(false); }}
+                placeholder="e.g. Member requested change — typo in original signup"
+                className="w-full px-3 py-2 bg-background border border-border rounded focus:outline-none focus:ring-2 focus:ring-primary text-sm"
+              />
+            </div>
+            {emailError && <p className="text-sm text-red-400">{emailError}</p>}
+            {emailConfirm && (
+              <div className="bg-yellow-500/10 border border-yellow-500/30 rounded p-2 text-sm text-yellow-400">
+                Change email from <span className="font-mono">{member.email}</span> to <span className="font-mono">{newEmail.trim().toLowerCase()}</span>? Click Save again to confirm.
+              </div>
+            )}
+            <div className="flex gap-2">
+              <button
+                onClick={handleEmailSave}
+                disabled={emailSaving}
+                className={cn(
+                  'px-3 py-1.5 text-sm rounded transition-colors disabled:opacity-50',
+                  emailConfirm
+                    ? 'bg-yellow-600 text-white hover:bg-yellow-500'
+                    : 'bg-primary text-primary-foreground hover:bg-primary/90'
+                )}
+              >
+                {emailSaving ? 'Saving...' : emailConfirm ? 'Confirm Save' : 'Save'}
+              </button>
+              <button
+                onClick={handleEmailEditCancel}
+                disabled={emailSaving}
+                className="px-3 py-1.5 text-sm border border-border rounded hover:bg-accent transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Loading/Error */}
