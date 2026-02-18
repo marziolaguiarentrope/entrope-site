@@ -1,9 +1,11 @@
 'use client';
 
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { FileText, Plane, Hotel, AlertTriangle, LogOut, ListTodo, Search, Contact, BarChart3, TrendingUp, Wrench } from 'lucide-react';
+import { FileText, Plane, Hotel, AlertTriangle, LogOut, ListTodo, Search, Contact, BarChart3, TrendingUp, Wrench, Mail } from 'lucide-react';
 import { useAuth } from '@/contexts/auth-context';
+import { api } from '@/lib/api';
 import { cn } from '@/lib/utils';
 
 const navItems = [
@@ -16,12 +18,42 @@ const navItems = [
   { href: '/business', icon: TrendingUp, label: 'Business' },
   { href: '/metrics', icon: BarChart3, label: 'Metrics' },
   { href: '/booking-issues', icon: Wrench, label: 'Booking Issues' },
+  { href: '/pending-emails', icon: Mail, label: 'Pending Emails' },
   { href: '/escalations', icon: AlertTriangle, label: 'Escalations' },
 ];
 
 export function Sidebar() {
   const pathname = usePathname();
   const { user, logout } = useAuth();
+  const [pendingCount, setPendingCount] = useState<number | null>(null);
+  const refreshTimer = useRef<NodeJS.Timeout | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const fetchPendingCount = async () => {
+      try {
+        const response = await api.listPendingEmails({
+          status: 'PENDING',
+          limit: 1,
+          offset: 0,
+        });
+        if (!cancelled) setPendingCount(response.total);
+      } catch {
+        if (!cancelled) setPendingCount(null);
+      }
+    };
+
+    fetchPendingCount();
+    refreshTimer.current = setInterval(() => {
+      fetchPendingCount();
+    }, 30_000);
+
+    return () => {
+      cancelled = true;
+      if (refreshTimer.current) clearInterval(refreshTimer.current);
+    };
+  }, []);
 
   return (
     <aside className="fixed left-0 top-0 h-screen w-56 border-r border-border bg-card flex flex-col">
@@ -48,7 +80,12 @@ export function Sidebar() {
               )}
             >
               <Icon className="size-4" />
-              {item.label}
+              <span>{item.label}</span>
+              {item.href === '/pending-emails' && pendingCount !== null && pendingCount > 0 && (
+                <span className="ml-auto px-1.5 py-0.5 text-[10px] font-semibold rounded bg-yellow-500/20 text-yellow-400">
+                  {pendingCount}
+                </span>
+              )}
             </Link>
           );
         })}
