@@ -1158,17 +1158,12 @@ export interface HotelMatchResponse {
 
 // Member email update types
 export interface UpdateMemberEmailRequest {
-  new_email: string;
-  reason: string;
-  operator_email: string;
+  email: string;
 }
 
 export interface UpdateMemberEmailResponse {
-  success: boolean;
-  user_id: string;
-  old_email: string | null;
-  new_email: string;
-  updated_at: string;
+  message: string;
+  email: string;
 }
 
 // Credit adjustment types

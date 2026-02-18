@@ -20,7 +20,6 @@ import {
   api,
   RawEmail,
   CreditAdjustmentRequest,
-  UpdateMemberEmailRequest,
   IntercomContact,
   IntercomConversation,
   CustomerIoPerson,
@@ -2118,20 +2117,17 @@ export function MemberDetail({
   loading: boolean;
   error: string | null;
 }) {
-  const { user: authUser } = useAuth();
   const openEscalations = context?.escalations.filter(e => e.status === 'open').length || 0;
 
   // Email edit state
   const [editingEmail, setEditingEmail] = useState(false);
   const [newEmail, setNewEmail] = useState(member.email || '');
-  const [emailReason, setEmailReason] = useState('');
   const [emailSaving, setEmailSaving] = useState(false);
   const [emailError, setEmailError] = useState<string | null>(null);
   const [emailConfirm, setEmailConfirm] = useState(false);
 
   function handleEmailEditStart() {
     setNewEmail(member.email || '');
-    setEmailReason('');
     setEmailError(null);
     setEmailConfirm(false);
     setEditingEmail(true);
@@ -2154,10 +2150,6 @@ export function MemberDetail({
       setEmailError('New email is the same as current email');
       return;
     }
-    if (!emailReason.trim()) {
-      setEmailError('Please provide a reason for the change');
-      return;
-    }
 
     if (!emailConfirm) {
       setEmailConfirm(true);
@@ -2167,11 +2159,7 @@ export function MemberDetail({
     setEmailSaving(true);
     setEmailError(null);
     try {
-      await api.updateMemberEmail(member.id, {
-        new_email: trimmed,
-        reason: emailReason.trim(),
-        operator_email: authUser?.email || 'unknown',
-      });
+      await api.updateMemberEmail(member.id, { email: trimmed });
       setEditingEmail(false);
       setEmailConfirm(false);
       onRefresh?.();
@@ -2237,16 +2225,6 @@ export function MemberDetail({
                 onChange={(e) => { setNewEmail(e.target.value); setEmailConfirm(false); }}
                 placeholder="new@example.com"
                 autoFocus
-                className="w-full px-3 py-2 bg-background border border-border rounded focus:outline-none focus:ring-2 focus:ring-primary text-sm"
-              />
-            </div>
-            <div>
-              <label className="block text-xs text-muted-foreground mb-1">Reason for change</label>
-              <input
-                type="text"
-                value={emailReason}
-                onChange={(e) => { setEmailReason(e.target.value); setEmailConfirm(false); }}
-                placeholder="e.g. Member requested change — typo in original signup"
                 className="w-full px-3 py-2 bg-background border border-border rounded focus:outline-none focus:ring-2 focus:ring-primary text-sm"
               />
             </div>
