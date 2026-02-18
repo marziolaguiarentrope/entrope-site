@@ -328,8 +328,8 @@ class ApiClient {
   }
 
   async updateMemberEmail(userId: string, data: UpdateMemberEmailRequest): Promise<UpdateMemberEmailResponse> {
-    return this.fetch<UpdateMemberEmailResponse>(`/members/${userId}/email`, {
-      method: 'PATCH',
+    return this.fetch<UpdateMemberEmailResponse>(`/members/${userId}/update-email`, {
+      method: 'POST',
       body: JSON.stringify(data),
     });
   }
