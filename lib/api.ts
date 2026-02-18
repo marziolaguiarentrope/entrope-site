@@ -336,6 +336,13 @@ class ApiClient {
     });
   }
 
+  async updateMemberName(userId: string, data: UpdateMemberNameRequest): Promise<UpdateMemberNameResponse> {
+    return this.fetch<UpdateMemberNameResponse>(`/members/${userId}/update-name`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
   /** Lightweight user info (email, phone, name) extracted from full member context */
   async getUserBasicInfo(userId: string): Promise<UserBasicInfo> {
     const ctx = await this.getMember(userId);
@@ -1166,6 +1173,16 @@ export interface UpdateMemberEmailRequest {
 export interface UpdateMemberEmailResponse {
   message: string;
   email: string;
+}
+
+// Member name update types
+export interface UpdateMemberNameRequest {
+  name: string;
+}
+
+export interface UpdateMemberNameResponse {
+  message: string;
+  name: string;
 }
 
 // Credit adjustment types

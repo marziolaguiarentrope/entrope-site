@@ -2119,6 +2119,58 @@ export function MemberDetail({
 }) {
   const openEscalations = context?.escalations.filter(e => e.status === 'open').length || 0;
 
+  // Name edit state
+  const [editingName, setEditingName] = useState(false);
+  const [newName, setNewName] = useState(member.name || '');
+  const [nameSaving, setNameSaving] = useState(false);
+  const [nameError, setNameError] = useState<string | null>(null);
+  const [nameConfirm, setNameConfirm] = useState(false);
+
+  function handleNameEditStart() {
+    setNewName(member.name || '');
+    setNameError(null);
+    setNameConfirm(false);
+    setEditingName(true);
+  }
+
+  function handleNameEditCancel() {
+    setEditingName(false);
+    setNameError(null);
+    setNameConfirm(false);
+  }
+
+  async function handleNameSave() {
+    const trimmed = newName.trim();
+
+    if (!trimmed) {
+      setNameError('Name cannot be empty');
+      return;
+    }
+    if (trimmed === (member.name || '')) {
+      setNameError('New name is the same as current name');
+      return;
+    }
+
+    if (!nameConfirm) {
+      setNameConfirm(true);
+      return;
+    }
+
+    setNameSaving(true);
+    setNameError(null);
+    try {
+      await api.updateMemberName(member.id, { name: trimmed });
+      setEditingName(false);
+      setNameConfirm(false);
+      onRefresh?.();
+    } catch (err) {
+      setNameError(err instanceof Error ? err.message : 'Failed to update name');
+      setNameConfirm(false);
+    } finally {
+      setNameSaving(false);
+    }
+  }
+
   // Email edit state
   const [editingEmail, setEditingEmail] = useState(false);
   const [newEmail, setNewEmail] = useState(member.email || '');
@@ -2200,7 +2252,59 @@ export function MemberDetail({
 
       {/* Member header info */}
       <div className="mb-6">
-        <h1 className="text-2xl font-semibold">{member.name || 'Unknown'}</h1>
+        {!editingName ? (
+          <div className="flex items-center gap-2">
+            <h1 className="text-2xl font-semibold">{member.name || 'Unknown'}</h1>
+            <button
+              onClick={handleNameEditStart}
+              title="Edit name"
+              className="px-2 py-0.5 text-xs bg-accent hover:bg-accent/80 rounded transition-colors text-muted-foreground hover:text-foreground"
+            >
+              Edit
+            </button>
+          </div>
+        ) : (
+          <div className="space-y-2 max-w-md">
+            <div>
+              <label className="block text-xs text-muted-foreground mb-1">Name</label>
+              <input
+                type="text"
+                value={newName}
+                onChange={(e) => { setNewName(e.target.value); setNameConfirm(false); }}
+                placeholder="Full name"
+                autoFocus
+                className="w-full px-3 py-2 bg-background border border-border rounded focus:outline-none focus:ring-2 focus:ring-primary text-sm"
+              />
+            </div>
+            {nameError && <p className="text-sm text-red-400">{nameError}</p>}
+            {nameConfirm && (
+              <div className="bg-yellow-500/10 border border-yellow-500/30 rounded p-2 text-sm text-yellow-400">
+                Change name from <span className="font-semibold">{member.name || 'Unknown'}</span> to <span className="font-semibold">{newName.trim()}</span>? Click Save again to confirm.
+              </div>
+            )}
+            <div className="flex gap-2">
+              <button
+                onClick={handleNameSave}
+                disabled={nameSaving}
+                className={cn(
+                  'px-3 py-1.5 text-sm rounded transition-colors disabled:opacity-50',
+                  nameConfirm
+                    ? 'bg-yellow-600 text-white hover:bg-yellow-500'
+                    : 'bg-primary text-primary-foreground hover:bg-primary/90'
+                )}
+              >
+                {nameSaving ? 'Saving...' : nameConfirm ? 'Confirm Save' : 'Save'}
+              </button>
+              <button
+                onClick={handleNameEditCancel}
+                disabled={nameSaving}
+                className="px-3 py-1.5 text-sm border border-border rounded hover:bg-accent transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
 
         {!editingEmail ? (
           <div className="flex items-center gap-2">
