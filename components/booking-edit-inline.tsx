@@ -518,10 +518,10 @@ export function BookingEditInline({ booking, travellers, onClose, onSave }: Book
         if (bookingProvider && bookingProvider !== origProvider) patch.booking_provider = bookingProvider;
         if (verificationStatus) patch.verification_status = verificationStatus;
 
-        // Price
-        const newPriceCents = priceAmount ? Math.round(parseFloat(priceAmount) * 100) : null;
-        if (newPriceCents !== null && (newPriceCents !== currentPrice.amount || priceCurrency !== currentPrice.currency)) {
-          patch.customer_price = { amount: newPriceCents, currency: priceCurrency };
+        // Price — send decimal amount as-is; BE converts to minor units per currency
+        const newPrice = priceAmount ? parseFloat(priceAmount) : null;
+        if (newPrice !== null && !isNaN(newPrice) && newPrice > 0) {
+          patch.customer_price = { amount: newPrice, currency: priceCurrency };
         }
 
         // Stay changes
@@ -573,10 +573,10 @@ export function BookingEditInline({ booking, travellers, onClose, onSave }: Book
         if (bookingProvider && bookingProvider !== origProvider) patch.booking_provider = bookingProvider;
         if (verificationStatus) patch.verification_status = verificationStatus;
 
-        // Price
-        const newPriceCents = priceAmount ? Math.round(parseFloat(priceAmount) * 100) : null;
-        if (newPriceCents !== null && (newPriceCents !== currentPrice.amount || priceCurrency !== currentPrice.currency)) {
-          patch.customer_price = { amount: newPriceCents, currency: priceCurrency };
+        // Price — send decimal amount as-is; BE converts to minor units per currency
+        const newPrice = priceAmount ? parseFloat(priceAmount) : null;
+        if (newPrice !== null && !isNaN(newPrice) && newPrice > 0) {
+          patch.customer_price = { amount: newPrice, currency: priceCurrency };
         }
 
         // Itinerary — send full legs array if anything changed
