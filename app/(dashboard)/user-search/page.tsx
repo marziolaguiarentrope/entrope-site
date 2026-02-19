@@ -128,15 +128,25 @@ export default function UserSearchPage() {
     }
   }
 
+  // UUID v4 pattern
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
   async function handleSearch(e: React.FormEvent) {
     e.preventDefault();
-    if (!search.trim()) return;
+    const q = search.trim();
+    if (!q) return;
+
+    // If the query looks like a UUID, navigate directly to the user detail page
+    if (UUID_RE.test(q)) {
+      router.push(`/users-list/${q}`);
+      return;
+    }
 
     setLoading(true);
     setError(null);
 
     try {
-      const result = await api.searchMember(search.trim());
+      const result = await api.searchMember(q);
       if (result) {
         // Deduplicate by id
         setResults((prev) => {
@@ -144,7 +154,7 @@ export default function UserSearchPage() {
           return exists ? prev : [result, ...prev];
         });
       } else {
-        setError(`No user found for "${search.trim()}"`);
+        setError(`No user found for "${q}"`);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Search failed');
@@ -159,7 +169,7 @@ export default function UserSearchPage() {
       <div className="mb-6">
         <h1 className="text-2xl font-semibold">User Search</h1>
         <p className="text-sm text-muted-foreground mt-1">
-          Search by email or phone — results accumulate in the table below
+          Search by email, phone, or user ID — results accumulate in the table below
         </p>
       </div>
 
@@ -170,7 +180,7 @@ export default function UserSearchPage() {
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search by email or phone number..."
+            placeholder="Search by email, phone number, or user ID..."
             className="flex-1 max-w-lg px-4 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
           />
           <button
@@ -203,7 +213,7 @@ export default function UserSearchPage() {
       <div className="bg-card border border-border rounded-lg overflow-hidden">
         {results.length === 0 ? (
           <div className="p-8 text-center text-muted-foreground">
-            Search for users by email or phone number. Results will accumulate here.
+            Search for users by email, phone number, or user ID. Results will accumulate here.
           </div>
         ) : (
           <table className="w-full">
