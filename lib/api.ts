@@ -640,8 +640,9 @@ class ApiClient {
     }
   }
 
-  async getBusinessDashboard(): Promise<BusinessDashboardResponse> {
-    return this.fetch<BusinessDashboardResponse>('/metrics/dashboard');
+  async getBusinessDashboard(days?: number): Promise<BusinessDashboardResponse> {
+    const params = days ? `?days=${days}` : '';
+    return this.fetch<BusinessDashboardResponse>(`/metrics/dashboard${params}`);
   }
 }
 

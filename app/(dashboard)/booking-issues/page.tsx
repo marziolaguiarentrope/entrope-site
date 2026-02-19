@@ -75,7 +75,7 @@ const PIPELINE_STAGES: PipelineStage[] = [
     label: 'Observation',
     description: 'Price check execution and delivery',
     icon: Telescope,
-    issueTypes: ['watch_no_observations', 'email_not_delivered', 'threshold_met_no_opportunity'],
+    issueTypes: ['watch_no_observations', 'email_not_delivered', 'threshold_met_no_opportunity', 'savings_found_awaiting_details'],
     color: 'text-blue-400 border-blue-500/20',
     bgColor: 'bg-blue-500/15',
     headerColor: 'border-l-blue-500',

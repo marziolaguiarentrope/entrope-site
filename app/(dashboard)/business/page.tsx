@@ -199,6 +199,7 @@ export default function BusinessPage() {
   const [error, setError] = useState<string | null>(null);
   const [showExportMenu, setShowExportMenu] = useState(false);
   const [funnelExpanded, setFunnelExpanded] = useState(false);
+  const [funnelDays, setFunnelDays] = useState(7);
   const exportRef = useRef<HTMLDivElement>(null);
 
   // Close export menu on outside click
@@ -223,11 +224,11 @@ export default function BusinessPage() {
     }
   }
 
-  const fetchData = useCallback(async () => {
+  const fetchData = useCallback(async (days: number) => {
     setLoading(true);
     setError(null);
     try {
-      const result = await api.getBusinessDashboard();
+      const result = await api.getBusinessDashboard(days);
       setData(result);
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to load dashboard';
@@ -238,8 +239,8 @@ export default function BusinessPage() {
   }, []);
 
   useEffect(() => {
-    fetchData();
-  }, [fetchData]);
+    fetchData(funnelDays);
+  }, [fetchData, funnelDays]);
 
   return (
     <div>
@@ -272,7 +273,7 @@ export default function BusinessPage() {
             </div>
           )}
           <button
-            onClick={fetchData}
+            onClick={() => fetchData(funnelDays)}
             disabled={loading}
             className="px-3 py-2 text-sm font-medium bg-accent/50 rounded-lg hover:bg-accent disabled:opacity-30 transition-colors flex items-center gap-1.5"
           >
@@ -286,7 +287,7 @@ export default function BusinessPage() {
         <div className="text-center py-16">
           <p className="text-red-400 mb-2">{error}</p>
           <button
-            onClick={fetchData}
+            onClick={() => fetchData(funnelDays)}
             className="mt-3 px-4 py-2 rounded-lg text-sm font-medium text-white bg-emerald-600 hover:bg-emerald-500 transition-colors"
           >
             Retry
@@ -409,8 +410,26 @@ export default function BusinessPage() {
           {/* Onboarding Funnel */}
           {data.onboarding_funnel && (
             <div className="bg-[#0d1117] border border-[#1a1f2e] rounded-lg p-5">
-              <h2 className="text-sm font-semibold text-zinc-300 mb-1">Onboarding Funnel</h2>
-              <p className="text-xs text-zinc-500 mb-4">Last 7 days &mdash; signups through opportunity progression</p>
+              <div className="flex items-center justify-between mb-1">
+                <h2 className="text-sm font-semibold text-zinc-300">Onboarding Funnel</h2>
+                <div className="flex items-center gap-1">
+                  {[1, 7, 30].map((d) => (
+                    <button
+                      key={d}
+                      onClick={() => setFunnelDays(d)}
+                      className={cn(
+                        'px-2 py-0.5 text-xs rounded transition-colors',
+                        funnelDays === d
+                          ? 'bg-emerald-500/20 text-emerald-400 font-medium'
+                          : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800'
+                      )}
+                    >
+                      {d}d
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <p className="text-xs text-zinc-500 mb-4">Last {funnelDays} day{funnelDays !== 1 ? 's' : ''} &mdash; signups through opportunity progression</p>
 
               <div className="space-y-0">
                 <FunnelBar label="Signed up" count={data.onboarding_funnel.summary.signed_up} total={data.onboarding_funnel.summary.signed_up} />
