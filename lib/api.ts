@@ -126,6 +126,48 @@ export interface EscalationListResponse {
   total: number;
 }
 
+export type PendingEmailApprovalStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
+
+export interface PendingEmail {
+  id: string;
+  user_id: string;
+  to_email: string | null;
+  to_name: string | null;
+  subject: string | null;
+  body: string;
+  status: string;
+  approval_status: PendingEmailApprovalStatus;
+  decided_by: string | null;
+  decided_at: string | null;
+  rejection_reason: string | null;
+  loop_record_id: string | null;
+  idempotency_key: string | null;
+  created_at: string;
+  sent_at: string | null;
+  provider_message_id?: string | null;
+  error_message?: string | null;
+}
+
+export interface PendingEmailListResponse {
+  items: PendingEmail[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface PendingEmailBrainReasoning {
+  headline: string | null;
+  intent_summary: string | null;
+  triggered_at: string | null;
+}
+
+export interface PendingEmailDetail {
+  message: PendingEmail;
+  brain_reasoning: PendingEmailBrainReasoning | null;
+  recent_communications: CommunicationView[];
+  member_url: string | null;
+}
+
 class ApiClient {
   private baseUrl: string;
 
@@ -283,6 +325,36 @@ class ApiClient {
     return this.fetch<Escalation>(`/escalations/${escalationId}/resolve`, {
       method: 'POST',
       body: JSON.stringify({ resolution_notes: resolutionNotes }),
+    });
+  }
+
+  // Pending email approvals
+  async listPendingEmails(params?: {
+    status?: PendingEmailApprovalStatus;
+    limit?: number;
+    offset?: number;
+  }): Promise<PendingEmailListResponse> {
+    const searchParams = new URLSearchParams();
+    if (params?.status) searchParams.set('status', params.status);
+    if (params?.limit !== undefined) searchParams.set('limit', params.limit.toString());
+    if (params?.offset !== undefined) searchParams.set('offset', params.offset.toString());
+
+    const query = searchParams.toString();
+    return this.fetch<PendingEmailListResponse>(`/pending-emails${query ? `?${query}` : ''}`);
+  }
+
+  async getPendingEmailDetail(id: string): Promise<PendingEmailDetail> {
+    return this.fetch<PendingEmailDetail>(`/pending-emails/${id}`);
+  }
+
+  async approvePendingEmail(id: string): Promise<PendingEmail> {
+    return this.fetch<PendingEmail>(`/pending-emails/${id}/approve`, { method: 'POST' });
+  }
+
+  async rejectPendingEmail(id: string, reason: string): Promise<PendingEmail> {
+    return this.fetch<PendingEmail>(`/pending-emails/${id}/reject`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
     });
   }
 
