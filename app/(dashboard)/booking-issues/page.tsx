@@ -743,7 +743,7 @@ function IssueActions({
     setActionResult(null);
     try {
       await api.patchFlightBooking(issue.booking_id, {
-        itinerary: { legs: [{ airline: airlineInput.trim().toUpperCase() }] },
+        itinerary: { legs: [{ segments: [{ operating_carrier: airlineInput.trim().toUpperCase() }] }] },
       });
       setActionResult({ type: 'success', message: `Airline set: ${airlineInput.trim().toUpperCase()}` });
       setShowAirlineForm(false);
