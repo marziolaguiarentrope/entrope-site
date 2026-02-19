@@ -343,6 +343,13 @@ class ApiClient {
     });
   }
 
+  /** Permanently delete all member data across all services. This is IRREVERSIBLE. */
+  async deleteMemberData(userId: string): Promise<DeleteMemberDataResponse> {
+    return this.fetch<DeleteMemberDataResponse>(`/members/${userId}/data`, {
+      method: 'DELETE',
+    });
+  }
+
   /** Lightweight user info (email, phone, name) extracted from full member context */
   async getUserBasicInfo(userId: string): Promise<UserBasicInfo> {
     const ctx = await this.getMember(userId);
@@ -1183,6 +1190,20 @@ export interface UpdateMemberNameRequest {
 export interface UpdateMemberNameResponse {
   message: string;
   name: string;
+}
+
+// Member data deletion types
+export interface DeleteMemberDataDetails {
+  travel?: { trips?: number; flight_bookings?: number; [key: string]: number | undefined };
+  payments?: { stripe_customers?: number; [key: string]: number | undefined };
+  communications?: { messages?: number; [key: string]: number | undefined };
+  travel_email?: { gmail_parsing_record?: number; [key: string]: number | undefined };
+  users?: { users?: number; memberships?: number; [key: string]: number | undefined };
+}
+
+export interface DeleteMemberDataResponse {
+  status: string;
+  details: DeleteMemberDataDetails;
 }
 
 // Credit adjustment types

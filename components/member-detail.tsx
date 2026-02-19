@@ -20,6 +20,8 @@ import {
   api,
   RawEmail,
   CreditAdjustmentRequest,
+  DeleteMemberDataResponse,
+  DeleteMemberDataDetails,
   IntercomContact,
   IntercomConversation,
   CustomerIoPerson,
@@ -596,6 +598,236 @@ function CreditAdjustmentModal({
                 className="px-4 py-2 text-sm bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50 transition-colors font-medium"
               >
                 {saving ? 'Submitting...' : 'Confirm & Apply'}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Delete Member Data Modal — triple confirmation (warning → type DELETE → final confirm)
+function DeleteMemberModal({
+  userId,
+  memberName,
+  memberEmail,
+  onClose,
+  onDeleted,
+}: {
+  userId: string;
+  memberName: string;
+  memberEmail: string;
+  onClose: () => void;
+  onDeleted: () => void;
+}) {
+  const [step, setStep] = useState<'warning' | 'type-delete' | 'final-confirm'>('warning');
+  const [deleteInput, setDeleteInput] = useState('');
+  const [deleting, setDeleting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<DeleteMemberDataResponse | null>(null);
+
+  async function handleDelete() {
+    setDeleting(true);
+    setError(null);
+    try {
+      const res = await api.deleteMemberData(userId);
+      setResult(res);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete member data');
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  // Helper to render deletion details
+  function renderDetails(details: DeleteMemberDataDetails) {
+    const sections = [
+      { label: 'Travel', data: details.travel },
+      { label: 'Payments', data: details.payments },
+      { label: 'Communications', data: details.communications },
+      { label: 'Travel Email', data: details.travel_email },
+      { label: 'Users', data: details.users },
+    ];
+    return (
+      <div className="space-y-1 text-sm">
+        {sections.map(({ label, data }) => {
+          if (!data) return null;
+          const entries = Object.entries(data).filter(([, v]) => v !== undefined && v > 0);
+          if (entries.length === 0) return null;
+          return (
+            <div key={label} className="flex justify-between">
+              <span className="text-muted-foreground">{label}</span>
+              <span>{entries.map(([k, v]) => `${v} ${k.replace(/_/g, ' ')}`).join(', ')}</span>
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-[60]">
+      <div className="bg-card border border-border rounded-lg p-5 w-full max-w-md">
+
+        {/* SUCCESS STATE */}
+        {result ? (
+          <>
+            <div className="flex items-center gap-2 mb-4">
+              <svg className="w-6 h-6 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+              </svg>
+              <h3 className="text-lg font-semibold">Member Data Deleted</h3>
+            </div>
+            <p className="text-sm text-muted-foreground mb-3">
+              All data for <span className="font-medium text-foreground">{memberName}</span> has been permanently deleted.
+            </p>
+            <div className="bg-accent/30 rounded p-3 mb-4">
+              {renderDetails(result.details)}
+            </div>
+            <div className="flex justify-end">
+              <button
+                onClick={onDeleted}
+                className="px-4 py-2 text-sm bg-primary text-primary-foreground rounded hover:bg-primary/90 transition-colors"
+              >
+                Done
+              </button>
+            </div>
+          </>
+        ) : step === 'warning' ? (
+          <>
+            {/* STEP 1: Warning */}
+            <div className="flex items-center gap-2 mb-4">
+              <svg className="w-7 h-7 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
+              </svg>
+              <h3 className="text-lg font-semibold text-red-400">Permanently Delete Member Data</h3>
+            </div>
+
+            <div className="bg-red-500/10 border border-red-500/30 rounded p-3 mb-4">
+              <p className="text-sm text-red-300 font-medium mb-2">
+                This will permanently destroy ALL data for this member:
+              </p>
+              <ul className="text-sm text-red-300/80 space-y-1 ml-4 list-disc">
+                <li>Trips, flight bookings, hotel bookings, watches &amp; opportunities</li>
+                <li>Stripe customers, subscriptions &amp; payment events</li>
+                <li>Messages &amp; communications</li>
+                <li>Gmail/Postmark email parsing records</li>
+                <li>User account, memberships, referral codes, credits &amp; Supabase auth</li>
+              </ul>
+            </div>
+
+            <div className="bg-accent/30 rounded p-3 mb-4 text-sm">
+              <div className="flex justify-between mb-1">
+                <span className="text-muted-foreground">Member</span>
+                <span className="font-medium">{memberName}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Email</span>
+                <span className="font-mono text-xs">{memberEmail}</span>
+              </div>
+            </div>
+
+            <p className="text-sm text-red-400 font-medium mb-4">
+              This action is irreversible. There is no undo.
+            </p>
+
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={onClose}
+                className="px-4 py-2 text-sm border border-border rounded hover:bg-accent transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => setStep('type-delete')}
+                className="px-4 py-2 text-sm bg-red-600 text-white rounded hover:bg-red-700 transition-colors font-medium"
+              >
+                I understand, proceed
+              </button>
+            </div>
+          </>
+        ) : step === 'type-delete' ? (
+          <>
+            {/* STEP 2: Type DELETE */}
+            <div className="flex items-center gap-2 mb-4">
+              <svg className="w-6 h-6 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
+              </svg>
+              <h3 className="text-lg font-semibold">Confirm Deletion</h3>
+            </div>
+
+            <p className="text-sm text-muted-foreground mb-4">
+              To confirm you want to permanently delete all data for{' '}
+              <span className="font-medium text-foreground">{memberName}</span>, type{' '}
+              <span className="font-mono font-bold text-red-400">DELETE</span> in the box below.
+            </p>
+
+            <input
+              type="text"
+              value={deleteInput}
+              onChange={(e) => setDeleteInput(e.target.value)}
+              placeholder="Type DELETE here"
+              autoFocus
+              className="w-full px-3 py-2 bg-background border border-border rounded focus:outline-none focus:ring-2 focus:ring-red-500 text-sm font-mono mb-4"
+            />
+
+            {error && <p className="text-sm text-red-400 mb-3">{error}</p>}
+
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => { setStep('warning'); setDeleteInput(''); setError(null); }}
+                className="px-4 py-2 text-sm border border-border rounded hover:bg-accent transition-colors"
+              >
+                Go Back
+              </button>
+              <button
+                onClick={() => setStep('final-confirm')}
+                disabled={deleteInput !== 'DELETE'}
+                className="px-4 py-2 text-sm bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors font-medium"
+              >
+                Delete All Member Data
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
+            {/* STEP 3: Final Confirmation */}
+            <div className="flex items-center gap-2 mb-4">
+              <svg className="w-7 h-7 text-red-500 animate-pulse" fill="currentColor" viewBox="0 0 24 24">
+                <path fillRule="evenodd" d="M9.401 3.003c1.155-2 4.043-2 5.197 0l7.355 12.748c1.154 2-.29 4.5-2.599 4.5H4.645c-2.309 0-3.752-2.5-2.598-4.5L9.4 3.003zM12 8.25a.75.75 0 01.75.75v3.75a.75.75 0 01-1.5 0V9a.75.75 0 01.75-.75zm0 8.25a.75.75 0 100-1.5.75.75 0 000 1.5z" clipRule="evenodd" />
+              </svg>
+              <h3 className="text-lg font-bold text-red-400">Final Confirmation</h3>
+            </div>
+
+            <div className="bg-red-500/10 border-2 border-red-500/50 rounded p-4 mb-4">
+              <p className="text-sm text-red-300">
+                You are about to <span className="font-bold">permanently delete all data</span> for:
+              </p>
+              <p className="text-base font-semibold text-foreground mt-2">
+                {memberName} ({memberEmail})
+              </p>
+              <p className="text-sm text-red-400 font-bold mt-2">
+                This cannot be undone. All services will be purged.
+              </p>
+            </div>
+
+            {error && <p className="text-sm text-red-400 mb-3">{error}</p>}
+
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => { setStep('type-delete'); setError(null); }}
+                disabled={deleting}
+                className="px-4 py-2 text-sm border border-border rounded hover:bg-accent transition-colors"
+              >
+                Go Back
+              </button>
+              <button
+                onClick={handleDelete}
+                disabled={deleting}
+                className="px-4 py-2 text-sm bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50 transition-colors font-bold ring-2 ring-red-500/50"
+              >
+                {deleting ? 'Deleting...' : 'Confirm Permanent Deletion'}
               </button>
             </div>
           </>
@@ -2178,6 +2410,9 @@ export function MemberDetail({
   const [emailError, setEmailError] = useState<string | null>(null);
   const [emailConfirm, setEmailConfirm] = useState(false);
 
+  // Delete member state
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+
   function handleEmailEditStart() {
     setNewEmail(member.email || '');
     setEmailError(null);
@@ -2604,11 +2839,39 @@ export function MemberDetail({
                   ]}
                 </Section>
               )}
+
+              {/* Danger Zone */}
+              <div className="mt-8 border border-red-500/30 rounded-lg bg-red-500/5 p-4">
+                <h3 className="text-base font-semibold text-red-400 mb-1">Danger Zone</h3>
+                <p className="text-sm text-muted-foreground mb-3">
+                  Permanently delete all data for this member across all services. This action is irreversible.
+                </p>
+                <button
+                  onClick={() => setShowDeleteModal(true)}
+                  className="px-4 py-2 text-sm bg-red-600 text-white rounded hover:bg-red-700 transition-colors font-medium"
+                >
+                  Delete Member Data
+                </button>
+              </div>
             </>
           )}
         </div>
 
       </div>
+
+      {/* Delete Member Modal */}
+      {showDeleteModal && (
+        <DeleteMemberModal
+          userId={member.id}
+          memberName={member.name || 'Unknown'}
+          memberEmail={member.email || 'No email'}
+          onClose={() => setShowDeleteModal(false)}
+          onDeleted={() => {
+            setShowDeleteModal(false);
+            onClose();
+          }}
+        />
+      )}
     </div>
   );
 }
