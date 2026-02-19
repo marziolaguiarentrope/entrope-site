@@ -1151,20 +1151,39 @@ export interface FlightTicketPatch {
   baggage?: BaggageAllowancePatch;
 }
 
+export interface FlightSegmentPatch {
+  origin?: string;
+  destination?: string;
+  departure_date?: string;
+  departure_time?: string;
+  arrival_date?: string;
+  arrival_time?: string;
+  operating_carrier?: string;
+  marketing_carrier?: string;
+  flight_number?: string;
+  marketing_flight_number?: string;
+  cabin?: string;
+  fare_family?: string;
+  booking_class?: string;
+  duration_minutes?: number;
+  aircraft?: string;
+  origin_terminal?: string;
+  destination_terminal?: string;
+  origin_city?: string;
+  destination_city?: string;
+}
+
+export interface FlightLegPatch {
+  direction?: 'outbound' | 'return';
+  segments?: FlightSegmentPatch[];
+}
+
 export interface FlightBookingPatchRequest {
   confirmation_code?: string;
   booking_provider?: string;
   verification_status?: VerificationStatus;
   itinerary?: {
-    legs?: Array<{
-      departure_airport?: string;
-      arrival_airport?: string;
-      departure_time?: string;
-      arrival_time?: string;
-      airline?: string;
-      flight_number?: string;
-      cabin_class?: string;
-    }>;
+    legs?: FlightLegPatch[];
   };
   tickets?: FlightTicketPatch[];
   customer_price?: {

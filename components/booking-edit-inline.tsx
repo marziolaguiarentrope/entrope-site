@@ -582,17 +582,19 @@ export function BookingEditInline({ booking, travellers, onClose, onSave }: Book
         // Itinerary — send full legs array if anything changed
         if (legs.length > 0) {
           patch.itinerary = {
-            legs: legs.flatMap((leg) =>
-              leg.segments.map((s) => ({
-                departure_airport: s.origin || undefined,
-                arrival_airport: s.destination || undefined,
-                departure_time: s.departure ? s.departure + ':00' : undefined,
-                arrival_time: s.arrival ? s.arrival + ':00' : undefined,
-                airline: s.airline || undefined,
+            legs: legs.map((leg) => ({
+              segments: leg.segments.map((s) => ({
+                origin: s.origin || undefined,
+                destination: s.destination || undefined,
+                departure_time: s.departure ? s.departure.slice(11, 16) + ':00' : undefined,
+                departure_date: s.departure ? s.departure.slice(0, 10) : undefined,
+                arrival_time: s.arrival ? s.arrival.slice(11, 16) + ':00' : undefined,
+                arrival_date: s.arrival ? s.arrival.slice(0, 10) : undefined,
+                operating_carrier: s.airline || undefined,
                 flight_number: s.flight_number || undefined,
-                cabin_class: s.cabin || undefined,
-              }))
-            ),
+                cabin: s.cabin || undefined,
+              })),
+            })),
           };
         }
 
