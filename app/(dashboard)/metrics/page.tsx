@@ -142,7 +142,13 @@ function getPartsInTz(date: Date, tz: Timezone): { year: number; month: number; 
   };
 }
 
-function getDateRange(range: DateRange): { start: Date | null; end: Date } {
+/**
+ * Compute the effective date range in UTC.
+ * Uses UTC consistently to avoid local-timezone drift in bucket generation.
+ * The timezone parameter adjusts the "now" anchor so that date boundaries
+ * align with the user's selected display timezone.
+ */
+function getDateRange(range: DateRange, tz: Timezone = 'UTC'): { start: Date | null; end: Date } {
   const now = new Date();
 
   if (range === '24h') {
@@ -150,38 +156,50 @@ function getDateRange(range: DateRange): { start: Date | null; end: Date } {
     return { start, end: now };
   }
 
-  const end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59);
+  // Compute "end of today" in the selected timezone, expressed as a UTC Date.
+  // This ensures "Last 7 days" in Pacific means the last 7 Pacific days, not UTC days.
+  const offsetMs = getUtcOffsetHours(now, tz) * 60 * 60 * 1000;
+  const nowInTz = new Date(now.getTime() + offsetMs);
+  // End of today in tz = start of tomorrow in tz - 1ms, converted back to UTC
+  const endOfTodayInTzUtc = new Date(
+    Date.UTC(nowInTz.getUTCFullYear(), nowInTz.getUTCMonth(), nowInTz.getUTCDate(), 23, 59, 59) - offsetMs
+  );
+  // But don't go past actual "now" — if it's 3pm Pacific, don't claim data through 11:59pm Pacific
+  const end = new Date(Math.min(now.getTime(), endOfTodayInTzUtc.getTime() + 1000));
+
+  // Start of day in tz for the computed start date
+  function startOfDayInTz(d: Date): Date {
+    const dInTz = new Date(d.getTime() + offsetMs);
+    return new Date(
+      Date.UTC(dInTz.getUTCFullYear(), dInTz.getUTCMonth(), dInTz.getUTCDate(), 0, 0, 0) - offsetMs
+    );
+  }
 
   switch (range) {
     case '7d': {
-      const s = new Date(end);
-      s.setDate(s.getDate() - 7);
-      s.setHours(0, 0, 0, 0);
-      return { start: s, end };
+      const s = new Date(now);
+      s.setUTCDate(s.getUTCDate() - 7);
+      return { start: startOfDayInTz(s), end };
     }
     case '30d': {
-      const s = new Date(end);
-      s.setDate(s.getDate() - 30);
-      s.setHours(0, 0, 0, 0);
-      return { start: s, end };
+      const s = new Date(now);
+      s.setUTCDate(s.getUTCDate() - 30);
+      return { start: startOfDayInTz(s), end };
     }
     case '90d': {
-      const s = new Date(end);
-      s.setDate(s.getDate() - 90);
-      s.setHours(0, 0, 0, 0);
-      return { start: s, end };
+      const s = new Date(now);
+      s.setUTCDate(s.getUTCDate() - 90);
+      return { start: startOfDayInTz(s), end };
     }
     case '6m': {
-      const s = new Date(end);
-      s.setMonth(s.getMonth() - 6);
-      s.setHours(0, 0, 0, 0);
-      return { start: s, end };
+      const s = new Date(now);
+      s.setUTCMonth(s.getUTCMonth() - 6);
+      return { start: startOfDayInTz(s), end };
     }
     case '1y': {
-      const s = new Date(end);
-      s.setFullYear(s.getFullYear() - 1);
-      s.setHours(0, 0, 0, 0);
-      return { start: s, end };
+      const s = new Date(now);
+      s.setUTCFullYear(s.getUTCFullYear() - 1);
+      return { start: startOfDayInTz(s), end };
     }
     case 'all':
     case 'custom':
@@ -297,11 +315,13 @@ function formatBucketLabel(key: string, granularity: Granularity): string {
 /**
  * Generate time bucket boundaries for the count-based fetch strategy.
  * Returns an array of { key, start: ISO, end: ISO } for each bucket in the range.
+ * Now timezone-aware: bucket keys are computed in the selected timezone.
  */
 function generateBuckets(
   rangeStart: Date,
   rangeEnd: Date,
   gran: Granularity,
+  tz: Timezone = 'UTC',
 ): { key: string; start: Date; end: Date }[] {
   const buckets: { key: string; start: Date; end: Date }[] = [];
   const cursor = new Date(rangeStart);
@@ -326,7 +346,7 @@ function generateBuckets(
         break;
     }
     const bucketEnd = new Date(Math.min(cursor.getTime(), rangeEnd.getTime()));
-    const key = getBucketKey(bucketStart, gran, 'UTC');
+    const key = getBucketKey(bucketStart, gran, tz);
     buckets.push({ key, start: bucketStart, end: bucketEnd });
     iter++;
   }
@@ -509,6 +529,8 @@ export default function MetricsPage() {
   const [chartData, setChartData] = useState<ChartDataPoint[]>([]);
   const [baselineCount, setBaselineCount] = useState(0); // users before range start
   const [totalInRange, setTotalInRange] = useState(0);
+  const [lifetimeTotal, setLifetimeTotal] = useState(0); // total users ever
+  const [lifetimeFirstDate, setLifetimeFirstDate] = useState<string | null>(null); // earliest user creation
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [fetchProgress, setFetchProgress] = useState<string | null>(null);
@@ -539,7 +561,7 @@ export default function MetricsPage() {
 
     // Sync customStart/customEnd so the calendar always reflects the active range
     if (range !== 'custom') {
-      const { start, end } = getDateRange(range);
+      const { start, end } = getDateRange(range, timezone);
       if (start) {
         setCustomStart(toDateKey(start));
       } else {
@@ -547,18 +569,20 @@ export default function MetricsPage() {
       }
       setCustomEnd(toDateKey(end));
     }
-  }, [toDateKey]);
+  }, [toDateKey, timezone]);
 
-  // Compute effective date range
+  // Compute effective date range (now timezone-aware)
   const effectiveDates = useMemo(() => {
     if (dateRange === 'custom') {
+      // For custom ranges, interpret the dates in the selected timezone
+      const offsetMs = getUtcOffsetHours(new Date(), timezone) * 60 * 60 * 1000;
       return {
-        start: customStart ? new Date(customStart + 'T00:00:00') : null,
-        end: customEnd ? new Date(customEnd + 'T23:59:59') : new Date(),
+        start: customStart ? new Date(new Date(customStart + 'T00:00:00Z').getTime() - offsetMs) : null,
+        end: customEnd ? new Date(new Date(customEnd + 'T23:59:59Z').getTime() - offsetMs) : new Date(),
       };
     }
-    return getDateRange(dateRange);
-  }, [dateRange, customStart, customEnd]);
+    return getDateRange(dateRange, timezone);
+  }, [dateRange, customStart, customEnd, timezone]);
 
   // Fetch counts per bucket in parallel (no user record download)
   const fetchData = useCallback(async () => {
@@ -570,8 +594,8 @@ export default function MetricsPage() {
       const rangeStart = effectiveDates.start ?? new Date('2020-01-01T00:00:00Z');
       const rangeEnd = effectiveDates.end;
 
-      // Generate time buckets for the range
-      const buckets = generateBuckets(rangeStart, rangeEnd, granularity);
+      // Generate time buckets for the range — now timezone-aware
+      const buckets = generateBuckets(rangeStart, rangeEnd, granularity, timezone);
 
       if (buckets.length === 0) {
         setChartData([]);
@@ -584,7 +608,7 @@ export default function MetricsPage() {
 
       setFetchProgress(`Fetching counts for ${buckets.length} periods...`);
 
-      // Fire all bucket count requests in parallel + baseline count
+      // Fire all bucket count requests in parallel + baseline count + lifetime total
       // Use limit=1 to only get total_count without downloading user data
       const BATCH_SIZE = 15; // limit concurrent requests to avoid hammering the API
       const bucketCounts: number[] = new Array(buckets.length).fill(0);
@@ -594,6 +618,15 @@ export default function MetricsPage() {
       const baselinePromise = effectiveDates.start
         ? api.listUsers({ limit: 1, created_before: effectiveDates.start.toISOString() }).then(r => r.total_count).catch(() => 0)
         : Promise.resolve(0);
+
+      // Fetch lifetime total (all users ever) — fires in parallel with bucket fetches
+      const lifetimePromise = api.listUsers({ limit: 1 }).then(r => r.total_count).catch(() => 0);
+
+      // Fetch the earliest user to compute lifetime duration
+      // Use created_after with a very early date to get the first user chronologically
+      const firstUserPromise = api.listUsers({ limit: 1, created_after: '2020-01-01T00:00:00Z' })
+        .then(r => r.members?.[0]?.created_at ?? null)
+        .catch(() => null);
 
       // Process buckets in batches
       for (let i = 0; i < buckets.length; i += BATCH_SIZE) {
@@ -614,6 +647,8 @@ export default function MetricsPage() {
       }
 
       baseline = await baselinePromise;
+      const lifetime = await lifetimePromise;
+      const firstDate = await firstUserPromise;
 
       // Build chart data points
       let cumulative = baseline;
@@ -632,6 +667,8 @@ export default function MetricsPage() {
       setChartData(points);
       setBaselineCount(baseline);
       setTotalInRange(total);
+      setLifetimeTotal(lifetime);
+      setLifetimeFirstDate(firstDate);
       setFetchProgress(null);
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to load metrics';
@@ -641,13 +678,13 @@ export default function MetricsPage() {
       setLoading(false);
       setFetchProgress(null);
     }
-  }, [effectiveDates, granularity]);
+  }, [effectiveDates, granularity, timezone]);
 
   useEffect(() => {
     fetchData();
   }, [fetchData]);
 
-  // Stats
+  // Stats — now includes lifetime context
   const stats = useMemo(() => {
     const periods = chartData.length || 1;
     const avgPerPeriod = totalInRange / periods;
@@ -664,13 +701,39 @@ export default function MetricsPage() {
 
     const granLabel = granularity === 'hourly' ? 'hour' : granularity === 'daily' ? 'day' : granularity === 'weekly' ? 'week' : 'month';
 
+    // Compute range duration in days for daily rate
+    let rangeDays = 1;
+    if (effectiveDates.start) {
+      rangeDays = Math.max(1, (effectiveDates.end.getTime() - effectiveDates.start.getTime()) / (1000 * 60 * 60 * 24));
+    }
+    const dailyRateInRange = totalInRange / rangeDays;
+
+    // Lifetime daily average
+    let lifetimeDailyAvg: number | null = null;
+    let lifetimeDays: number | null = null;
+    if (lifetimeFirstDate && lifetimeTotal > 0) {
+      const firstDate = new Date(lifetimeFirstDate);
+      lifetimeDays = Math.max(1, (new Date().getTime() - firstDate.getTime()) / (1000 * 60 * 60 * 24));
+      lifetimeDailyAvg = lifetimeTotal / lifetimeDays;
+    }
+
+    // How current range compares to lifetime average
+    let vsLifetime: number | null = null;
+    if (lifetimeDailyAvg && lifetimeDailyAvg > 0) {
+      vsLifetime = ((dailyRateInRange - lifetimeDailyAvg) / lifetimeDailyAvg) * 100;
+    }
+
     return {
       totalInRange,
       avgPerPeriod: avgPerPeriod.toFixed(1),
       granLabel,
       growthRate,
+      dailyRateInRange,
+      lifetimeDailyAvg,
+      lifetimeDays,
+      vsLifetime,
     };
-  }, [totalInRange, chartData, granularity]);
+  }, [totalInRange, chartData, granularity, effectiveDates, lifetimeTotal, lifetimeFirstDate]);
 
   // Export handlers
   function handleExport(type: 'chart_csv' | 'json') {
@@ -907,21 +970,59 @@ export default function MetricsPage() {
         </div>
       </div>
 
-      {/* Stats Bar */}
-      {!loading && !error && chartData.length > 0 && (
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
-          <div className="bg-[#0d1117] border border-[#1a1f2e] rounded-lg p-4">
-            <p className="text-xs text-zinc-500 mb-1">Total Users</p>
-            <p className="text-2xl font-semibold" style={{ color: CHART_GREEN }}>{stats.totalInRange.toLocaleString()}</p>
+      {/* Lifetime Stats (always visible when data loaded) */}
+      {!loading && !error && lifetimeTotal > 0 && (
+        <div className="flex items-center gap-4 mb-4">
+          <div className="flex items-center gap-2 bg-[#0d1117] border border-[#1a1f2e] rounded-lg px-4 py-2.5">
+            <span className="text-xs text-zinc-500">Lifetime Users</span>
+            <span className="text-lg font-semibold" style={{ color: CHART_GREEN }}>{lifetimeTotal.toLocaleString()}</span>
           </div>
+          {stats.lifetimeDailyAvg !== null && (
+            <div className="flex items-center gap-2 bg-[#0d1117] border border-[#1a1f2e] rounded-lg px-4 py-2.5">
+              <span className="text-xs text-zinc-500">Lifetime Avg</span>
+              <span className="text-lg font-semibold text-zinc-200">{stats.lifetimeDailyAvg.toFixed(1)}</span>
+              <span className="text-xs text-zinc-500">/day</span>
+            </div>
+          )}
+          {stats.lifetimeDays !== null && (
+            <div className="flex items-center gap-2 bg-[#0d1117] border border-[#1a1f2e] rounded-lg px-4 py-2.5">
+              <span className="text-xs text-zinc-500">Since</span>
+              <span className="text-sm font-medium text-zinc-300">
+                {Math.floor(stats.lifetimeDays)} days ago
+              </span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Selected Range Stats Bar */}
+      {!loading && !error && chartData.length > 0 && (
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-4 mb-6">
           <div className="bg-[#0d1117] border border-[#1a1f2e] rounded-lg p-4">
-            <p className="text-xs text-zinc-500 mb-1">Time Periods</p>
-            <p className="text-2xl font-semibold text-zinc-200">{chartData.length}</p>
-            <p className="text-xs text-zinc-500">{stats.granLabel}s</p>
+            <p className="text-xs text-zinc-500 mb-1">New Users</p>
+            <p className="text-2xl font-semibold" style={{ color: CHART_GREEN }}>{stats.totalInRange.toLocaleString()}</p>
+            <p className="text-xs text-zinc-500">in selected range</p>
           </div>
           <div className="bg-[#0d1117] border border-[#1a1f2e] rounded-lg p-4">
             <p className="text-xs text-zinc-500 mb-1">Avg per {stats.granLabel}</p>
             <p className="text-2xl font-semibold text-zinc-200">{stats.avgPerPeriod}</p>
+            <p className="text-xs text-zinc-500">{chartData.length} {stats.granLabel}s</p>
+          </div>
+          <div className="bg-[#0d1117] border border-[#1a1f2e] rounded-lg p-4">
+            <p className="text-xs text-zinc-500 mb-1">Daily Rate</p>
+            <p className="text-2xl font-semibold text-zinc-200">{stats.dailyRateInRange.toFixed(1)}</p>
+            <p className="text-xs text-zinc-500">/day in range</p>
+          </div>
+          <div className="bg-[#0d1117] border border-[#1a1f2e] rounded-lg p-4">
+            <p className="text-xs text-zinc-500 mb-1">vs Lifetime Avg</p>
+            {stats.vsLifetime !== null ? (
+              <p className="text-2xl font-semibold" style={{ color: stats.vsLifetime > 0 ? CHART_GREEN : stats.vsLifetime < 0 ? '#ff5000' : '#9ca3af' }}>
+                {stats.vsLifetime > 0 ? '+' : ''}{stats.vsLifetime.toFixed(0)}%
+              </p>
+            ) : (
+              <p className="text-2xl font-semibold text-zinc-600">&mdash;</p>
+            )}
+            <p className="text-xs text-zinc-500">daily rate comparison</p>
           </div>
           <div className="bg-[#0d1117] border border-[#1a1f2e] rounded-lg p-4">
             <p className="text-xs text-zinc-500 mb-1">Growth Rate</p>
@@ -1031,6 +1132,7 @@ export default function MetricsPage() {
         <p className="text-xs text-muted-foreground mt-3">
           Showing {totalInRange.toLocaleString()} new users from {dateRangeLabel}
           {` \u00b7 ${TIMEZONE_OPTIONS.find(o => o.value === timezone)?.label ?? timezone} time`}
+          {lifetimeTotal > 0 && ` \u00b7 ${lifetimeTotal.toLocaleString()} lifetime users`}
         </p>
       )}
     </div>
