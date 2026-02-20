@@ -26,6 +26,44 @@ export function formatDate(dateStr: string | null): string {
   return parseLocalDate(dateStr).toLocaleDateString();
 }
 
+// ── Currency / Money Utilities ────────────────────────────
+
+/**
+ * Minor-unit multipliers per currency (ISO 4217).
+ * Most currencies use 100 (2 decimal places).
+ * Notable exceptions: JPY/KRW = 1, BHD/KWD/OMR = 1000.
+ */
+const CURRENCY_SUB_UNITS: Record<string, number> = {
+  BHD: 1000, KWD: 1000, OMR: 1000,           // 3 decimal places
+  JPY: 1, KRW: 1, VND: 1, CLP: 1, ISK: 1,    // 0 decimal places
+};
+const DEFAULT_SUB_UNIT = 100; // 2 decimal places (USD, EUR, GBP, etc.)
+
+/**
+ * Convert a display amount to integer minor units for the given currency.
+ *
+ * Examples:
+ *   toMinorUnits(19.99, "USD") → 1999
+ *   toMinorUnits(1000, "JPY")  → 1000
+ *   toMinorUnits(5.123, "BHD") → 5123
+ */
+export function toMinorUnits(amount: number, currency: string): number {
+  const subUnit = CURRENCY_SUB_UNITS[currency.toUpperCase()] ?? DEFAULT_SUB_UNIT;
+  return Math.round(amount * subUnit);
+}
+
+/**
+ * Convert integer minor units to a display amount for the given currency.
+ *
+ * Examples:
+ *   fromMinorUnits(1999, "USD") → 19.99
+ *   fromMinorUnits(1000, "JPY") → 1000
+ */
+export function fromMinorUnits(amount: number, currency: string): number {
+  const subUnit = CURRENCY_SUB_UNITS[currency.toUpperCase()] ?? DEFAULT_SUB_UNIT;
+  return amount / subUnit;
+}
+
 // ── Export Utilities ─────────────────────────────────────
 
 /**

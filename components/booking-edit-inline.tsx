@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { cn } from '@/lib/utils';
+import { cn, toMinorUnits, fromMinorUnits } from '@/lib/utils';
 import {
   BookingView,
   FlightBookingView,
@@ -58,10 +58,11 @@ function getBookingProvider(
 
 function formatMoney(amount: number | null | undefined, currency: string | null | undefined): string {
   if (amount === null || amount === undefined) return 'N/A';
+  const curr = currency || 'USD';
   return new Intl.NumberFormat('en-US', {
     style: 'currency',
-    currency: currency || 'USD',
-  }).format(amount / 100);
+    currency: curr,
+  }).format(fromMinorUnits(amount, curr));
 }
 
 // ─── Shared field classes ─────────────────────────────────────────────────────
@@ -365,10 +366,11 @@ export function BookingEditInline({ booking, travellers, onClose, onSave }: Book
   const [verificationStatus, setVerificationStatus] = useState<VerificationStatus | ''>('');
 
   const currentPrice = getBookingPrice(flightData, hotelData);
+  const initCurrency = currentPrice.currency || 'USD';
   const [priceAmount, setPriceAmount] = useState(
-    currentPrice.amount !== null ? (currentPrice.amount / 100).toFixed(2) : ''
+    currentPrice.amount !== null ? fromMinorUnits(currentPrice.amount, initCurrency).toFixed(2) : ''
   );
-  const [priceCurrency, setPriceCurrency] = useState(currentPrice.currency || 'USD');
+  const [priceCurrency, setPriceCurrency] = useState(initCurrency);
 
   // ── Hotel stay fields ───────────────────────────────────────────────────
   const [hotelId, setHotelId] = useState(hotelData?.hotel_id || '');
@@ -518,10 +520,10 @@ export function BookingEditInline({ booking, travellers, onClose, onSave }: Book
         if (bookingProvider && bookingProvider !== origProvider) patch.booking_provider = bookingProvider;
         if (verificationStatus) patch.verification_status = verificationStatus;
 
-        // Price — send decimal amount as-is; BE converts to minor units per currency
+        // Price — convert display amount to integer minor units (cents, yen, etc.)
         const newPrice = priceAmount ? parseFloat(priceAmount) : null;
         if (newPrice !== null && !isNaN(newPrice) && newPrice > 0) {
-          patch.customer_price = { amount: newPrice, currency: priceCurrency };
+          patch.customer_price = { amount: toMinorUnits(newPrice, priceCurrency), currency: priceCurrency };
         }
 
         // Stay changes
@@ -573,10 +575,10 @@ export function BookingEditInline({ booking, travellers, onClose, onSave }: Book
         if (bookingProvider && bookingProvider !== origProvider) patch.booking_provider = bookingProvider;
         if (verificationStatus) patch.verification_status = verificationStatus;
 
-        // Price — send decimal amount as-is; BE converts to minor units per currency
+        // Price — convert display amount to integer minor units (cents, yen, etc.)
         const newPrice = priceAmount ? parseFloat(priceAmount) : null;
         if (newPrice !== null && !isNaN(newPrice) && newPrice > 0) {
-          patch.customer_price = { amount: newPrice, currency: priceCurrency };
+          patch.customer_price = { amount: toMinorUnits(newPrice, priceCurrency), currency: priceCurrency };
         }
 
         // Itinerary — send full legs array if anything changed
