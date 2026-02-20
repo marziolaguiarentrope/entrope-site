@@ -548,6 +548,7 @@ export function HotelOpportunityDetail({
   const [confirmationCode, setConfirmationCode] = useState('');
   const [showConfirm, setShowConfirm] = useState(false);
   const [showEmail, setShowEmail] = useState(false);
+  const [cancelSuccess, setCancelSuccess] = useState<'cancelled' | 'unable' | null>(null);
 
   // Confirm manual booking state (for needs_intervention)
   const [showManualBooking, setShowManualBooking] = useState(false);
@@ -586,7 +587,7 @@ export function HotelOpportunityDetail({
         ...opportunity,
         old_booking_status: 'cancelled',
       });
-      onClose();
+      setCancelSuccess('cancelled');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to mark as cancelled');
       setShowConfirm(false);
@@ -614,7 +615,7 @@ export function HotelOpportunityDetail({
         'unable_to_cancel',
         notes.trim(),
       );
-      onClose();
+      setCancelSuccess('unable');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to send cancel reminder');
     } finally {
@@ -726,8 +727,24 @@ export function HotelOpportunityDetail({
           </div>
         )}
 
+        {/* Cancel success feedback */}
+        {cancelSuccess && (
+          <div className={cn('rounded-lg p-4', cancelSuccess === 'cancelled' ? 'bg-green-500/10' : 'bg-amber-500/10')}>
+            <p className={cn('font-medium', cancelSuccess === 'cancelled' ? 'text-green-400' : 'text-amber-400')}>
+              {cancelSuccess === 'cancelled'
+                ? 'Original booking has been marked as cancelled.'
+                : 'Marked as unable to cancel — reminder sent to customer.'}
+            </p>
+            <p className="text-sm text-muted-foreground mt-1">
+              {cancelSuccess === 'cancelled'
+                ? 'The repricing can now proceed.'
+                : 'The customer will receive instructions to cancel their booking.'}
+            </p>
+          </div>
+        )}
+
         {/* Actions for cancel variant */}
-        {variant === 'cancel' && opportunity.old_booking_status === 'active' && !showConfirm && (
+        {variant === 'cancel' && opportunity.old_booking_status === 'active' && !showConfirm && !cancelSuccess && (
           <div className="space-y-4">
             <div>
               <label className="block text-sm font-medium mb-1">
@@ -789,7 +806,7 @@ export function HotelOpportunityDetail({
         )}
 
         {/* Confirmation */}
-        {variant === 'cancel' && opportunity.old_booking_status === 'active' && showConfirm && (
+        {variant === 'cancel' && opportunity.old_booking_status === 'active' && showConfirm && !cancelSuccess && (
           <div className="space-y-4">
             <div className="bg-green-500/10 rounded-lg p-4">
               <h4 className="font-medium text-green-400 mb-2">Confirm Cancellation</h4>
