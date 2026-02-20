@@ -706,13 +706,20 @@ export default function MetricsPage() {
     const granLabel = granularity === 'hourly' ? 'hour' : granularity === 'daily' ? 'day' : granularity === 'weekly' ? 'week' : 'month';
 
     // Compute range duration in days for daily rate
+    // Clamp the effective start to lifetimeFirstDate so we don't dilute the rate
+    // with days before the product had any users
     let rangeDays = 1;
-    if (effectiveDates.start) {
-      rangeDays = Math.max(1, (effectiveDates.end.getTime() - effectiveDates.start.getTime()) / (1000 * 60 * 60 * 24));
-    } else if (lifetimeFirstDate) {
-      // "All time" range — fall back to lifetime span
-      const firstDate = new Date(lifetimeFirstDate);
-      rangeDays = Math.max(1, (new Date().getTime() - firstDate.getTime()) / (1000 * 60 * 60 * 24));
+    const rangeStartMs = effectiveDates.start?.getTime() ?? null;
+    const firstUserMs = lifetimeFirstDate ? new Date(lifetimeFirstDate).getTime() : null;
+    const rangeEndMs = effectiveDates.end.getTime();
+
+    if (rangeStartMs !== null) {
+      // Use the later of range start vs first user date, so we don't count empty pre-launch days
+      const effectiveStart = firstUserMs ? Math.max(rangeStartMs, firstUserMs) : rangeStartMs;
+      rangeDays = Math.max(1, (rangeEndMs - effectiveStart) / (1000 * 60 * 60 * 24));
+    } else if (firstUserMs) {
+      // "All time" range — use lifetime span from first user
+      rangeDays = Math.max(1, (rangeEndMs - firstUserMs) / (1000 * 60 * 60 * 24));
     }
     const dailyRateInRange = totalInRange / rangeDays;
 
