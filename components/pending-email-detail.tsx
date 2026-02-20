@@ -166,6 +166,9 @@ export function PendingEmailDetail({
               <span className="text-muted-foreground shrink-0">Subject</span>
               <span className="font-medium">{message.subject || '—'}</span>
             </div>
+            {message.preheader && (
+              <p className="text-sm text-muted-foreground mt-1">{message.preheader}</p>
+            )}
           </div>
 
           <div className="bg-background rounded-lg border border-border p-3">
