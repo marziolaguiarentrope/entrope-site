@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { cn, toMinorUnits, fromMinorUnits } from '@/lib/utils';
+import { cn, fromMinorUnits } from '@/lib/utils';
 import {
   BookingView,
   FlightBookingView,
@@ -520,10 +520,10 @@ export function BookingEditInline({ booking, travellers, onClose, onSave }: Book
         if (bookingProvider && bookingProvider !== origProvider) patch.booking_provider = bookingProvider;
         if (verificationStatus) patch.verification_status = verificationStatus;
 
-        // Price — convert display amount to integer minor units (cents, yen, etc.)
+        // Price — send display amount as-is; BE converts to minor units via Money.from_decimal()
         const newPrice = priceAmount ? parseFloat(priceAmount) : null;
         if (newPrice !== null && !isNaN(newPrice) && newPrice > 0) {
-          patch.customer_price = { amount: toMinorUnits(newPrice, priceCurrency), currency: priceCurrency };
+          patch.customer_price = { amount: newPrice, currency: priceCurrency };
         }
 
         // Stay changes
@@ -575,10 +575,10 @@ export function BookingEditInline({ booking, travellers, onClose, onSave }: Book
         if (bookingProvider && bookingProvider !== origProvider) patch.booking_provider = bookingProvider;
         if (verificationStatus) patch.verification_status = verificationStatus;
 
-        // Price — convert display amount to integer minor units (cents, yen, etc.)
+        // Price — send display amount as-is; BE converts to minor units via Money.from_decimal()
         const newPrice = priceAmount ? parseFloat(priceAmount) : null;
         if (newPrice !== null && !isNaN(newPrice) && newPrice > 0) {
-          patch.customer_price = { amount: toMinorUnits(newPrice, priceCurrency), currency: priceCurrency };
+          patch.customer_price = { amount: newPrice, currency: priceCurrency };
         }
 
         // Itinerary — send full legs array if anything changed

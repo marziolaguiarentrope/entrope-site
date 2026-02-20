@@ -7,7 +7,7 @@ import {
   Mail, Database, Eye, Telescope, MessageSquare, CheckCircle2,
   Loader2, Check, X, Hotel, Plane, Clock, DollarSign,
 } from 'lucide-react';
-import { cn, parseLocalDate, toMinorUnits, fromMinorUnits } from '@/lib/utils';
+import { cn, parseLocalDate, fromMinorUnits } from '@/lib/utils';
 import {
   api,
   RepricingPipelineIssue,
@@ -720,11 +720,10 @@ function IssueActions({
     setActionLoading('patch-price');
     setActionResult(null);
     try {
-      const minorUnits = toMinorUnits(amount, currencyInput);
       if (issue.booking_type === 'hotel') {
-        await api.patchHotelBooking(issue.booking_id, { customer_price: { amount: minorUnits, currency: currencyInput } });
+        await api.patchHotelBooking(issue.booking_id, { customer_price: { amount, currency: currencyInput } });
       } else {
-        await api.patchFlightBooking(issue.booking_id, { customer_price: { amount: minorUnits, currency: currencyInput } });
+        await api.patchFlightBooking(issue.booking_id, { customer_price: { amount, currency: currencyInput } });
       }
       setActionResult({ type: 'success', message: `Price set: ${amount} ${currencyInput}` });
       setShowPriceForm(false);
