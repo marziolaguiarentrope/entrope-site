@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import Link from 'next/link';
-import { cn, formatDate } from '@/lib/utils';
+import { cn, formatDate, fromMinorUnits } from '@/lib/utils';
 import { api, HotelOpportunity, BookingEnrichment, UserBasicInfo } from '@/lib/api';
 import { HotelOpportunityDetail } from '@/components/hotel-opportunity-detail';
 
@@ -25,16 +25,17 @@ function timeAgo(dateString: string): string {
 
 function formatMoney(amount: number | null | undefined, currency: string | null | undefined): string {
   if (amount === null || amount === undefined) return '—';
+  const cur = currency || 'USD';
   return new Intl.NumberFormat('en-US', {
     style: 'currency',
-    currency: currency || 'USD',
-  }).format(amount / 100);
+    currency: cur,
+  }).format(fromMinorUnits(amount, cur));
 }
 
 // ── Types ────────────────────────────────────────────────
 
 type TabFilter = 'all' | 'current' | 'past';
-type OpportunityType = 'pending_payment' | 'pending_cancel' | 'completed';
+type OpportunityType = 'pending_payment' | 'pending_cancel' | 'active' | 'completed';
 type SortKey = 'payment_due' | 'hotel' | 'check_in' | 'created' | 'original_price' | 'new_price' | 'savings' | 'account_name' | 'status';
 type SortDir = 'asc' | 'desc';
 
@@ -188,6 +189,7 @@ function StatusBadge({ status }: { status: string }) {
 function TypeBadge({ type }: { type: OpportunityType }) {
   if (type === 'pending_payment') return <span className="px-2 py-0.5 text-xs bg-yellow-500/20 text-yellow-400 rounded font-medium whitespace-nowrap">Payment</span>;
   if (type === 'pending_cancel') return <span className="px-2 py-0.5 text-xs bg-red-500/20 text-red-400 rounded font-medium whitespace-nowrap">Cancel</span>;
+  if (type === 'active') return <span className="px-2 py-0.5 text-xs bg-blue-500/20 text-blue-400 rounded font-medium whitespace-nowrap">Active</span>;
   return <span className="px-2 py-0.5 text-xs bg-zinc-500/20 text-zinc-400 rounded font-medium whitespace-nowrap">Completed</span>;
 }
 
@@ -397,7 +399,7 @@ export default function HotelRepricingTrackingPage() {
   const [opportunities, setOpportunities] = useState<EnrichedOpportunity[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [counts, setCounts] = useState({ payment: 0, cancel: 0, completed: 0 });
+  const [counts, setCounts] = useState({ payment: 0, cancel: 0, active: 0, completed: 0 });
 
   // Enrichment
   const [userInfoMap, setUserInfoMap] = useState<Map<string, UserBasicInfo>>(new Map());
@@ -460,8 +462,8 @@ export default function HotelRepricingTrackingPage() {
         if (paymentIds.has(o.id)) return 'pending_payment';
         if (cancelIds.has(o.id)) return 'pending_cancel';
         if (TERMINAL_STATUSES.has(o.status)) return 'completed';
-        // Active but not in a specific sub-list (e.g. card_saved + cancelled old booking)
-        return 'pending_cancel';
+        // Active but not in a specific sub-list (e.g. executing, needs_intervention, awaiting_customer)
+        return 'active';
       }
 
       let opps: EnrichedOpportunity[];
@@ -470,6 +472,8 @@ export default function HotelRepricingTrackingPage() {
         // Use the /active endpoint — returns ALL non-terminal opportunities
         const activeRes = await api.listHotelOpportunitiesActive({ limit: 100 });
         opps = activeRes.opportunities.map(o => ({ ...o, opp_type: classify(o) }));
+        const activeCount = opps.filter(o => o.opp_type === 'active').length;
+        setCounts(prev => ({ ...prev, active: activeCount }));
       } else if (tab === 'past') {
         // Completed endpoint (may 404 if not deployed yet)
         try {
@@ -590,6 +594,12 @@ export default function HotelRepricingTrackingPage() {
           <span className="font-medium text-yellow-400">{counts.payment}</span> pending payment
           <span className="mx-1">·</span>
           <span className="font-medium text-red-400">{counts.cancel}</span> pending cancel
+          {counts.active > 0 && (
+            <>
+              <span className="mx-1">·</span>
+              <span className="font-medium text-blue-400">{counts.active}</span> active
+            </>
+          )}
         </span>
         {counts.completed > 0 && (
           <>
@@ -739,7 +749,11 @@ export default function HotelRepricingTrackingPage() {
           opportunity={selectedOpportunity}
           bookingEnrichment={selectedOpportunity.old_booking_id ? bookingEnrichmentMap.get(selectedOpportunity.old_booking_id) : undefined}
           userInfo={userInfoMap.get(selectedOpportunity.user_id)}
-          variant={selectedOpportunity.opp_type === 'pending_payment' ? 'payment' : 'cancel'}
+          variant={
+            selectedOpportunity.opp_type === 'pending_payment' ? 'payment'
+            : selectedOpportunity.opp_type === 'pending_cancel' ? 'cancel'
+            : 'active'
+          }
           onClose={() => setSelectedOpportunity(null)}
           onUpdate={(updated) => {
             setOpportunities(prev => prev.map(o => o.id === updated.id ? { ...updated, opp_type: o.opp_type } : o));

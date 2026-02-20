@@ -3,16 +3,17 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { HotelOpportunity, BookingEnrichment, api, RawEmail, UserBasicInfo, MemberContext, HotelOpportunityView } from '@/lib/api';
-import { cn, formatDate } from '@/lib/utils';
+import { cn, formatDate, fromMinorUnits } from '@/lib/utils';
 
 // ── Helpers ──────────────────────────────────────────────
 
 function formatMoney(amount: number | null | undefined, currency: string | null | undefined): string {
   if (amount === null || amount === undefined) return '—';
+  const cur = currency || 'USD';
   return new Intl.NumberFormat('en-US', {
     style: 'currency',
-    currency: currency || 'USD',
-  }).format(amount / 100);
+    currency: cur,
+  }).format(fromMinorUnits(amount, cur));
 }
 
 function formatMoneyObj(price: { amount: number; currency: string } | null | undefined): string {
@@ -526,7 +527,7 @@ interface HotelOpportunityDetailProps {
   opportunity: HotelOpportunity;
   bookingEnrichment?: BookingEnrichment;
   userInfo?: UserBasicInfo;
-  variant: 'payment' | 'cancel';
+  variant: 'payment' | 'cancel' | 'active';
   onClose: () => void;
   onUpdate: (opportunity: HotelOpportunity) => void;
   renderInline?: boolean;
@@ -547,6 +548,15 @@ export function HotelOpportunityDetail({
   const [confirmationCode, setConfirmationCode] = useState('');
   const [showConfirm, setShowConfirm] = useState(false);
   const [showEmail, setShowEmail] = useState(false);
+
+  // Confirm manual booking state (for needs_intervention)
+  const [showManualBooking, setShowManualBooking] = useState(false);
+  const [manualSupplier, setManualSupplier] = useState('');
+  const [manualSupplierRef, setManualSupplierRef] = useState('');
+  const [manualCostAmount, setManualCostAmount] = useState('');
+  const [manualCostCurrency, setManualCostCurrency] = useState('USD');
+  const [confirmingManual, setConfirmingManual] = useState(false);
+  const [manualSuccess, setManualSuccess] = useState(false);
 
   async function handleMarkCancelled() {
     if (!opportunity.old_booking_id) {
@@ -612,13 +622,41 @@ export function HotelOpportunityDetail({
     }
   }
 
+  async function handleConfirmManualBooking() {
+    if (!manualSupplier.trim() || !manualSupplierRef.trim()) {
+      setError('Supplier and reference are required');
+      return;
+    }
+    setConfirmingManual(true);
+    setError(null);
+    try {
+      const costAmount = manualCostAmount ? parseInt(manualCostAmount, 10) : undefined;
+      await api.confirmBooking(
+        opportunity.id,
+        manualSupplier.trim(),
+        manualSupplierRef.trim(),
+        costAmount,
+        costAmount ? manualCostCurrency : undefined,
+      );
+      setManualSuccess(true);
+      onUpdate({ ...opportunity, status: 'executing' });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to confirm booking');
+    } finally {
+      setConfirmingManual(false);
+    }
+  }
+
   const detailContent = (
     <>
       {/* Header */}
       <div className="sticky top-0 bg-card border-b border-border p-4 flex items-center justify-between z-10">
         <div>
           <h2 className="text-lg font-semibold">
-            {variant === 'cancel' ? 'Pending Cancellation' : 'Pending Payment'}
+            {variant === 'cancel' ? 'Pending Cancellation'
+              : variant === 'payment' ? 'Pending Payment'
+              : opportunity.status === 'needs_intervention' ? 'Needs Intervention'
+              : 'Repricing Details'}
           </h2>
           <p className="text-sm text-muted-foreground">
             {opportunity.hotel_name || 'Unknown Hotel'}
@@ -782,6 +820,102 @@ export function HotelOpportunityDetail({
                 Cancel
               </button>
             </div>
+          </div>
+        )}
+
+        {/* Needs Intervention — manual booking confirmation */}
+        {variant === 'active' && opportunity.status === 'needs_intervention' && !manualSuccess && (
+          <div className="space-y-4">
+            <div className="bg-orange-500/10 border border-orange-500/20 rounded-lg p-3">
+              <p className="text-orange-400 font-medium text-sm">This opportunity requires manual intervention.</p>
+              <p className="text-xs text-muted-foreground mt-1">
+                The automated booking process could not complete. You can manually confirm a booking below.
+              </p>
+            </div>
+
+            {!showManualBooking ? (
+              <button
+                onClick={() => setShowManualBooking(true)}
+                className="w-full py-2 px-4 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 transition-colors"
+              >
+                Confirm Manual Booking
+              </button>
+            ) : (
+              <div className="space-y-3 bg-accent/30 rounded-lg p-4">
+                <h4 className="text-sm font-medium">Manual Booking Details</h4>
+                <div>
+                  <label className="block text-xs font-medium text-muted-foreground mb-1">Supplier *</label>
+                  <select
+                    value={manualSupplier}
+                    onChange={(e) => setManualSupplier(e.target.value)}
+                    className="w-full px-3 py-2 bg-background border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                  >
+                    <option value="">Select supplier...</option>
+                    <option value="ETG/RateHawk">ETG / RateHawk</option>
+                    <option value="Booking.com">Booking.com</option>
+                    <option value="Expedia">Expedia</option>
+                    <option value="Other">Other</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-muted-foreground mb-1">Supplier Reference / Order ID *</label>
+                  <input
+                    type="text"
+                    value={manualSupplierRef}
+                    onChange={(e) => setManualSupplierRef(e.target.value)}
+                    placeholder="e.g., ETG order ID or booking reference"
+                    className="w-full px-3 py-2 bg-background border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-muted-foreground mb-1">Supplier Cost (optional)</label>
+                    <input
+                      type="number"
+                      value={manualCostAmount}
+                      onChange={(e) => setManualCostAmount(e.target.value)}
+                      placeholder="Amount in cents"
+                      className="w-full px-3 py-2 bg-background border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-muted-foreground mb-1">Currency</label>
+                    <select
+                      value={manualCostCurrency}
+                      onChange={(e) => setManualCostCurrency(e.target.value)}
+                      className="w-full px-3 py-2 bg-background border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                    >
+                      <option value="USD">USD</option>
+                      <option value="EUR">EUR</option>
+                      <option value="GBP">GBP</option>
+                    </select>
+                  </div>
+                </div>
+                <div className="flex gap-2 pt-2">
+                  <button
+                    onClick={handleConfirmManualBooking}
+                    disabled={confirmingManual || !manualSupplier || !manualSupplierRef.trim()}
+                    className="flex-1 py-2 px-4 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 disabled:opacity-50 transition-colors"
+                  >
+                    {confirmingManual ? 'Confirming...' : 'Confirm Booking'}
+                  </button>
+                  <button
+                    onClick={() => setShowManualBooking(false)}
+                    className="py-2 px-4 bg-accent text-foreground rounded-lg font-medium hover:bg-accent/80 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Manual booking confirmed — success */}
+        {manualSuccess && (
+          <div className="bg-green-500/10 rounded-lg p-4">
+            <p className="text-green-400 font-medium">Manual booking confirmed successfully.</p>
+            <p className="text-sm text-muted-foreground mt-1">The opportunity has moved to executing status.</p>
           </div>
         )}
 
