@@ -616,6 +616,12 @@ export function HotelOpportunityDetail({
         notes.trim(),
       );
       setCancelSuccess('unable');
+      // Update parent: flip cancellation_capability so the UI reflects
+      // that the customer is now responsible for cancelling
+      onUpdate({
+        ...opportunity,
+        cancellation_capability: 'they_cancel',
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to send cancel reminder');
     } finally {
@@ -738,7 +744,7 @@ export function HotelOpportunityDetail({
             <p className="text-sm text-muted-foreground mt-1">
               {cancelSuccess === 'cancelled'
                 ? 'The repricing can now proceed.'
-                : 'The customer will receive instructions to cancel their booking.'}
+                : 'Cancellation responsibility has been switched to the customer. They will receive an email with instructions to cancel their booking.'}
             </p>
           </div>
         )}
