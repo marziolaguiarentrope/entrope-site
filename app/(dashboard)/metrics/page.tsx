@@ -548,9 +548,9 @@ export default function MetricsPage() {
     return () => document.removeEventListener('mousedown', handler);
   }, []);
 
-  // Helper: format Date to YYYY-MM-DD
+  // Helper: format Date to YYYY-MM-DD (uses UTC to match effectiveDates computation)
   const toDateKey = useCallback((d: Date) => {
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
   }, []);
 
   // Auto-set granularity when date range changes + sync calendar dates
@@ -620,13 +620,17 @@ export default function MetricsPage() {
         : Promise.resolve(0);
 
       // Fetch lifetime total (all users ever) — fires in parallel with bucket fetches
+      // Then use the total to find the earliest user via offset (API returns newest first)
       const lifetimePromise = api.listUsers({ limit: 1 }).then(r => r.total_count).catch(() => 0);
 
-      // Fetch the earliest user to compute lifetime duration
-      // Use created_after with a very early date to get the first user chronologically
-      const firstUserPromise = api.listUsers({ limit: 1, created_after: '2020-01-01T00:00:00Z' })
-        .then(r => r.members?.[0]?.created_at ?? null)
-        .catch(() => null);
+      // We need lifetime total first, then offset to the last page to get the earliest user
+      // This is sequential but only adds one lightweight API call
+      const firstUserPromise = lifetimePromise.then(total => {
+        if (total === 0) return null;
+        return api.listUsers({ limit: 1, offset: total - 1 })
+          .then(r => r.members?.[0]?.created_at ?? null)
+          .catch(() => null);
+      });
 
       // Process buckets in batches
       for (let i = 0; i < buckets.length; i += BATCH_SIZE) {
@@ -705,8 +709,17 @@ export default function MetricsPage() {
     let rangeDays = 1;
     if (effectiveDates.start) {
       rangeDays = Math.max(1, (effectiveDates.end.getTime() - effectiveDates.start.getTime()) / (1000 * 60 * 60 * 24));
+    } else if (lifetimeFirstDate) {
+      // "All time" range — fall back to lifetime span
+      const firstDate = new Date(lifetimeFirstDate);
+      rangeDays = Math.max(1, (new Date().getTime() - firstDate.getTime()) / (1000 * 60 * 60 * 24));
     }
     const dailyRateInRange = totalInRange / rangeDays;
+
+    // For ≤24h ranges, compute hourly rate instead (daily rate is redundant with total)
+    const rangeHours = rangeDays * 24;
+    const isShortRange = rangeDays <= 1.5; // roughly 24h or less
+    const hourlyRateInRange = isShortRange ? totalInRange / Math.max(1, rangeHours) : null;
 
     // Lifetime daily average
     let lifetimeDailyAvg: number | null = null;
@@ -729,6 +742,8 @@ export default function MetricsPage() {
       granLabel,
       growthRate,
       dailyRateInRange,
+      hourlyRateInRange,
+      isShortRange,
       lifetimeDailyAvg,
       lifetimeDays,
       vsLifetime,
@@ -988,7 +1003,7 @@ export default function MetricsPage() {
             <div className="flex items-center gap-2 bg-[#0d1117] border border-[#1a1f2e] rounded-lg px-4 py-2.5">
               <span className="text-xs text-zinc-500">Since</span>
               <span className="text-sm font-medium text-zinc-300">
-                {Math.floor(stats.lifetimeDays)} days ago
+                {Math.floor(stats.lifetimeDays)} {Math.floor(stats.lifetimeDays) === 1 ? 'day' : 'days'} ago
               </span>
             </div>
           )}
@@ -1006,12 +1021,16 @@ export default function MetricsPage() {
           <div className="bg-[#0d1117] border border-[#1a1f2e] rounded-lg p-4">
             <p className="text-xs text-zinc-500 mb-1">Avg per {stats.granLabel}</p>
             <p className="text-2xl font-semibold text-zinc-200">{stats.avgPerPeriod}</p>
-            <p className="text-xs text-zinc-500">{chartData.length} {stats.granLabel}s</p>
+            <p className="text-xs text-zinc-500">{chartData.length} {stats.granLabel}{chartData.length !== 1 ? 's' : ''}</p>
           </div>
           <div className="bg-[#0d1117] border border-[#1a1f2e] rounded-lg p-4">
-            <p className="text-xs text-zinc-500 mb-1">Daily Rate</p>
-            <p className="text-2xl font-semibold text-zinc-200">{stats.dailyRateInRange.toFixed(1)}</p>
-            <p className="text-xs text-zinc-500">/day in range</p>
+            <p className="text-xs text-zinc-500 mb-1">{stats.isShortRange ? 'Hourly Rate' : 'Daily Rate'}</p>
+            <p className="text-2xl font-semibold text-zinc-200">
+              {stats.isShortRange
+                ? (stats.hourlyRateInRange ?? 0).toFixed(1)
+                : stats.dailyRateInRange.toFixed(1)}
+            </p>
+            <p className="text-xs text-zinc-500">{stats.isShortRange ? '/hour in range' : '/day in range'}</p>
           </div>
           <div className="bg-[#0d1117] border border-[#1a1f2e] rounded-lg p-4">
             <p className="text-xs text-zinc-500 mb-1">vs Lifetime Avg</p>
@@ -1085,6 +1104,11 @@ export default function MetricsPage() {
                     tickLine={false}
                     axisLine={{ stroke: CHART_GRID }}
                     allowDecimals={false}
+                    domain={[
+                      (dataMin: number) => Math.max(0, Math.floor(dataMin * 0.95)),
+                      (dataMax: number) => Math.ceil(dataMax * 1.02),
+                    ]}
+                    tickFormatter={(v: number) => v >= 1000 ? `${(v / 1000).toFixed(v >= 10000 ? 0 : 1)}k` : v.toLocaleString()}
                   />
                   <Tooltip content={<CustomTooltip />} cursor={{ stroke: CHART_GREEN_DIM }} />
                   <Area
@@ -1112,6 +1136,7 @@ export default function MetricsPage() {
                     tickLine={false}
                     axisLine={{ stroke: CHART_GRID }}
                     allowDecimals={false}
+                    tickFormatter={(v: number) => v >= 1000 ? `${(v / 1000).toFixed(v >= 10000 ? 0 : 1)}k` : v.toLocaleString()}
                   />
                   <Tooltip content={<CustomTooltip />} cursor={{ fill: CHART_GREEN_DIM }} />
                   <Bar
