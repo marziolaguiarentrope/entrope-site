@@ -134,6 +134,7 @@ export interface PendingEmail {
   to_email: string | null;
   to_name: string | null;
   subject: string | null;
+  preheader: string | null;
   body: string;
   status: string;
   approval_status: PendingEmailApprovalStatus;
