@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { FileText, Plane, Hotel, AlertTriangle, LogOut, ListTodo, Search, Contact, BarChart3, TrendingUp, Wrench, Mail } from 'lucide-react';
+import { FileText, Plane, Hotel, AlertTriangle, LogOut, ListTodo, Search, Contact, BarChart3, TrendingUp, Wrench, Mail, Filter } from 'lucide-react';
 import { useAuth } from '@/contexts/auth-context';
 import { api } from '@/lib/api';
 import { cn } from '@/lib/utils';
@@ -12,6 +12,7 @@ const navItems = [
   { href: '/tasks', icon: ListTodo, label: 'Tasks' },
   { href: '/manual-import', icon: FileText, label: 'Manual Import' },
   { href: '/complete-repricings', icon: Plane, label: 'Complete Repricings' },
+  { href: '/flight-repricing-funnel', icon: Filter, label: 'Flight Funnel' },
   { href: '/hotel-repricing-tracking', icon: Hotel, label: 'Hotel Repricing Tracking' },
   { href: '/user-search', icon: Search, label: 'User Search' },
   { href: '/users-list', icon: Contact, label: 'Users List' },
