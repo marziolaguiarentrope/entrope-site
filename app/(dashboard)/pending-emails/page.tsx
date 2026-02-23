@@ -2,13 +2,20 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { api, PendingEmail, PendingEmailDetail as PendingEmailDetailData } from '@/lib/api';
+import { api, PendingEmail, PendingEmailApprovalStatus, PendingEmailDetail as PendingEmailDetailData } from '@/lib/api';
 import { PendingEmailDetail } from '@/components/pending-email-detail';
 import { cn } from '@/lib/utils';
 
 type TabFilter = 'pending' | 'approved' | 'rejected' | 'all';
 type SortKey = 'created' | 'subject' | 'member' | 'delivery';
 type SortDir = 'asc' | 'desc';
+
+const STATUS_PAGE_LIMIT = 500;
+const EMPTY_STATUS_TOTALS: Record<PendingEmailApprovalStatus, number> = {
+  PENDING: 0,
+  APPROVED: 0,
+  REJECTED: 0,
+};
 
 function timeAgo(dateString: string): string {
   const now = new Date();
@@ -181,6 +188,7 @@ export default function PendingEmailsPage() {
   const [sortDir, setSortDir] = useState<SortDir>('desc');
 
   const [emails, setEmails] = useState<PendingEmail[]>([]);
+  const [statusTotals, setStatusTotals] = useState<Record<PendingEmailApprovalStatus, number>>(EMPTY_STATUS_TOTALS);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const refreshTimer = useRef<NodeJS.Timeout | null>(null);
@@ -196,10 +204,16 @@ export default function PendingEmailsPage() {
 
     try {
       const [pending, approved, rejected] = await Promise.all([
-        api.listPendingEmails({ status: 'PENDING', limit: 200, offset: 0 }),
-        api.listPendingEmails({ status: 'APPROVED', limit: 200, offset: 0 }),
-        api.listPendingEmails({ status: 'REJECTED', limit: 200, offset: 0 }),
+        api.listPendingEmails({ status: 'PENDING', limit: STATUS_PAGE_LIMIT, offset: 0 }),
+        api.listPendingEmails({ status: 'APPROVED', limit: STATUS_PAGE_LIMIT, offset: 0 }),
+        api.listPendingEmails({ status: 'REJECTED', limit: STATUS_PAGE_LIMIT, offset: 0 }),
       ]);
+
+      setStatusTotals({
+        PENDING: pending.total,
+        APPROVED: approved.total,
+        REJECTED: rejected.total,
+      });
 
       const byId = new Map<string, PendingEmail>();
       [...pending.items, ...approved.items, ...rejected.items].forEach((item) => {
@@ -209,6 +223,7 @@ export default function PendingEmailsPage() {
       setEmails(Array.from(byId.values()));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch pending emails');
+      setStatusTotals(EMPTY_STATUS_TOTALS);
       setEmails([]);
     } finally {
       setLoading(false);
@@ -239,9 +254,17 @@ export default function PendingEmailsPage() {
     });
   }, [emails, selectedEmailId]);
 
-  const pendingCount = emails.filter((e) => e.approval_status === 'PENDING').length;
-  const approvedCount = emails.filter((e) => e.approval_status === 'APPROVED').length;
-  const rejectedCount = emails.filter((e) => e.approval_status === 'REJECTED').length;
+  const loadedPendingCount = emails.filter((e) => e.approval_status === 'PENDING').length;
+  const loadedApprovedCount = emails.filter((e) => e.approval_status === 'APPROVED').length;
+  const loadedRejectedCount = emails.filter((e) => e.approval_status === 'REJECTED').length;
+
+  const pendingCount = statusTotals.PENDING;
+  const approvedCount = statusTotals.APPROVED;
+  const rejectedCount = statusTotals.REJECTED;
+  const hasTruncatedStatus =
+    pendingCount > loadedPendingCount ||
+    approvedCount > loadedApprovedCount ||
+    rejectedCount > loadedRejectedCount;
 
   const tabFiltered = useMemo(() => {
     if (tab === 'pending') return emails.filter((e) => e.approval_status === 'PENDING');
@@ -334,6 +357,12 @@ export default function PendingEmailsPage() {
           <span className="font-medium text-red-400">{rejectedCount}</span> rejected
         </span>
       </div>
+
+      {hasTruncatedStatus && (
+        <p className="text-xs text-muted-foreground mb-4">
+          Loaded up to {STATUS_PAGE_LIMIT} emails per status from the latest queue.
+        </p>
+      )}
 
       <div className="flex flex-col lg:flex-row lg:items-center gap-3 mb-4">
         <div className="flex gap-1 bg-accent/30 rounded-lg p-1">
