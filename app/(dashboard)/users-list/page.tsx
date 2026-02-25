@@ -95,7 +95,6 @@ const MEMBERSHIP_TABS: { value: MembershipFilter; label: string }[] = [
 ];
 
 const PAGE_SIZES = [25, 50, 100];
-const MAX_FULL_FETCH = 10000;
 
 function MembershipBadge({ status, plan }: { status: string | null; plan: string | null }) {
   // No membership data at all
@@ -172,11 +171,17 @@ export default function UsersListPage() {
   const [membershipFilter, setMembershipFilter] = useState<MembershipFilter>('all');
   const debounceTimer = useRef<NodeJS.Timeout | null>(null);
 
-  // Full-dataset cache for client-side filtering
-  const fullDatasetRef = useRef<{ key: string; data: UserListItem[] } | null>(null);
+  // Progressive scan cache for client-side filtering
+  const fullDatasetRef = useRef<{
+    key: string;
+    items: UserListItem[];
+    scannedOffset: number;
+    serverTotal: number;
+    done: boolean;
+  } | null>(null);
   const fetchVersionRef = useRef(0);
-  const [fetchProgress, setFetchProgress] = useState<{ loaded: number; total: number } | null>(null);
-  const [filterLimited, setFilterLimited] = useState(false);
+  const [fetchProgress, setFetchProgress] = useState<{ scanned: number; total: number; found: number } | null>(null);
+  const [scanComplete, setScanComplete] = useState(true);
 
   // Sorting — default to newest first
   const [sortKey, setSortKey] = useState<SortKey>('created_at');
@@ -217,33 +222,27 @@ export default function UsersListPage() {
     return filtered;
   }
 
-  // Fetch users — when client-side filters are active, fetches ALL users
-  // so filtering is accurate across the full dataset (not just current page).
+  // Estimate total matching users based on the ratio found so far
+  function estimateFilteredTotal(found: number, scanned: number, serverTotal: number): number {
+    if (scanned === 0) return 0;
+    return Math.round((found / scanned) * serverTotal);
+  }
+
+  // Fetch users — when client-side filters are active, progressively scans
+  // server pages until enough matching results are found for the current view.
+  // Scales to any number of users without fetching the entire dataset upfront.
   const fetchUsers = useCallback(async () => {
     const hasClientFilter = statusFilter != null || membershipFilter !== 'all';
-    const cacheKey = `${debouncedSearch}|${statusFilter}|${membershipFilter}`;
-
-    // If filters are active and we have a cached dataset, paginate from cache
-    if (hasClientFilter && fullDatasetRef.current?.key === cacheKey) {
-      const cached = fullDatasetRef.current.data;
-      const start = page * pageSize;
-      setUsers(cached.slice(start, start + pageSize));
-      setTotalCount(cached.length);
-      return;
-    }
 
     if (!hasClientFilter) {
+      // Normal paginated fetch — no client-side filtering needed
       fullDatasetRef.current = null;
-    }
-
-    const version = ++fetchVersionRef.current;
-    setLoading(true);
-    setError(null);
-    setFetchProgress(null);
-
-    try {
-      if (!hasClientFilter) {
-        // Normal paginated fetch
+      const version = ++fetchVersionRef.current;
+      setLoading(true);
+      setError(null);
+      setFetchProgress(null);
+      setScanComplete(true);
+      try {
         const result = await api.listUsers({
           offset: page * pageSize,
           limit: pageSize,
@@ -252,60 +251,92 @@ export default function UsersListPage() {
         if (fetchVersionRef.current !== version) return;
         setUsers(result.members);
         setTotalCount(result.total_count);
-        setFilterLimited(false);
-      } else {
-        // Fetch all users for accurate client-side filtering
-        const batchSize = 100;
+      } catch (err) {
+        if (fetchVersionRef.current !== version) return;
+        setError(err instanceof Error ? err.message : 'Failed to load users');
+        setUsers([]);
+      } finally {
+        if (fetchVersionRef.current === version) setLoading(false);
+      }
+      return;
+    }
+
+    // Client-side filter active — progressive scan approach
+    const cacheKey = `${debouncedSearch}|${statusFilter}|${membershipFilter}`;
+    const targetEnd = (page + 1) * pageSize;
+
+    // Check if cache already has enough results for this page
+    const cache = fullDatasetRef.current;
+    if (cache?.key === cacheKey && (cache.items.length >= targetEnd || cache.done)) {
+      const start = page * pageSize;
+      setUsers(cache.items.slice(start, targetEnd));
+      setTotalCount(cache.done
+        ? cache.items.length
+        : estimateFilteredTotal(cache.items.length, cache.scannedOffset, cache.serverTotal)
+      );
+      setScanComplete(cache.done);
+      return;
+    }
+
+    // Need to scan — start fresh or continue from where cache left off
+    const version = ++fetchVersionRef.current;
+    setLoading(true);
+    setError(null);
+    setScanComplete(false);
+
+    let items = cache?.key === cacheKey ? [...cache.items] : [];
+    let offset = cache?.key === cacheKey ? cache.scannedOffset : 0;
+    let serverTotal = cache?.key === cacheKey ? cache.serverTotal : 0;
+
+    try {
+      const batchSize = 100;
+      const parallelism = 10;
+
+      // First batch to learn serverTotal (if starting fresh)
+      if (offset === 0) {
         const first = await api.listUsers({ offset: 0, limit: batchSize, q: debouncedSearch || undefined });
         if (fetchVersionRef.current !== version) return;
-
-        const serverTotal = first.total_count;
-
-        if (serverTotal > MAX_FULL_FETCH) {
-          // Too many users — fall back to current-page-only filtering
-          const members = applyClientFilters(first.members, statusFilter, membershipFilter);
-          setUsers(members);
-          setTotalCount(serverTotal);
-          setFilterLimited(true);
-          setFetchProgress(null);
-          return;
-        }
-
-        let allUsers = [...first.members];
-        setFetchProgress({ loaded: allUsers.length, total: serverTotal });
-
-        // Fetch remaining pages in parallel batches of 5
-        if (serverTotal > batchSize) {
-          const offsets: number[] = [];
-          for (let o = batchSize; o < serverTotal; o += batchSize) {
-            offsets.push(o);
-          }
-          for (let i = 0; i < offsets.length; i += 5) {
-            const batch = offsets.slice(i, i + 5);
-            const results = await Promise.all(
-              batch.map(o => api.listUsers({ offset: o, limit: batchSize, q: debouncedSearch || undefined }))
-            );
-            if (fetchVersionRef.current !== version) return;
-            for (const r of results) {
-              allUsers.push(...r.members);
-            }
-            setFetchProgress({ loaded: allUsers.length, total: serverTotal });
-          }
-        }
-
-        // Apply filters and cache
-        const filtered = applyClientFilters(allUsers, statusFilter, membershipFilter);
-        fullDatasetRef.current = { key: cacheKey, data: filtered };
-        setTotalCount(filtered.length);
-        const start = page * pageSize;
-        setUsers(filtered.slice(start, start + pageSize));
-        setFilterLimited(false);
-        setFetchProgress(null);
+        serverTotal = first.total_count;
+        const matches = applyClientFilters(first.members, statusFilter, membershipFilter);
+        items.push(...matches);
+        offset = batchSize;
+        setFetchProgress({ scanned: Math.min(offset, serverTotal), total: serverTotal, found: items.length });
       }
+
+      // Scan pages until we have enough matching items for the requested page
+      while (items.length < targetEnd && offset < serverTotal) {
+        const batchOffsets: number[] = [];
+        for (let o = offset; o < serverTotal && batchOffsets.length < parallelism; o += batchSize) {
+          batchOffsets.push(o);
+        }
+
+        const results = await Promise.all(
+          batchOffsets.map(o => api.listUsers({ offset: o, limit: batchSize, q: debouncedSearch || undefined }))
+        );
+        if (fetchVersionRef.current !== version) return;
+
+        for (const r of results) {
+          const matches = applyClientFilters(r.members, statusFilter, membershipFilter);
+          items.push(...matches);
+        }
+        offset = batchOffsets[batchOffsets.length - 1] + batchSize;
+        setFetchProgress({ scanned: Math.min(offset, serverTotal), total: serverTotal, found: items.length });
+      }
+
+      const done = offset >= serverTotal;
+      fullDatasetRef.current = { key: cacheKey, items, scannedOffset: offset, serverTotal, done };
+
+      const start = page * pageSize;
+      setUsers(items.slice(start, targetEnd));
+      setTotalCount(done
+        ? items.length
+        : estimateFilteredTotal(items.length, offset, serverTotal)
+      );
+      setScanComplete(done);
+      setFetchProgress(null);
     } catch (err) {
       if (fetchVersionRef.current !== version) return;
-      const msg = err instanceof Error ? err.message : 'Failed to load users';
-      setError(msg);
+      setError(err instanceof Error ? err.message : 'Failed to load users');
       setUsers([]);
     } finally {
       if (fetchVersionRef.current === version) {
@@ -429,7 +460,7 @@ export default function UsersListPage() {
           </p>
         </div>
         <button
-          onClick={fetchUsers}
+          onClick={() => { fullDatasetRef.current = null; fetchUsers(); }}
           disabled={loading}
           className="px-3 py-2 text-sm font-medium bg-accent/50 rounded-lg hover:bg-accent disabled:opacity-30 transition-colors flex items-center gap-1.5"
         >
@@ -496,13 +527,14 @@ export default function UsersListPage() {
           </select>
         </div>
 
-        {/* Warning only shown when dataset is too large for full client-side fetch */}
-        {filterLimited && (
-          <div className="flex items-center gap-2 px-3 py-2 bg-yellow-500/10 border border-yellow-500/20 rounded-lg text-xs text-yellow-400">
-            <svg className="w-3.5 h-3.5 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M12 9v4m0 4h.01M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-            Too many users ({totalCount.toLocaleString()}) to filter completely — showing current page only. Server-side filtering is needed for accurate results (FAC-222).
+        {/* Scanning progress shown when progressively loading filtered results */}
+        {fetchProgress && !loading && (
+          <div className="flex items-center gap-2 px-3 py-2 bg-blue-500/10 border border-blue-500/20 rounded-lg text-xs text-blue-400">
+            <div className="w-3.5 h-3.5 border-2 border-blue-400/30 border-t-blue-400 rounded-full animate-spin flex-shrink-0" />
+            <span>Scanning... found {fetchProgress.found.toLocaleString()} matching ({fetchProgress.scanned.toLocaleString()}/{fetchProgress.total.toLocaleString()} scanned)</span>
+            <div className="flex-1 max-w-[120px] bg-blue-500/20 rounded-full h-1 overflow-hidden">
+              <div className="bg-blue-400 h-full rounded-full transition-all duration-300" style={{ width: `${(fetchProgress.scanned / Math.max(1, fetchProgress.total)) * 100}%` }} />
+            </div>
           </div>
         )}
       </div>
@@ -523,11 +555,11 @@ export default function UsersListPage() {
           <div className="p-8 text-center text-muted-foreground">
             {fetchProgress ? (
               <div className="space-y-2">
-                <span>Loading all users for filtering... {fetchProgress.loaded.toLocaleString()}/{fetchProgress.total.toLocaleString()}</span>
+                <span>Scanning users... found {fetchProgress.found.toLocaleString()} matching ({fetchProgress.scanned.toLocaleString()}/{fetchProgress.total.toLocaleString()} scanned)</span>
                 <div className="w-48 mx-auto bg-accent/30 rounded-full h-1.5 overflow-hidden">
                   <div
                     className="bg-primary h-full rounded-full transition-all duration-300"
-                    style={{ width: `${Math.min(100, (fetchProgress.loaded / Math.max(1, fetchProgress.total)) * 100)}%` }}
+                    style={{ width: `${Math.min(100, (fetchProgress.scanned / Math.max(1, fetchProgress.total)) * 100)}%` }}
                   />
                 </div>
               </div>
@@ -650,7 +682,9 @@ export default function UsersListPage() {
 
           <div className="flex items-center gap-3">
             <span className="text-sm text-muted-foreground">
-              Page {page + 1}{totalCount > 0 ? ` of ${Math.ceil(totalCount / pageSize)}` : ''}{totalCount > 0 ? ` · ${totalCount} total` : ''}
+              Page {page + 1}
+              {totalCount > 0 ? ` of ${!scanComplete ? '~' : ''}${Math.ceil(totalCount / pageSize)}` : ''}
+              {totalCount > 0 ? ` · ${!scanComplete ? '~' : ''}${totalCount.toLocaleString()} ${(statusFilter || membershipFilter !== 'all') ? 'matching' : 'total'}` : ''}
             </span>
             <button
               onClick={() => setPage((p) => Math.max(0, p - 1))}
