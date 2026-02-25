@@ -95,7 +95,7 @@ const MEMBERSHIP_TABS: { value: MembershipFilter; label: string }[] = [
 ];
 
 const PAGE_SIZES = [25, 50, 100];
-const MAX_FULL_FETCH = 5000;
+const MAX_FULL_FETCH = 10000;
 
 function MembershipBadge({ status, plan }: { status: string | null; plan: string | null }) {
   // No membership data at all
