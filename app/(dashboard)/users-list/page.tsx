@@ -209,9 +209,17 @@ export default function UsersListPage() {
         members = members.filter(m => m.status === statusFilter);
       }
       if (membershipFilter === 'member') {
-        members = members.filter(m => m.membership_status != null && m.membership_status !== '');
+        // Axel One = has a paid plan (not free)
+        members = members.filter(m =>
+          m.membership_plan != null &&
+          !m.membership_plan.toLowerCase().includes('free')
+        );
       } else if (membershipFilter === 'non-member') {
-        members = members.filter(m => m.membership_status == null || m.membership_status === '');
+        // No membership = free plan or no plan at all
+        members = members.filter(m =>
+          m.membership_plan == null ||
+          m.membership_plan.toLowerCase().includes('free')
+        );
       }
       setUsers(members);
       setTotalCount(result.total_count);
