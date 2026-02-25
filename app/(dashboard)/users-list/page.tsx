@@ -43,7 +43,11 @@ function timeAgo(dateString: string): string {
 
 function formatDate(dateString: string, tz: Timezone): string {
   if (!dateString) return '—';
-  const date = new Date(dateString);
+  // API returns UTC timestamps without 'Z' suffix — ensure they parse as UTC
+  const normalized = dateString.endsWith('Z') || /[+-]\d{2}:\d{2}$/.test(dateString)
+    ? dateString
+    : dateString + 'Z';
+  const date = new Date(normalized);
   if (isNaN(date.getTime())) return dateString;
 
   return new Intl.DateTimeFormat('en-US', {
