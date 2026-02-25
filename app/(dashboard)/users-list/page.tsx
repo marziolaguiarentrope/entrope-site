@@ -121,6 +121,16 @@ const STATUS_TABS = [
   { value: 'deactivated', label: 'Deactivated' },
 ] as const;
 
+// ── Membership Filter Options ────────────────────────────
+
+type MembershipFilter = 'all' | 'member' | 'non-member';
+
+const MEMBERSHIP_TABS: { value: MembershipFilter; label: string }[] = [
+  { value: 'all', label: 'All' },
+  { value: 'member', label: 'Axel One' },
+  { value: 'non-member', label: 'No Membership' },
+];
+
 const PAGE_SIZES = [25, 50, 100];
 
 function MembershipBadge({ status, plan }: { status: string | null; plan: string | null }) {
@@ -195,6 +205,7 @@ export default function UsersListPage() {
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
+  const [membershipFilter, setMembershipFilter] = useState<MembershipFilter>('all');
   const debounceTimer = useRef<NodeJS.Timeout | null>(null);
 
   // Sorting — default to newest first
@@ -227,10 +238,18 @@ export default function UsersListPage() {
         limit: pageSize,
         q: debouncedSearch || undefined,
       });
-      // Backend doesn't support status filter — filter client-side
-      const members = statusFilter
-        ? result.members.filter(m => m.status === statusFilter)
-        : result.members;
+      // Backend doesn't support status or membership filter — filter client-side
+      // NOTE: Client-side filtering on paginated data only filters the current page.
+      // See FAC-222 for server-side filter support.
+      let members = result.members;
+      if (statusFilter) {
+        members = members.filter(m => m.status === statusFilter);
+      }
+      if (membershipFilter === 'member') {
+        members = members.filter(m => m.membership_status != null && m.membership_status !== '');
+      } else if (membershipFilter === 'non-member') {
+        members = members.filter(m => m.membership_status == null || m.membership_status === '');
+      }
       setUsers(members);
       setTotalCount(result.total_count);
     } catch (err) {
@@ -240,7 +259,7 @@ export default function UsersListPage() {
     } finally {
       setLoading(false);
     }
-  }, [page, pageSize, debouncedSearch, statusFilter]);
+  }, [page, pageSize, debouncedSearch, statusFilter, membershipFilter]);
 
   useEffect(() => {
     fetchUsers();
@@ -249,6 +268,11 @@ export default function UsersListPage() {
   // Reset page when filters change
   function handleStatusChange(status: string | null) {
     setStatusFilter(status);
+    setPage(0);
+  }
+
+  function handleMembershipChange(filter: MembershipFilter) {
+    setMembershipFilter(filter);
     setPage(0);
   }
 
@@ -362,42 +386,71 @@ export default function UsersListPage() {
         </button>
       </div>
 
-      {/* Search + Status Filters */}
-      <div className="flex flex-col sm:flex-row gap-3 mb-4">
-        <input
-          type="text"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search by name or email..."
-          className="flex-1 max-w-md px-4 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
-        />
+      {/* Search + Filters */}
+      <div className="flex flex-col gap-3 mb-4">
+        <div className="flex flex-col sm:flex-row gap-3">
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search by name or email..."
+            className="flex-1 max-w-md px-4 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
+          />
 
-        <div className="flex gap-1">
-          {STATUS_TABS.map((tab) => (
-            <button
-              key={tab.label}
-              onClick={() => handleStatusChange(tab.value)}
-              className={cn(
-                'px-3 py-2 text-xs font-medium rounded-lg transition-colors',
-                statusFilter === tab.value
-                  ? 'bg-primary text-primary-foreground'
-                  : 'bg-accent/50 text-muted-foreground hover:bg-accent'
-              )}
-            >
-              {tab.label}
-            </button>
-          ))}
+          <div className="flex gap-1">
+            {STATUS_TABS.map((tab) => (
+              <button
+                key={tab.label}
+                onClick={() => handleStatusChange(tab.value)}
+                className={cn(
+                  'px-3 py-2 text-xs font-medium rounded-lg transition-colors',
+                  statusFilter === tab.value
+                    ? 'bg-primary text-primary-foreground'
+                    : 'bg-accent/50 text-muted-foreground hover:bg-accent'
+                )}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+
+          <div className="flex gap-1">
+            {MEMBERSHIP_TABS.map((tab) => (
+              <button
+                key={tab.value}
+                onClick={() => handleMembershipChange(tab.value)}
+                className={cn(
+                  'px-3 py-2 text-xs font-medium rounded-lg transition-colors',
+                  membershipFilter === tab.value
+                    ? 'bg-primary text-primary-foreground'
+                    : 'bg-accent/50 text-muted-foreground hover:bg-accent'
+                )}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+
+          <select
+            value={timezone}
+            onChange={(e) => setTimezone(e.target.value as Timezone)}
+            className="bg-background border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+          >
+            {TIMEZONE_OPTIONS.map(opt => (
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
+            ))}
+          </select>
         </div>
 
-        <select
-          value={timezone}
-          onChange={(e) => setTimezone(e.target.value as Timezone)}
-          className="bg-background border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
-        >
-          {TIMEZONE_OPTIONS.map(opt => (
-            <option key={opt.value} value={opt.value}>{opt.label}</option>
-          ))}
-        </select>
+        {/* Warning when client-side filters are active */}
+        {(statusFilter || membershipFilter !== 'all') && (
+          <div className="flex items-center gap-2 px-3 py-2 bg-yellow-500/10 border border-yellow-500/20 rounded-lg text-xs text-yellow-400">
+            <svg className="w-3.5 h-3.5 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M12 9v4m0 4h.01M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+            Filters apply only to the current page of results. Some matching users on other pages may not be shown.
+          </div>
+        )}
       </div>
 
       {/* Table */}
@@ -418,7 +471,7 @@ export default function UsersListPage() {
           </div>
         ) : users.length === 0 ? (
           <div className="p-8 text-center text-muted-foreground">
-            {debouncedSearch || statusFilter
+            {debouncedSearch || statusFilter || membershipFilter !== 'all'
               ? 'No users match the current filters'
               : 'No users found'}
           </div>
