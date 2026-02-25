@@ -95,6 +95,7 @@ const MEMBERSHIP_TABS: { value: MembershipFilter; label: string }[] = [
 ];
 
 const PAGE_SIZES = [25, 50, 100];
+const MAX_FULL_FETCH = 5000;
 
 function MembershipBadge({ status, plan }: { status: string | null; plan: string | null }) {
   // No membership data at all
@@ -171,6 +172,12 @@ export default function UsersListPage() {
   const [membershipFilter, setMembershipFilter] = useState<MembershipFilter>('all');
   const debounceTimer = useRef<NodeJS.Timeout | null>(null);
 
+  // Full-dataset cache for client-side filtering
+  const fullDatasetRef = useRef<{ key: string; data: UserListItem[] } | null>(null);
+  const fetchVersionRef = useRef(0);
+  const [fetchProgress, setFetchProgress] = useState<{ loaded: number; total: number } | null>(null);
+  const [filterLimited, setFilterLimited] = useState(false);
+
   // Sorting — default to newest first
   const [sortKey, setSortKey] = useState<SortKey>('created_at');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
@@ -190,45 +197,121 @@ export default function UsersListPage() {
     };
   }, [search]);
 
-  // Fetch users
+  // Apply membership/status filters to an array of users
+  function applyClientFilters(members: UserListItem[], status: string | null, membership: MembershipFilter): UserListItem[] {
+    let filtered = members;
+    if (status) {
+      filtered = filtered.filter(m => m.status === status);
+    }
+    if (membership === 'member') {
+      filtered = filtered.filter(m =>
+        m.membership_plan != null &&
+        !m.membership_plan.toLowerCase().includes('free')
+      );
+    } else if (membership === 'non-member') {
+      filtered = filtered.filter(m =>
+        m.membership_plan == null ||
+        m.membership_plan.toLowerCase().includes('free')
+      );
+    }
+    return filtered;
+  }
+
+  // Fetch users — when client-side filters are active, fetches ALL users
+  // so filtering is accurate across the full dataset (not just current page).
   const fetchUsers = useCallback(async () => {
+    const hasClientFilter = statusFilter != null || membershipFilter !== 'all';
+    const cacheKey = `${debouncedSearch}|${statusFilter}|${membershipFilter}`;
+
+    // If filters are active and we have a cached dataset, paginate from cache
+    if (hasClientFilter && fullDatasetRef.current?.key === cacheKey) {
+      const cached = fullDatasetRef.current.data;
+      const start = page * pageSize;
+      setUsers(cached.slice(start, start + pageSize));
+      setTotalCount(cached.length);
+      return;
+    }
+
+    if (!hasClientFilter) {
+      fullDatasetRef.current = null;
+    }
+
+    const version = ++fetchVersionRef.current;
     setLoading(true);
     setError(null);
+    setFetchProgress(null);
 
     try {
-      const result = await api.listUsers({
-        offset: page * pageSize,
-        limit: pageSize,
-        q: debouncedSearch || undefined,
-      });
-      // Backend doesn't support status or membership filter — filter client-side
-      // NOTE: Client-side filtering on paginated data only filters the current page.
-      // See FAC-222 for server-side filter support.
-      let members = result.members;
-      if (statusFilter) {
-        members = members.filter(m => m.status === statusFilter);
+      if (!hasClientFilter) {
+        // Normal paginated fetch
+        const result = await api.listUsers({
+          offset: page * pageSize,
+          limit: pageSize,
+          q: debouncedSearch || undefined,
+        });
+        if (fetchVersionRef.current !== version) return;
+        setUsers(result.members);
+        setTotalCount(result.total_count);
+        setFilterLimited(false);
+      } else {
+        // Fetch all users for accurate client-side filtering
+        const batchSize = 100;
+        const first = await api.listUsers({ offset: 0, limit: batchSize, q: debouncedSearch || undefined });
+        if (fetchVersionRef.current !== version) return;
+
+        const serverTotal = first.total_count;
+
+        if (serverTotal > MAX_FULL_FETCH) {
+          // Too many users — fall back to current-page-only filtering
+          const members = applyClientFilters(first.members, statusFilter, membershipFilter);
+          setUsers(members);
+          setTotalCount(serverTotal);
+          setFilterLimited(true);
+          setFetchProgress(null);
+          return;
+        }
+
+        let allUsers = [...first.members];
+        setFetchProgress({ loaded: allUsers.length, total: serverTotal });
+
+        // Fetch remaining pages in parallel batches of 5
+        if (serverTotal > batchSize) {
+          const offsets: number[] = [];
+          for (let o = batchSize; o < serverTotal; o += batchSize) {
+            offsets.push(o);
+          }
+          for (let i = 0; i < offsets.length; i += 5) {
+            const batch = offsets.slice(i, i + 5);
+            const results = await Promise.all(
+              batch.map(o => api.listUsers({ offset: o, limit: batchSize, q: debouncedSearch || undefined }))
+            );
+            if (fetchVersionRef.current !== version) return;
+            for (const r of results) {
+              allUsers.push(...r.members);
+            }
+            setFetchProgress({ loaded: allUsers.length, total: serverTotal });
+          }
+        }
+
+        // Apply filters and cache
+        const filtered = applyClientFilters(allUsers, statusFilter, membershipFilter);
+        fullDatasetRef.current = { key: cacheKey, data: filtered };
+        setTotalCount(filtered.length);
+        const start = page * pageSize;
+        setUsers(filtered.slice(start, start + pageSize));
+        setFilterLimited(false);
+        setFetchProgress(null);
       }
-      if (membershipFilter === 'member') {
-        // Axel One = has a paid plan (not free)
-        members = members.filter(m =>
-          m.membership_plan != null &&
-          !m.membership_plan.toLowerCase().includes('free')
-        );
-      } else if (membershipFilter === 'non-member') {
-        // No membership = free plan or no plan at all
-        members = members.filter(m =>
-          m.membership_plan == null ||
-          m.membership_plan.toLowerCase().includes('free')
-        );
-      }
-      setUsers(members);
-      setTotalCount(result.total_count);
     } catch (err) {
+      if (fetchVersionRef.current !== version) return;
       const msg = err instanceof Error ? err.message : 'Failed to load users';
       setError(msg);
       setUsers([]);
     } finally {
-      setLoading(false);
+      if (fetchVersionRef.current === version) {
+        setLoading(false);
+        setFetchProgress(null);
+      }
     }
   }, [page, pageSize, debouncedSearch, statusFilter, membershipFilter]);
 
@@ -413,13 +496,13 @@ export default function UsersListPage() {
           </select>
         </div>
 
-        {/* Warning when client-side filters are active */}
-        {(statusFilter || membershipFilter !== 'all') && (
+        {/* Warning only shown when dataset is too large for full client-side fetch */}
+        {filterLimited && (
           <div className="flex items-center gap-2 px-3 py-2 bg-yellow-500/10 border border-yellow-500/20 rounded-lg text-xs text-yellow-400">
             <svg className="w-3.5 h-3.5 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M12 9v4m0 4h.01M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
-            Filters apply only to the current page of results. Some matching users on other pages may not be shown.
+            Too many users ({totalCount.toLocaleString()}) to filter completely — showing current page only. Server-side filtering is needed for accurate results (FAC-222).
           </div>
         )}
       </div>
@@ -438,7 +521,19 @@ export default function UsersListPage() {
           </div>
         ) : loading ? (
           <div className="p-8 text-center text-muted-foreground">
-            Loading users...
+            {fetchProgress ? (
+              <div className="space-y-2">
+                <span>Loading all users for filtering... {fetchProgress.loaded.toLocaleString()}/{fetchProgress.total.toLocaleString()}</span>
+                <div className="w-48 mx-auto bg-accent/30 rounded-full h-1.5 overflow-hidden">
+                  <div
+                    className="bg-primary h-full rounded-full transition-all duration-300"
+                    style={{ width: `${Math.min(100, (fetchProgress.loaded / Math.max(1, fetchProgress.total)) * 100)}%` }}
+                  />
+                </div>
+              </div>
+            ) : (
+              'Loading users...'
+            )}
           </div>
         ) : users.length === 0 ? (
           <div className="p-8 text-center text-muted-foreground">
