@@ -1,9 +1,8 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState, useEffect, useRef, useCallback, useMemo, Fragment } from 'react';
 import { api, UserListItem } from '@/lib/api';
-import { cn } from '@/lib/utils';
+import { cn, exportCSV, exportJSON } from '@/lib/utils';
 
 // ── Types ────────────────────────────────────────────────
 
@@ -148,8 +147,6 @@ const COLUMNS = [
 // ── Main Page ────────────────────────────────────────────
 
 export default function UsersListPage() {
-  const router = useRouter();
-
   // Data
   const [users, setUsers] = useState<UserListItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -182,6 +179,9 @@ export default function UsersListPage() {
   const fetchVersionRef = useRef(0);
   const [fetchProgress, setFetchProgress] = useState<{ scanned: number; total: number; found: number } | null>(null);
   const [scanComplete, setScanComplete] = useState(true);
+
+  // Expanded row preview
+  const [expandedUserId, setExpandedUserId] = useState<string | null>(null);
 
   // Sorting — default to newest first
   const [sortKey, setSortKey] = useState<SortKey>('created_at');
@@ -366,6 +366,42 @@ export default function UsersListPage() {
     setPage(0);
   }
 
+  // Collapse expanded row when context changes
+  useEffect(() => {
+    setExpandedUserId(null);
+  }, [page, pageSize, statusFilter, membershipFilter, debouncedSearch, sortKey, sortDir]);
+
+  // Export visible or cached data
+  function handleExport(format: 'csv' | 'json') {
+    // If filters are active and we have cached results, export all matches
+    // Otherwise export the current page's sorted data
+    const hasClientFilter = statusFilter != null || membershipFilter !== 'all';
+    const dataToExport = hasClientFilter && fullDatasetRef.current?.items.length
+      ? fullDatasetRef.current.items
+      : sortedUsers;
+
+    const rows = dataToExport.map(u => ({
+      id: u.id,
+      name: u.name || '',
+      email: u.email || '',
+      phone: u.phone_number || '',
+      status: u.status,
+      membership_status: u.membership_status || '',
+      membership_plan: u.membership_plan || '',
+      hotel_count: u.hotel_count ?? 0,
+      flight_count: u.flight_count ?? 0,
+      email_count: u.email_count ?? 0,
+      created_at: u.created_at,
+    }));
+
+    const timestamp = new Date().toISOString().slice(0, 10);
+    if (format === 'csv') {
+      exportCSV(rows, `users-${timestamp}.csv`);
+    } else {
+      exportJSON(rows, `users-${timestamp}.json`);
+    }
+  }
+
   // Column resize handlers
   const handleResizeStart = useCallback((colIndex: number, e: React.MouseEvent) => {
     e.preventDefault();
@@ -459,16 +495,45 @@ export default function UsersListPage() {
             Browse all users with pagination, filtering, and search
           </p>
         </div>
-        <button
-          onClick={() => { fullDatasetRef.current = null; fetchUsers(); }}
-          disabled={loading}
-          className="px-3 py-2 text-sm font-medium bg-accent/50 rounded-lg hover:bg-accent disabled:opacity-30 transition-colors flex items-center gap-1.5"
-        >
-          <svg className={cn("w-4 h-4", loading && "animate-spin")} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M21 12a9 9 0 1 1-9-9" strokeLinecap="round" />
-          </svg>
-          Refresh
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => handleExport('csv')}
+            disabled={loading || users.length === 0}
+            className="px-3 py-2 text-sm font-medium bg-accent/50 rounded-lg hover:bg-accent disabled:opacity-30 transition-colors flex items-center gap-1.5"
+            title={fullDatasetRef.current?.items.length ? `Export all ${fullDatasetRef.current.items.length} matching` : `Export current page (${sortedUsers.length})`}
+          >
+            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" strokeLinecap="round" strokeLinejoin="round" />
+              <polyline points="7 10 12 15 17 10" strokeLinecap="round" strokeLinejoin="round" />
+              <line x1="12" y1="15" x2="12" y2="3" strokeLinecap="round" />
+            </svg>
+            CSV
+          </button>
+          <button
+            onClick={() => handleExport('json')}
+            disabled={loading || users.length === 0}
+            className="px-3 py-2 text-sm font-medium bg-accent/50 rounded-lg hover:bg-accent disabled:opacity-30 transition-colors flex items-center gap-1.5"
+            title={fullDatasetRef.current?.items.length ? `Export all ${fullDatasetRef.current.items.length} matching` : `Export current page (${sortedUsers.length})`}
+          >
+            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" strokeLinecap="round" strokeLinejoin="round" />
+              <polyline points="7 10 12 15 17 10" strokeLinecap="round" strokeLinejoin="round" />
+              <line x1="12" y1="15" x2="12" y2="3" strokeLinecap="round" />
+            </svg>
+            JSON
+          </button>
+          <div className="w-px h-6 bg-border" />
+          <button
+            onClick={() => { fullDatasetRef.current = null; fetchUsers(); }}
+            disabled={loading}
+            className="px-3 py-2 text-sm font-medium bg-accent/50 rounded-lg hover:bg-accent disabled:opacity-30 transition-colors flex items-center gap-1.5"
+          >
+            <svg className={cn("w-4 h-4", loading && "animate-spin")} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M21 12a9 9 0 1 1-9-9" strokeLinecap="round" />
+            </svg>
+            Refresh
+          </button>
+        </div>
       </div>
 
       {/* Search + Filters */}
@@ -609,55 +674,147 @@ export default function UsersListPage() {
                 </tr>
               </thead>
               <tbody>
-                {sortedUsers.map((user) => (
-                  <tr
-                    key={user.id}
-                    onClick={() => router.push(`/users-list/${user.id}`)}
-                    onMouseEnter={() => router.prefetch(`/users-list/${user.id}`)}
-                    className="border-b border-border last:border-0 hover:bg-accent/50 transition-colors cursor-pointer"
-                  >
-                    <td style={{ width: colWidths[0] }} className="px-4 py-3 text-sm font-medium truncate">
-                      {user.name || '—'}
-                    </td>
-                    <td style={{ width: colWidths[1] }} className="px-4 py-3 text-sm text-muted-foreground truncate">
-                      {user.email || '—'}
-                    </td>
-                    <td style={{ width: colWidths[2] }} className="px-4 py-3 text-sm text-muted-foreground truncate">
-                      {user.phone_number || '—'}
-                    </td>
-                    <td style={{ width: colWidths[3] }} className="px-4 py-3">
-                      <StatusBadge status={user.status} />
-                    </td>
-                    <td style={{ width: colWidths[4] }} className="px-4 py-3">
-                      <MembershipBadge status={user.membership_status} plan={user.membership_plan} />
-                    </td>
-                    <td style={{ width: colWidths[5] }} className="px-4 py-3 text-sm text-center tabular-nums">
-                      {user.hotel_count != null ? (
-                        <span className={user.hotel_count > 0 ? 'text-foreground' : 'text-muted-foreground'}>{user.hotel_count}</span>
-                      ) : (
-                        <span className="text-muted-foreground/40">—</span>
+                {sortedUsers.map((user) => {
+                  const isExpanded = expandedUserId === user.id;
+                  return (
+                    <Fragment key={user.id}>
+                      <tr
+                        onClick={() => setExpandedUserId(isExpanded ? null : user.id)}
+                        className={cn(
+                          "border-b border-border hover:bg-accent/50 transition-colors cursor-pointer",
+                          isExpanded && "bg-accent/40 border-b-0"
+                        )}
+                      >
+                        <td style={{ width: colWidths[0] }} className="px-4 py-3 text-sm font-medium truncate">
+                          <span className="inline-flex items-center gap-1.5">
+                            <svg
+                              className={cn("w-3 h-3 text-muted-foreground/60 transition-transform flex-shrink-0", isExpanded && "rotate-90")}
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                            >
+                              <polyline points="9 18 15 12 9 6" strokeLinecap="round" strokeLinejoin="round" />
+                            </svg>
+                            {user.name || '—'}
+                          </span>
+                        </td>
+                        <td style={{ width: colWidths[1] }} className="px-4 py-3 text-sm text-muted-foreground truncate">
+                          {user.email || '—'}
+                        </td>
+                        <td style={{ width: colWidths[2] }} className="px-4 py-3 text-sm text-muted-foreground truncate">
+                          {user.phone_number || '—'}
+                        </td>
+                        <td style={{ width: colWidths[3] }} className="px-4 py-3">
+                          <StatusBadge status={user.status} />
+                        </td>
+                        <td style={{ width: colWidths[4] }} className="px-4 py-3">
+                          <MembershipBadge status={user.membership_status} plan={user.membership_plan} />
+                        </td>
+                        <td style={{ width: colWidths[5] }} className="px-4 py-3 text-sm text-center tabular-nums">
+                          {user.hotel_count != null ? (
+                            <span className={user.hotel_count > 0 ? 'text-foreground' : 'text-muted-foreground'}>{user.hotel_count}</span>
+                          ) : (
+                            <span className="text-muted-foreground/40">—</span>
+                          )}
+                        </td>
+                        <td style={{ width: colWidths[6] }} className="px-4 py-3 text-sm text-center tabular-nums">
+                          {user.flight_count != null ? (
+                            <span className={user.flight_count > 0 ? 'text-foreground' : 'text-muted-foreground'}>{user.flight_count}</span>
+                          ) : (
+                            <span className="text-muted-foreground/40">—</span>
+                          )}
+                        </td>
+                        <td style={{ width: colWidths[7] }} className="px-4 py-3 text-sm text-center tabular-nums">
+                          {user.email_count != null ? (
+                            <span className={user.email_count > 0 ? 'text-foreground' : 'text-muted-foreground'}>{user.email_count}</span>
+                          ) : (
+                            <span className="text-muted-foreground/40">—</span>
+                          )}
+                        </td>
+                        <td style={{ width: colWidths[8] }} className="px-4 py-3 text-sm text-muted-foreground truncate">
+                          <span>{formatDate(user.created_at, timezone)}</span>
+                          <span className="text-xs text-muted-foreground/60 ml-1.5">({timeAgo(user.created_at)})</span>
+                        </td>
+                      </tr>
+                      {isExpanded && (
+                        <tr className="border-b border-border bg-accent/20">
+                          <td colSpan={COLUMNS.length} className="p-0">
+                            <div className="px-6 py-4">
+                              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-x-8 gap-y-3 text-sm">
+                                <div>
+                                  <div className="text-[11px] font-medium text-muted-foreground/70 uppercase tracking-wider mb-0.5">User ID</div>
+                                  <div className="font-mono text-xs text-muted-foreground select-all">{user.id}</div>
+                                </div>
+                                <div>
+                                  <div className="text-[11px] font-medium text-muted-foreground/70 uppercase tracking-wider mb-0.5">Name</div>
+                                  <div className="font-medium">{user.name || '—'}</div>
+                                </div>
+                                <div>
+                                  <div className="text-[11px] font-medium text-muted-foreground/70 uppercase tracking-wider mb-0.5">Email</div>
+                                  <div className="text-muted-foreground break-all">{user.email || '—'}</div>
+                                </div>
+                                <div>
+                                  <div className="text-[11px] font-medium text-muted-foreground/70 uppercase tracking-wider mb-0.5">Phone</div>
+                                  <div className="text-muted-foreground">{user.phone_number || '—'}</div>
+                                </div>
+                                <div>
+                                  <div className="text-[11px] font-medium text-muted-foreground/70 uppercase tracking-wider mb-0.5">Status</div>
+                                  <div><StatusBadge status={user.status} /></div>
+                                </div>
+                                <div>
+                                  <div className="text-[11px] font-medium text-muted-foreground/70 uppercase tracking-wider mb-0.5">Membership</div>
+                                  <div className="flex flex-col gap-0.5">
+                                    <MembershipBadge status={user.membership_status} plan={user.membership_plan} />
+                                    {user.membership_status && (
+                                      <span className="text-[11px] text-muted-foreground/60">Status: {user.membership_status}</span>
+                                    )}
+                                  </div>
+                                </div>
+                                <div>
+                                  <div className="text-[11px] font-medium text-muted-foreground/70 uppercase tracking-wider mb-0.5">Activity</div>
+                                  <div className="flex items-center gap-3 text-muted-foreground text-xs">
+                                    <span className={user.hotel_count ? 'text-foreground' : ''}>{user.hotel_count ?? 0} hotels</span>
+                                    <span className="text-muted-foreground/30">·</span>
+                                    <span className={user.flight_count ? 'text-foreground' : ''}>{user.flight_count ?? 0} flights</span>
+                                    <span className="text-muted-foreground/30">·</span>
+                                    <span className={user.email_count ? 'text-foreground' : ''}>{user.email_count ?? 0} emails</span>
+                                  </div>
+                                </div>
+                                <div>
+                                  <div className="text-[11px] font-medium text-muted-foreground/70 uppercase tracking-wider mb-0.5">Created</div>
+                                  <div className="text-muted-foreground">
+                                    {formatDate(user.created_at, timezone)}
+                                    <span className="text-xs text-muted-foreground/60 ml-1">({timeAgo(user.created_at)})</span>
+                                  </div>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-3 mt-4 pt-3 border-t border-border/50">
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); window.open(`/users-list/${user.id}`, '_blank'); }}
+                                  className="px-4 py-1.5 text-sm font-medium bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors inline-flex items-center gap-1.5"
+                                >
+                                  Open Full Profile
+                                  <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                    <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" strokeLinecap="round" strokeLinejoin="round" />
+                                    <polyline points="15 3 21 3 21 9" strokeLinecap="round" strokeLinejoin="round" />
+                                    <line x1="10" y1="14" x2="21" y2="3" strokeLinecap="round" />
+                                  </svg>
+                                </button>
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); setExpandedUserId(null); }}
+                                  className="px-4 py-1.5 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+                                >
+                                  Collapse
+                                </button>
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
                       )}
-                    </td>
-                    <td style={{ width: colWidths[6] }} className="px-4 py-3 text-sm text-center tabular-nums">
-                      {user.flight_count != null ? (
-                        <span className={user.flight_count > 0 ? 'text-foreground' : 'text-muted-foreground'}>{user.flight_count}</span>
-                      ) : (
-                        <span className="text-muted-foreground/40">—</span>
-                      )}
-                    </td>
-                    <td style={{ width: colWidths[7] }} className="px-4 py-3 text-sm text-center tabular-nums">
-                      {user.email_count != null ? (
-                        <span className={user.email_count > 0 ? 'text-foreground' : 'text-muted-foreground'}>{user.email_count}</span>
-                      ) : (
-                        <span className="text-muted-foreground/40">—</span>
-                      )}
-                    </td>
-                    <td style={{ width: colWidths[8] }} className="px-4 py-3 text-sm text-muted-foreground truncate">
-                      <span>{formatDate(user.created_at, timezone)}</span>
-                      <span className="text-xs text-muted-foreground/60 ml-1.5">({timeAgo(user.created_at)})</span>
-                    </td>
-                  </tr>
-                ))}
+                    </Fragment>
+                  );
+                })}
               </tbody>
             </table>
           </div>
