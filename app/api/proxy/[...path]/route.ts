@@ -36,6 +36,25 @@ async function fetchWithTimeout(
   }
 }
 
+/**
+ * Safely parse the backend response, handling non-JSON bodies (HTML error pages, etc.)
+ * instead of letting response.json() throw and lose the real error.
+ */
+async function safeParseResponse(response: Response): Promise<NextResponse> {
+  const text = await response.text();
+  try {
+    const data = JSON.parse(text);
+    return NextResponse.json(data, { status: response.status });
+  } catch {
+    // Backend returned non-JSON (HTML error page, plain text, etc.)
+    // Forward the raw text so callers can see the actual error
+    return NextResponse.json(
+      { error: text.slice(0, 500) || `Backend returned ${response.status} with empty body` },
+      { status: response.status }
+    );
+  }
+}
+
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ path: string[] }> }
@@ -58,14 +77,13 @@ export async function GET(
       },
     });
 
-    const data = await response.json();
-    return NextResponse.json(data, { status: response.status });
+    return await safeParseResponse(response);
   } catch (error: unknown) {
     if (error instanceof Error && error.name === 'AbortError') {
       return NextResponse.json({ error: 'Gateway timeout — backend did not respond in time' }, { status: 504 });
     }
     console.error('Proxy GET error:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return NextResponse.json({ error: 'Proxy error: ' + (error instanceof Error ? error.message : 'unknown') }, { status: 502 });
   }
 }
 
@@ -92,14 +110,13 @@ export async function POST(
       body,
     });
 
-    const data = await response.json();
-    return NextResponse.json(data, { status: response.status });
+    return await safeParseResponse(response);
   } catch (error: unknown) {
     if (error instanceof Error && error.name === 'AbortError') {
       return NextResponse.json({ error: 'Gateway timeout — backend did not respond in time' }, { status: 504 });
     }
     console.error('Proxy POST error:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return NextResponse.json({ error: 'Proxy error: ' + (error instanceof Error ? error.message : 'unknown') }, { status: 502 });
   }
 }
 
@@ -126,14 +143,13 @@ export async function PATCH(
       body,
     });
 
-    const data = await response.json();
-    return NextResponse.json(data, { status: response.status });
+    return await safeParseResponse(response);
   } catch (error: unknown) {
     if (error instanceof Error && error.name === 'AbortError') {
       return NextResponse.json({ error: 'Gateway timeout — backend did not respond in time' }, { status: 504 });
     }
     console.error('Proxy PATCH error:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return NextResponse.json({ error: 'Proxy error: ' + (error instanceof Error ? error.message : 'unknown') }, { status: 502 });
   }
 }
 
@@ -158,13 +174,12 @@ export async function DELETE(
       },
     });
 
-    const data = await response.json();
-    return NextResponse.json(data, { status: response.status });
+    return await safeParseResponse(response);
   } catch (error: unknown) {
     if (error instanceof Error && error.name === 'AbortError') {
       return NextResponse.json({ error: 'Gateway timeout — backend did not respond in time' }, { status: 504 });
     }
     console.error('Proxy DELETE error:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return NextResponse.json({ error: 'Proxy error: ' + (error instanceof Error ? error.message : 'unknown') }, { status: 502 });
   }
 }
