@@ -253,6 +253,14 @@ export interface FlightConversionSendMessageResponse {
   error: string | null;
 }
 
+export interface OperatorAxelMessageSendResponse {
+  message_id: string | null;
+  status: string;
+  approval_status: string | null;
+  provider_message_id: string | null;
+  error: string | null;
+}
+
 class ApiClient {
   private baseUrl: string;
 
@@ -544,6 +552,20 @@ class ApiClient {
       return this.searchMemberByPhone(query.trim());
     }
     return this.searchMemberByEmail(query.trim());
+  }
+
+  async sendMemberAxelMessage(
+    userId: string,
+    data: {
+      body: string;
+      subject?: string;
+      idempotency_key?: string;
+    },
+  ): Promise<OperatorAxelMessageSendResponse> {
+    return this.fetch<OperatorAxelMessageSendResponse>(`/members/${userId}/send-axel-message`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
   }
 
   async getMember(userId: string): Promise<MemberContext> {
