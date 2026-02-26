@@ -18,7 +18,7 @@ type SortDir = 'asc' | 'desc';
 
 type StatusTotals = Record<FlightConversionTaskStatus, number>;
 
-const STATUS_PAGE_LIMIT = 500;
+const STATUS_PAGE_LIMIT = 100;
 const STATUSES: FlightConversionTaskStatus[] = ['pending', 'claimed', 'completed', 'blocked'];
 const EMPTY_STATUS_TOTALS: StatusTotals = {
   pending: 0,
