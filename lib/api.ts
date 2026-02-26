@@ -169,6 +169,90 @@ export interface PendingEmailDetail {
   member_url: string | null;
 }
 
+export type FlightConversionTaskStatus = 'pending' | 'claimed' | 'blocked' | 'completed';
+
+export interface FlightConversionSummary {
+  quote_request_id: string | null;
+  origin: string | null;
+  destination: string | null;
+  departure_date: string | null;
+  return_date: string | null;
+  cabin: string | null;
+  passengers: number | null;
+  best_axel_savings_cents: number | null;
+  converted_at: string | null;
+}
+
+export interface FlightConversionListItem {
+  task: Task;
+  summary: FlightConversionSummary;
+}
+
+export interface FlightConversionListResponse {
+  items: FlightConversionListItem[];
+  total: number;
+}
+
+export interface FlightResultLegSnapshot {
+  stops: number;
+  duration_minutes: number | null;
+  departure_time: string | null;
+  arrival_time: string | null;
+  flight_numbers: string[];
+  stop_cities: string[];
+}
+
+export interface FlightResultSnapshot {
+  price_cents: number;
+  axel_price_cents: number | null;
+  axel_savings_cents: number | null;
+  currency: string;
+  carriers: string[];
+  carrier_names: Record<string, string>;
+  outbound: FlightResultLegSnapshot | null;
+  return: FlightResultLegSnapshot | null;
+}
+
+export interface FlightConversionFulfillmentContext {
+  quote_request_id: string;
+  origin: string | null;
+  destination: string | null;
+  departure_date: string | null;
+  return_date: string | null;
+  cabin: string | null;
+  passengers: number | null;
+  results_snapshot: FlightResultSnapshot[] | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface FlightConversionUser {
+  id: string;
+  email?: string | null;
+  phone?: string | null;
+  phone_number?: string | null;
+  first_name?: string | null;
+  last_name?: string | null;
+  name?: string | null;
+  [key: string]: unknown;
+}
+
+export interface FlightConversionDetail {
+  task: Task;
+  user: FlightConversionUser | null;
+  quote_request_id: string;
+  fulfillment_context: FlightConversionFulfillmentContext | null;
+  recent_communications: CommunicationView[];
+}
+
+export interface FlightConversionSendMessageResponse {
+  message_id: string | null;
+  status: string;
+  approval_status: string | null;
+  provider_message_id: string | null;
+  error: string | null;
+}
+
 class ApiClient {
   private baseUrl: string;
 
@@ -356,6 +440,70 @@ class ApiClient {
     return this.fetch<PendingEmail>(`/pending-emails/${id}/reject`, {
       method: 'POST',
       body: JSON.stringify({ reason }),
+    });
+  }
+
+  // Flight watch conversions (operator fulfillment)
+  async listFlightConversions(params?: {
+    status?: FlightConversionTaskStatus;
+    limit?: number;
+    offset?: number;
+  }): Promise<FlightConversionListResponse> {
+    const searchParams = new URLSearchParams();
+    if (params?.status) searchParams.set('status', params.status);
+    if (params?.limit !== undefined) searchParams.set('limit', params.limit.toString());
+    if (params?.offset !== undefined) searchParams.set('offset', params.offset.toString());
+
+    const query = searchParams.toString();
+    return this.fetch<FlightConversionListResponse>(`/flight-conversions/${query ? `?${query}` : ''}`);
+  }
+
+  async getFlightConversionDetail(taskId: string): Promise<FlightConversionDetail> {
+    return this.fetch<FlightConversionDetail>(`/flight-conversions/${taskId}`);
+  }
+
+  async sendFlightConversionMessage(
+    taskId: string,
+    data: {
+      body: string;
+      subject?: string;
+      idempotency_key?: string;
+    },
+  ): Promise<FlightConversionSendMessageResponse> {
+    return this.fetch<FlightConversionSendMessageResponse>(`/flight-conversions/${taskId}/send-message`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async claimFlightConversionTask(taskId: string): Promise<Task> {
+    return this.fetch<Task>(`/flight-conversions/${taskId}/claim`, { method: 'POST' });
+  }
+
+  async unclaimFlightConversionTask(taskId: string): Promise<Task> {
+    return this.fetch<Task>(`/flight-conversions/${taskId}/unclaim`, { method: 'POST' });
+  }
+
+  async blockFlightConversionTask(taskId: string, reason: string): Promise<Task> {
+    return this.fetch<Task>(`/flight-conversions/${taskId}/block`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    });
+  }
+
+  async completeFlightConversionTask(
+    taskId: string,
+    data: {
+      outcome: 'success' | 'partial' | 'failure';
+      fulfillment_outcome?: string;
+      contacted_via?: string;
+      message_ids?: string[];
+      notes?: string;
+    },
+  ): Promise<Task> {
+    return this.fetch<Task>(`/flight-conversions/${taskId}/complete`, {
+      method: 'POST',
+      body: JSON.stringify(data),
     });
   }
 
