@@ -22,6 +22,7 @@ import {
   FlightOpportunityView,
   FlightBookingView,
   HotelBookingView,
+  RawEmail,
 } from '@/lib/api';
 
 // ---------------------------------------------------------------------------
@@ -1075,6 +1076,138 @@ function IssueActions({
 }
 
 // ---------------------------------------------------------------------------
+// Expandable original email viewer — lazy-loads email for a booking
+// ---------------------------------------------------------------------------
+
+function BookingEmailViewer({ issue }: { issue: RepricingPipelineIssue }) {
+  const [showEmail, setShowEmail] = useState(false);
+  const [email, setEmail] = useState<RawEmail | null>(null);
+  const [emailLoading, setEmailLoading] = useState(false);
+  const [emailError, setEmailError] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState(false);
+
+  async function loadEmail() {
+    if (!issue.booking_id || !issue.booking_type) return;
+    setEmailLoading(true);
+    setEmailError(null);
+    try {
+      const result = await api.getEmailForBooking(
+        issue.booking_type as 'flight' | 'hotel',
+        issue.booking_id
+      );
+      setEmail(result);
+    } catch (err) {
+      setEmailError(err instanceof Error ? err.message : 'Failed to load email');
+    } finally {
+      setEmailLoading(false);
+    }
+  }
+
+  function handleToggle() {
+    const next = !showEmail;
+    setShowEmail(next);
+    if (next && !email && !emailLoading) {
+      loadEmail();
+    }
+  }
+
+  if (!issue.booking_id || !issue.booking_type) return null;
+
+  return (
+    <div className="mt-3">
+      <button
+        onClick={handleToggle}
+        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-accent/50 text-muted-foreground hover:bg-accent hover:text-foreground rounded transition-colors"
+      >
+        <Mail className="size-3" />
+        {showEmail ? 'Hide Original Email' : 'View Original Email'}
+        {showEmail ? <ChevronDown className="size-3 ml-0.5" /> : <ChevronRight className="size-3 ml-0.5" />}
+      </button>
+
+      {showEmail && (
+        <div className="mt-2 border border-border rounded-lg overflow-hidden bg-card">
+          {emailLoading ? (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground p-4">
+              <Loader2 className="size-3.5 animate-spin" />
+              Loading email...
+            </div>
+          ) : emailError ? (
+            <div className="p-4">
+              <div className="bg-red-500/10 rounded p-3">
+                <p className="text-sm text-red-400">{emailError}</p>
+                <button onClick={loadEmail} className="mt-2 text-xs text-primary hover:underline">
+                  Retry
+                </button>
+              </div>
+            </div>
+          ) : !email ? (
+            <p className="text-sm text-muted-foreground p-4">No source email found for this booking.</p>
+          ) : (
+            <div className="text-sm">
+              {/* Email metadata */}
+              <div className="px-4 py-3 space-y-1 border-b border-border bg-accent/20">
+                <div>
+                  <span className="text-muted-foreground">From: </span>
+                  <span>{email.from_address || 'N/A'}</span>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">To: </span>
+                  <span>{email.to_address || 'N/A'}</span>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">Subject: </span>
+                  <span className="font-medium">{email.subject || 'N/A'}</span>
+                </div>
+                {email.received_at && (
+                  <div>
+                    <span className="text-muted-foreground">Received: </span>
+                    <span>{new Date(email.received_at).toLocaleString()}</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Email body */}
+              <div className="px-4 py-3">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs text-muted-foreground font-medium">Email Body</span>
+                  <button
+                    onClick={() => setExpanded(!expanded)}
+                    className="text-xs text-primary hover:underline"
+                  >
+                    {expanded ? 'Collapse' : 'Expand full'}
+                  </button>
+                </div>
+                <div
+                  className={cn(
+                    'bg-white rounded p-3 overflow-y-auto text-sm email-html-render',
+                    expanded ? 'max-h-[600px]' : 'max-h-56'
+                  )}
+                  dangerouslySetInnerHTML={{ __html: email.body_html || email.body || 'No content' }}
+                />
+              </div>
+
+              {/* Attachments */}
+              {email.attachments && email.attachments.length > 0 && (
+                <div className="px-4 py-3 border-t border-border">
+                  <p className="text-xs text-muted-foreground mb-1.5">Attachments:</p>
+                  <div className="flex flex-wrap gap-2">
+                    {email.attachments.map((att, i) => (
+                      <span key={i} className="px-2 py-1 bg-accent/30 text-xs rounded border border-border">
+                        {att.filename}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Issue row component
 // ---------------------------------------------------------------------------
 
@@ -1252,6 +1385,9 @@ function IssueRow({
 
             {/* Rich member context */}
             <IssueContextPanel issue={issue} memberContext={memberContext} />
+
+            {/* Original booking email */}
+            <BookingEmailViewer issue={issue} />
 
             {/* Contextual actions */}
             <IssueActions issue={issue} onActionComplete={() => onActionComplete(issueKey)} memberContext={memberContext} />
