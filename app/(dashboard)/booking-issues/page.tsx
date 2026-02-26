@@ -1169,21 +1169,38 @@ function BookingEmailViewer({ issue }: { issue: RepricingPipelineIssue }) {
               {/* Email body */}
               <div className="px-4 py-3">
                 <div className="flex items-center justify-between mb-2">
-                  <span className="text-xs text-muted-foreground font-medium">Email Body</span>
+                  <span className="text-xs text-muted-foreground font-medium">
+                    Email Body {email.body_html ? '(HTML)' : '(Plain Text)'}
+                  </span>
                   <button
                     onClick={() => setExpanded(!expanded)}
-                    className="text-xs text-primary hover:underline"
+                    className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:text-primary/80 transition-colors"
                   >
-                    {expanded ? 'Collapse' : 'Expand full'}
+                    {expanded ? (
+                      <><ChevronDown className="size-3" /> Collapse</>
+                    ) : (
+                      <><ChevronRight className="size-3" /> Expand full</>
+                    )}
                   </button>
                 </div>
-                <div
-                  className={cn(
-                    'bg-white rounded p-3 overflow-y-auto text-sm email-html-render',
-                    expanded ? 'max-h-[600px]' : 'max-h-56'
-                  )}
-                  dangerouslySetInnerHTML={{ __html: email.body_html || email.body || 'No content' }}
-                />
+                {email.body_html ? (
+                  <div
+                    className={cn(
+                      'bg-muted/30 rounded p-3 overflow-y-auto text-sm text-foreground email-html-render',
+                      expanded ? 'max-h-none' : 'max-h-56'
+                    )}
+                    dangerouslySetInnerHTML={{ __html: email.body_html }}
+                  />
+                ) : (
+                  <pre
+                    className={cn(
+                      'bg-muted/30 rounded p-3 overflow-y-auto text-sm text-foreground font-sans whitespace-pre-wrap break-words',
+                      expanded ? 'max-h-none' : 'max-h-56'
+                    )}
+                  >
+                    {email.body_text || email.body || 'No content'}
+                  </pre>
+                )}
               </div>
 
               {/* Attachments */}
