@@ -331,7 +331,7 @@ function IssueContextPanel({
   // Fallback: fetch hotel booking directly if not found in member context
   const [fallbackHotel, setFallbackHotel] = useState<HotelBookingDetail | null>(null);
   const [fallbackLoading, setFallbackLoading] = useState(false);
-  const fallbackAttempted = useRef(false);
+  const [fallbackError, setFallbackError] = useState<string | null>(null);
 
   const booking = memberContext && typeof memberContext === 'object'
     ? findBooking(memberContext, issue.booking_id)
@@ -343,23 +343,30 @@ function IssueContextPanel({
     ? findOpportunity(memberContext, issue)
     : undefined;
 
-  // Trigger fallback fetch when member context loaded but booking not found
-  useEffect(() => {
-    if (
-      memberContext && typeof memberContext === 'object' &&
-      !booking &&
-      issue.booking_id &&
-      issue.booking_type === 'hotel' &&
-      !fallbackAttempted.current
-    ) {
-      fallbackAttempted.current = true;
-      setFallbackLoading(true);
-      api.getHotelBookingDetail(issue.booking_id)
-        .then(setFallbackHotel)
-        .catch(() => {}) // silently fail — we'll just show "not found"
-        .finally(() => setFallbackLoading(false));
+  const needsFallback = memberContext && typeof memberContext === 'object' && !booking && issue.booking_id && issue.booking_type === 'hotel';
+
+  const fetchFallbackHotel = useCallback(async () => {
+    if (!issue.booking_id) return;
+    setFallbackLoading(true);
+    setFallbackError(null);
+    try {
+      const detail = await api.getHotelBookingDetail(issue.booking_id);
+      setFallbackHotel(detail);
+    } catch (err) {
+      setFallbackError(err instanceof Error ? err.message : 'Failed to fetch booking directly');
+    } finally {
+      setFallbackLoading(false);
     }
-  }, [memberContext, booking, issue.booking_id, issue.booking_type]);
+  }, [issue.booking_id]);
+
+  // Trigger fallback fetch when member context loaded but booking not found
+  const fallbackAttempted = useRef(false);
+  useEffect(() => {
+    if (needsFallback && !fallbackAttempted.current && !fallbackHotel) {
+      fallbackAttempted.current = true;
+      fetchFallbackHotel();
+    }
+  }, [needsFallback, fallbackHotel, fetchFallbackHotel]);
 
   if (!memberContext) return null;
 
@@ -391,12 +398,21 @@ function IssueContextPanel({
   const hasAnything = booking || watch || opportunity || fallbackHotel;
 
   if (!hasAnything) {
-    const missingNote = issue.booking_type === 'flight'
-      ? 'No matching booking found in member context. Direct flight booking lookup is not yet available.'
-      : 'No matching booking, watch, or opportunity found in member context.';
     return (
       <div className="mt-3 pt-3 border-t border-border/30">
-        <p className="text-xs text-muted-foreground">{missingNote}</p>
+        {fallbackError ? (
+          <div className="text-xs">
+            <span className="text-muted-foreground">Booking not found in member context. Direct lookup failed: </span>
+            <span className="text-red-400">{fallbackError}</span>
+            <button onClick={fetchFallbackHotel} className="ml-2 text-primary hover:underline">
+              Retry
+            </button>
+          </div>
+        ) : issue.booking_type === 'flight' ? (
+          <p className="text-xs text-muted-foreground">No matching booking found in member context. Direct flight booking lookup is not yet available.</p>
+        ) : (
+          <p className="text-xs text-muted-foreground">No matching booking, watch, or opportunity found in member context.</p>
+        )}
       </div>
     );
   }
