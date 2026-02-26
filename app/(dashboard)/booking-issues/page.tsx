@@ -23,6 +23,7 @@ import {
   FlightBookingView,
   HotelBookingView,
   RawEmail,
+  HotelBookingDetail,
 } from '@/lib/api';
 
 // ---------------------------------------------------------------------------
@@ -270,6 +271,56 @@ function getBookingSummary(ctx: MemberContext | undefined, bookingId: string | n
 // Context panel — shows booking, watch, and opportunity details
 // ---------------------------------------------------------------------------
 
+// Fallback card for hotel bookings fetched directly (not from member context)
+function HotelBookingFallbackCard({ detail }: { detail: HotelBookingDetail }) {
+  return (
+    <div className="bg-accent/20 rounded-lg p-3 border border-border/50">
+      <div className="flex items-center gap-2 mb-2">
+        <Hotel className="size-3.5 text-purple-400" />
+        <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Booking</span>
+        <span className="text-[10px] text-muted-foreground italic ml-1">(direct lookup)</span>
+        <span className={cn(
+          'ml-auto px-1.5 py-0.5 text-[10px] font-medium rounded',
+          detail.status === 'CONFIRMED' ? 'bg-green-500/20 text-green-400' :
+          detail.status === 'CANCELLED' ? 'bg-red-500/20 text-red-400' :
+          'bg-yellow-500/20 text-yellow-400'
+        )}>
+          {detail.status}
+        </span>
+      </div>
+      <div className="space-y-1 text-xs">
+        <div className="font-medium text-sm">{detail.hotel_name || 'Unknown Hotel'}</div>
+        {detail.city && <div className="text-muted-foreground">{detail.city}</div>}
+        <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 mt-1.5">
+          <div><span className="text-muted-foreground">Check-in:</span> {detail.check_in_date ? parseLocalDate(detail.check_in_date).toLocaleDateString() : 'N/A'}</div>
+          <div><span className="text-muted-foreground">Check-out:</span> {detail.check_out_date ? parseLocalDate(detail.check_out_date).toLocaleDateString() : 'N/A'}</div>
+          {detail.room_type && <div><span className="text-muted-foreground">Room:</span> {detail.room_type}</div>}
+        </div>
+        <div className="mt-1.5 pt-1.5 border-t border-border/30 grid grid-cols-2 gap-x-3 gap-y-0.5">
+          <div>
+            <span className="text-muted-foreground">Price:</span>{' '}
+            {detail.cash_paid ? `${detail.cash_paid.amount} ${detail.cash_paid.currency}` : 'N/A'}
+          </div>
+          {detail.confirmation_number && (
+            <div><span className="text-muted-foreground">Conf:</span> <span className="font-bold">{detail.confirmation_number}</span></div>
+          )}
+          {detail.booking_provider && (
+            <div><span className="text-muted-foreground">Via:</span> {detail.booking_provider}</div>
+          )}
+          <div>
+            <span className="text-muted-foreground">Hotel ID:</span>{' '}
+            {detail.hotel_id ? (
+              <span className="font-mono">{truncateId(detail.hotel_id)}</span>
+            ) : (
+              <span className="text-red-400 font-medium">missing</span>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function IssueContextPanel({
   issue,
   memberContext,
@@ -277,9 +328,42 @@ function IssueContextPanel({
   issue: RepricingPipelineIssue;
   memberContext: MemberContext | 'loading' | 'error' | undefined;
 }) {
+  // Fallback: fetch hotel booking directly if not found in member context
+  const [fallbackHotel, setFallbackHotel] = useState<HotelBookingDetail | null>(null);
+  const [fallbackLoading, setFallbackLoading] = useState(false);
+  const fallbackAttempted = useRef(false);
+
+  const booking = memberContext && typeof memberContext === 'object'
+    ? findBooking(memberContext, issue.booking_id)
+    : undefined;
+  const watch = memberContext && typeof memberContext === 'object'
+    ? findWatch(memberContext, issue, booking)
+    : undefined;
+  const opportunity = memberContext && typeof memberContext === 'object'
+    ? findOpportunity(memberContext, issue)
+    : undefined;
+
+  // Trigger fallback fetch when member context loaded but booking not found
+  useEffect(() => {
+    if (
+      memberContext && typeof memberContext === 'object' &&
+      !booking &&
+      issue.booking_id &&
+      issue.booking_type === 'hotel' &&
+      !fallbackAttempted.current
+    ) {
+      fallbackAttempted.current = true;
+      setFallbackLoading(true);
+      api.getHotelBookingDetail(issue.booking_id)
+        .then(setFallbackHotel)
+        .catch(() => {}) // silently fail — we'll just show "not found"
+        .finally(() => setFallbackLoading(false));
+    }
+  }, [memberContext, booking, issue.booking_id, issue.booking_type]);
+
   if (!memberContext) return null;
 
-  if (memberContext === 'loading') {
+  if (memberContext === 'loading' || fallbackLoading) {
     return (
       <div className="mt-3 pt-3 border-t border-border/30">
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -304,14 +388,15 @@ function IssueContextPanel({
     );
   }
 
-  const booking = findBooking(memberContext, issue.booking_id);
-  const watch = findWatch(memberContext, issue, booking);
-  const opportunity = findOpportunity(memberContext, issue);
+  const hasAnything = booking || watch || opportunity || fallbackHotel;
 
-  if (!booking && !watch && !opportunity) {
+  if (!hasAnything) {
+    const missingNote = issue.booking_type === 'flight'
+      ? 'No matching booking found in member context. Direct flight booking lookup is not yet available.'
+      : 'No matching booking, watch, or opportunity found in member context.';
     return (
       <div className="mt-3 pt-3 border-t border-border/30">
-        <p className="text-xs text-muted-foreground">No matching booking, watch, or opportunity found in member context.</p>
+        <p className="text-xs text-muted-foreground">{missingNote}</p>
       </div>
     );
   }
@@ -319,7 +404,8 @@ function IssueContextPanel({
   return (
     <div className="mt-3 pt-3 border-t border-border/30">
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-        {/* Booking card */}
+        {/* Booking card — fallback to direct hotel lookup if not in member context */}
+        {!booking && fallbackHotel && <HotelBookingFallbackCard detail={fallbackHotel} />}
         {booking && (
           <div className="bg-accent/20 rounded-lg p-3 border border-border/50">
             <div className="flex items-center gap-2 mb-2">
