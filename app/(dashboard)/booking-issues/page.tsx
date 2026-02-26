@@ -597,6 +597,9 @@ function IssueActions({
   const [showAirlineForm, setShowAirlineForm] = useState(false);
   const [refundableInput, setRefundableInput] = useState<boolean | null>(null);
   const [showRefundForm, setShowRefundForm] = useState(false);
+  const [departureDateInput, setDepartureDateInput] = useState('');
+  const [departureTimeInput, setDepartureTimeInput] = useState('');
+  const [showDepartureDateForm, setShowDepartureDateForm] = useState(false);
 
   // Pre-populate hotel name from member context
   useEffect(() => {
@@ -622,7 +625,12 @@ function IssueActions({
       clearResult();
       onActionComplete();
     } catch (err) {
-      setActionResult({ type: 'error', message: err instanceof Error ? err.message : 'Failed to regenerate watch' });
+      const msg = err instanceof Error ? err.message : 'Failed to regenerate watch';
+      setActionResult({ type: 'error', message: msg });
+      // Detect missing departure date error and offer inline fix
+      if (msg.toLowerCase().includes('no departure date')) {
+        setShowDepartureDateForm(true);
+      }
     } finally {
       setActionLoading(null);
     }
@@ -772,6 +780,34 @@ function IssueActions({
       onActionComplete();
     } catch (err) {
       setActionResult({ type: 'error', message: err instanceof Error ? err.message : 'Failed to patch refundability' });
+    } finally {
+      setActionLoading(null);
+    }
+  }
+
+  // --- Departure date patch (stopgap for FAC-225) ---
+
+  async function handlePatchDepartureDate() {
+    if (!issue.booking_id || !departureDateInput) return;
+    setActionLoading('patch-departure');
+    setActionResult(null);
+    try {
+      await api.patchFlightBooking(issue.booking_id, {
+        itinerary: {
+          legs: [{
+            segments: [{
+              departure_date: departureDateInput,
+              ...(departureTimeInput ? { departure_time: departureTimeInput } : {}),
+            }],
+          }],
+        },
+      });
+      setActionResult({ type: 'success', message: `Departure date set: ${departureDateInput}${departureTimeInput ? ' ' + departureTimeInput : ''}. You can now retry Create Watch.` });
+      setShowDepartureDateForm(false);
+      setDepartureDateInput('');
+      setDepartureTimeInput('');
+    } catch (err) {
+      setActionResult({ type: 'error', message: err instanceof Error ? err.message : 'Failed to patch departure date' });
     } finally {
       setActionLoading(null);
     }
@@ -1056,6 +1092,44 @@ function IssueActions({
               className="px-3 py-1.5 text-xs font-medium bg-green-500/20 text-green-400 hover:bg-green-500/30 rounded transition-colors disabled:opacity-50"
             >
               {actionLoading === 'patch-refund' ? 'Saving…' : 'Save'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Departure date form (reactive stopgap — shows after Create Watch fails with missing date) */}
+      {showDepartureDateForm && (
+        <div className="mt-3 p-3 bg-background rounded border border-border">
+          <div className="text-xs font-medium mb-1">Set Departure Date</div>
+          <p className="text-xs text-muted-foreground mb-2">
+            This booking is missing a departure date. Set it below, then retry Create Watch.
+          </p>
+          <div className="flex items-center gap-2">
+            <input
+              type="date"
+              value={departureDateInput}
+              onChange={(e) => setDepartureDateInput(e.target.value)}
+              className="px-2.5 py-1.5 text-xs rounded border border-border bg-background"
+            />
+            <input
+              type="time"
+              value={departureTimeInput}
+              onChange={(e) => setDepartureTimeInput(e.target.value)}
+              placeholder="Time (optional)"
+              className="px-2.5 py-1.5 text-xs rounded border border-border bg-background"
+            />
+            <button
+              onClick={handlePatchDepartureDate}
+              disabled={!departureDateInput || !!actionLoading}
+              className="px-3 py-1.5 text-xs font-medium bg-green-500/20 text-green-400 hover:bg-green-500/30 rounded transition-colors disabled:opacity-50"
+            >
+              {actionLoading === 'patch-departure' ? 'Saving…' : 'Save'}
+            </button>
+            <button
+              onClick={() => setShowDepartureDateForm(false)}
+              className="px-2 py-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+            >
+              Cancel
             </button>
           </div>
         </div>
