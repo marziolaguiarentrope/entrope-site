@@ -130,6 +130,33 @@ function MembershipBadge({ status, plan }: { status: string | null; plan: string
   );
 }
 
+// Sort helper — used for both full-dataset and page-level sorting
+function sortItems(items: UserListItem[], key: SortKey, dir: SortDir): UserListItem[] {
+  return [...items].sort((a, b) => {
+    const d = dir === 'asc' ? 1 : -1;
+    switch (key) {
+      case 'name':
+        return (a.name || '').toLowerCase().localeCompare((b.name || '').toLowerCase()) * d;
+      case 'email':
+        return (a.email || '').toLowerCase().localeCompare((b.email || '').toLowerCase()) * d;
+      case 'status':
+        return a.status.localeCompare(b.status) * d;
+      case 'membership':
+        return (a.membership_status || '').toLowerCase().localeCompare((b.membership_status || '').toLowerCase()) * d;
+      case 'hotels':
+        return ((a.hotel_count ?? 0) - (b.hotel_count ?? 0)) * d;
+      case 'flights':
+        return ((a.flight_count ?? 0) - (b.flight_count ?? 0)) * d;
+      case 'emails':
+        return ((a.email_count ?? 0) - (b.email_count ?? 0)) * d;
+      case 'created_at':
+        return (new Date(a.created_at).getTime() - new Date(b.created_at).getTime()) * d;
+      default:
+        return 0;
+    }
+  });
+}
+
 // ── Column Definitions ───────────────────────────────────
 
 const COLUMNS = [
@@ -228,14 +255,16 @@ export default function UsersListPage() {
     return Math.round((found / scanned) * serverTotal);
   }
 
-  // Fetch users — when client-side filters are active, progressively scans
-  // server pages until enough matching results are found for the current view.
-  // Scales to any number of users without fetching the entire dataset upfront.
+  // Fetch users — progressively scans server pages when client-side filters
+  // are active OR when a non-default sort is applied (need full dataset to
+  // sort correctly across all pages). Cached per filter combo.
   const fetchUsers = useCallback(async () => {
     const hasClientFilter = statusFilter != null || membershipFilter !== 'all';
+    const isDefaultSort = sortKey === 'created_at' && sortDir === 'desc';
+    const needsFullScan = !isDefaultSort;
 
-    if (!hasClientFilter) {
-      // Normal paginated fetch — no client-side filtering needed
+    if (!hasClientFilter && !needsFullScan) {
+      // Fast path: default sort, no filters — single page from API
       fullDatasetRef.current = null;
       const version = ++fetchVersionRef.current;
       setLoading(true);
@@ -261,21 +290,34 @@ export default function UsersListPage() {
       return;
     }
 
-    // Client-side filter active — progressive scan approach
+    // Need progressive scan — either for client filters, non-default sort, or both
     const cacheKey = `${debouncedSearch}|${statusFilter}|${membershipFilter}`;
     const targetEnd = (page + 1) * pageSize;
 
-    // Check if cache already has enough results for this page
+    // Check if cache can satisfy this request without fetching
     const cache = fullDatasetRef.current;
-    if (cache?.key === cacheKey && (cache.items.length >= targetEnd || cache.done)) {
-      const start = page * pageSize;
-      setUsers(cache.items.slice(start, targetEnd));
-      setTotalCount(cache.done
-        ? cache.items.length
-        : estimateFilteredTotal(cache.items.length, cache.scannedOffset, cache.serverTotal)
-      );
-      setScanComplete(cache.done);
-      return;
+    if (cache?.key === cacheKey) {
+      if (needsFullScan && cache.done) {
+        // Non-default sort with complete cache — sort and paginate instantly
+        const sorted = sortItems(cache.items, sortKey, sortDir);
+        const start = page * pageSize;
+        setUsers(sorted.slice(start, start + pageSize));
+        setTotalCount(cache.items.length);
+        setScanComplete(true);
+        setLoading(false);
+        return;
+      }
+      if (!needsFullScan && (cache.items.length >= targetEnd || cache.done)) {
+        // Default sort with enough cached items — paginate directly
+        const start = page * pageSize;
+        setUsers(cache.items.slice(start, targetEnd));
+        setTotalCount(cache.done
+          ? cache.items.length
+          : estimateFilteredTotal(cache.items.length, cache.scannedOffset, cache.serverTotal)
+        );
+        setScanComplete(cache.done);
+        return;
+      }
     }
 
     // Need to scan — start fresh or continue from where cache left off
@@ -297,14 +339,17 @@ export default function UsersListPage() {
         const first = await api.listUsers({ offset: 0, limit: batchSize, q: debouncedSearch || undefined });
         if (fetchVersionRef.current !== version) return;
         serverTotal = first.total_count;
-        const matches = applyClientFilters(first.members, statusFilter, membershipFilter);
+        const matches = hasClientFilter
+          ? applyClientFilters(first.members, statusFilter, membershipFilter)
+          : first.members;
         items.push(...matches);
         offset = batchSize;
         setFetchProgress({ scanned: Math.min(offset, serverTotal), total: serverTotal, found: items.length });
       }
 
-      // Scan pages until we have enough matching items for the requested page
-      while (items.length < targetEnd && offset < serverTotal) {
+      // For non-default sort: scan ALL pages (need complete data to sort)
+      // For filter-only (default sort): scan until enough matches found
+      while (offset < serverTotal && (needsFullScan || items.length < targetEnd)) {
         const batchOffsets: number[] = [];
         for (let o = offset; o < serverTotal && batchOffsets.length < parallelism; o += batchSize) {
           batchOffsets.push(o);
@@ -316,7 +361,9 @@ export default function UsersListPage() {
         if (fetchVersionRef.current !== version) return;
 
         for (const r of results) {
-          const matches = applyClientFilters(r.members, statusFilter, membershipFilter);
+          const matches = hasClientFilter
+            ? applyClientFilters(r.members, statusFilter, membershipFilter)
+            : r.members;
           items.push(...matches);
         }
         offset = batchOffsets[batchOffsets.length - 1] + batchSize;
@@ -326,12 +373,21 @@ export default function UsersListPage() {
       const done = offset >= serverTotal;
       fullDatasetRef.current = { key: cacheKey, items, scannedOffset: offset, serverTotal, done };
 
-      const start = page * pageSize;
-      setUsers(items.slice(start, targetEnd));
-      setTotalCount(done
-        ? items.length
-        : estimateFilteredTotal(items.length, offset, serverTotal)
-      );
+      if (needsFullScan) {
+        // Sort the full dataset, then paginate
+        const sorted = sortItems(items, sortKey, sortDir);
+        const start = page * pageSize;
+        setUsers(sorted.slice(start, start + pageSize));
+        setTotalCount(items.length);
+      } else {
+        // Default sort — paginate directly from scanned items
+        const start = page * pageSize;
+        setUsers(items.slice(start, targetEnd));
+        setTotalCount(done
+          ? items.length
+          : estimateFilteredTotal(items.length, offset, serverTotal)
+        );
+      }
       setScanComplete(done);
       setFetchProgress(null);
     } catch (err) {
@@ -344,7 +400,7 @@ export default function UsersListPage() {
         setFetchProgress(null);
       }
     }
-  }, [page, pageSize, debouncedSearch, statusFilter, membershipFilter]);
+  }, [page, pageSize, debouncedSearch, statusFilter, membershipFilter, sortKey, sortDir]);
 
   useEffect(() => {
     fetchUsers();
@@ -373,11 +429,11 @@ export default function UsersListPage() {
 
   // Export visible or cached data
   function handleExport(format: 'csv' | 'json') {
-    // If filters are active and we have cached results, export all matches
-    // Otherwise export the current page's sorted data
-    const hasClientFilter = statusFilter != null || membershipFilter !== 'all';
-    const dataToExport = hasClientFilter && fullDatasetRef.current?.items.length
-      ? fullDatasetRef.current.items
+    // If we have a complete cached dataset (from filter scan or sort scan),
+    // export all items sorted by current column. Otherwise export current page.
+    const cache = fullDatasetRef.current;
+    const dataToExport = cache?.done && cache.items.length
+      ? sortItems(cache.items, sortKey, sortDir)
       : sortedUsers;
 
     const rows = dataToExport.map(u => ({
@@ -433,7 +489,7 @@ export default function UsersListPage() {
     document.body.style.userSelect = 'none';
   }, [colWidths]);
 
-  // Sort handler
+  // Sort handler — resets to page 0 since sort order changes everything
   function handleSort(key: SortKey) {
     if (sortKey === key) {
       setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
@@ -441,50 +497,13 @@ export default function UsersListPage() {
       setSortKey(key);
       setSortDir(key === 'created_at' ? 'desc' : 'asc');
     }
+    setPage(0);
   }
 
-  // Sorted users (client-side)
-  const sortedUsers = useMemo(() => {
-    return [...users].sort((a, b) => {
-      const dir = sortDir === 'asc' ? 1 : -1;
-      switch (sortKey) {
-        case 'name': {
-          const aVal = (a.name || '').toLowerCase();
-          const bVal = (b.name || '').toLowerCase();
-          return aVal.localeCompare(bVal) * dir;
-        }
-        case 'email': {
-          const aVal = (a.email || '').toLowerCase();
-          const bVal = (b.email || '').toLowerCase();
-          return aVal.localeCompare(bVal) * dir;
-        }
-        case 'status': {
-          return a.status.localeCompare(b.status) * dir;
-        }
-        case 'membership': {
-          const aVal = (a.membership_status || '').toLowerCase();
-          const bVal = (b.membership_status || '').toLowerCase();
-          return aVal.localeCompare(bVal) * dir;
-        }
-        case 'hotels': {
-          return ((a.hotel_count ?? 0) - (b.hotel_count ?? 0)) * dir;
-        }
-        case 'flights': {
-          return ((a.flight_count ?? 0) - (b.flight_count ?? 0)) * dir;
-        }
-        case 'emails': {
-          return ((a.email_count ?? 0) - (b.email_count ?? 0)) * dir;
-        }
-        case 'created_at': {
-          const aTime = new Date(a.created_at).getTime();
-          const bTime = new Date(b.created_at).getTime();
-          return (aTime - bTime) * dir;
-        }
-        default:
-          return 0;
-      }
-    });
-  }, [users, sortKey, sortDir]);
+  // Sorted users — when full dataset is cached, users are already globally
+  // sorted by fetchUsers; this memo is a stable no-op in that case.
+  // For the fast-path (default sort, no filters), it sorts the single page.
+  const sortedUsers = useMemo(() => sortItems(users, sortKey, sortDir), [users, sortKey, sortDir]);
 
   return (
     <div>
