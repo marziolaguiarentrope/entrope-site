@@ -2816,8 +2816,8 @@ export function MemberDetail({
                 {context.trips.length === 0 ? (
                   <p className="text-sm text-muted-foreground">No trips</p>
                 ) : (() => {
-                  const activeTrips = context.trips.filter(t => t.status !== 'PAST');
-                  const pastTrips = context.trips.filter(t => t.status === 'PAST');
+                  const activeTrips = context.trips.filter(t => t.status.toLowerCase() !== 'past');
+                  const pastTrips = context.trips.filter(t => t.status.toLowerCase() === 'past');
                   return (
                     <>
                       {activeTrips.map((trip) => (
