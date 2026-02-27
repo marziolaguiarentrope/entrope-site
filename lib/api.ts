@@ -213,6 +213,16 @@ export interface FlightResultSnapshot {
   return: FlightResultLegSnapshot | null;
 }
 
+export interface PriceInsightsSnapshot {
+  price_level: string | null;
+  typical_low_cents: number | null;
+  typical_high_cents: number | null;
+  price_history: { date: string; price_cents: number }[] | null;
+  cheapest_price_cents: number | null;
+  hold_target_cents: number | null;
+  is_fallback: boolean;
+}
+
 export interface FlightConversionFulfillmentContext {
   quote_request_id: string;
   origin: string | null;
@@ -222,6 +232,7 @@ export interface FlightConversionFulfillmentContext {
   cabin: string | null;
   passengers: number | null;
   results_snapshot: FlightResultSnapshot[] | null;
+  price_insights_snapshot: PriceInsightsSnapshot | null;
   created_at: string;
   updated_at: string;
 }

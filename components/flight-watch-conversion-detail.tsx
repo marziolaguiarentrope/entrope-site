@@ -272,6 +272,7 @@ export function FlightWatchConversionDetail({
   const bestSavings = taskRequestNumber(task, 'best_axel_savings_cents');
   const isRoundTrip = Boolean(returnDate);
   const resultsSnapshot = context?.results_snapshot || [];
+  const insightsSnapshot = context?.price_insights_snapshot || null;
   const canReply = task.status !== 'completed' && task.status !== 'blocked';
   const canClaim = task.status === 'pending';
   const canUnclaim = task.status === 'claimed';
@@ -485,6 +486,58 @@ export function FlightWatchConversionDetail({
                 )}
               </div>
             </div>
+          </section>
+
+          <section className="rounded-lg border border-border bg-accent/20 p-4">
+            <div className="flex items-center justify-between gap-3 mb-3">
+              <div>
+                <h3 className="text-sm font-semibold">Price Insights Snapshot</h3>
+                <p className="text-xs text-muted-foreground">
+                  Pricing context the customer saw at conversion time.
+                </p>
+              </div>
+              {insightsSnapshot?.is_fallback && (
+                <span className="inline-flex items-center rounded border border-yellow-500/30 bg-yellow-500/10 px-2 py-0.5 text-xs font-medium text-yellow-400">
+                  Fallback - no SerpAPI data
+                </span>
+              )}
+            </div>
+
+            {!insightsSnapshot ? (
+              <div className="rounded-md border border-dashed border-border p-3 text-sm text-muted-foreground">
+                No price insights snapshot stored. This conversion predates the persistence feature.
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <div className="rounded-md border border-border bg-background/50 p-3">
+                  <div className="text-xs text-muted-foreground">Hold Target</div>
+                  <div className="text-lg font-semibold">
+                    {formatMoneyCents(insightsSnapshot.hold_target_cents)}
+                  </div>
+                </div>
+                <div className="rounded-md border border-border bg-background/50 p-3">
+                  <div className="text-xs text-muted-foreground">Price Level</div>
+                  <div className="text-sm font-medium capitalize">
+                    {insightsSnapshot.price_level || '—'}
+                  </div>
+                </div>
+                <div className="rounded-md border border-border bg-background/50 p-3">
+                  <div className="text-xs text-muted-foreground">
+                    {insightsSnapshot.is_fallback ? 'Derived Range' : 'Typical Range'}
+                  </div>
+                  <div className="text-sm font-medium">
+                    {formatMoneyCents(insightsSnapshot.typical_low_cents)} -{' '}
+                    {formatMoneyCents(insightsSnapshot.typical_high_cents)}
+                  </div>
+                </div>
+                <div className="rounded-md border border-border bg-background/50 p-3">
+                  <div className="text-xs text-muted-foreground">Cheapest at Search</div>
+                  <div className="text-sm font-medium">
+                    {formatMoneyCents(insightsSnapshot.cheapest_price_cents)}
+                  </div>
+                </div>
+              </div>
+            )}
           </section>
 
           <section className="rounded-lg border border-border bg-accent/20 p-4">
