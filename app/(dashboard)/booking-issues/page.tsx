@@ -1181,7 +1181,12 @@ function BookingEmailViewer({ issue }: { issue: RepricingPipelineIssue }) {
       );
       setEmail(result);
     } catch (err) {
-      setEmailError(err instanceof Error ? err.message : 'Failed to load email');
+      if ((err as { status?: number })?.status === 404) {
+        setEmail(null);
+        setEmailError(null);
+      } else {
+        setEmailError(err instanceof Error ? err.message : 'Failed to load email');
+      }
     } finally {
       setEmailLoading(false);
     }
