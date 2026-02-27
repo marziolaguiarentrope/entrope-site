@@ -1926,6 +1926,42 @@ function BookingCard({ booking, watch, travellers, opportunities, onRefresh }: {
   );
 }
 
+function PastTripsDisclosure({ count, trips, watches, travellers, hotelOpportunities, onRefresh }: { count: number; trips: TripView[]; watches?: WatchView[]; travellers?: TravelerProfile[]; hotelOpportunities?: HotelOpportunityView[]; onRefresh?: () => void }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="border border-border/50 rounded overflow-hidden">
+      <button
+        onClick={() => setOpen(!open)}
+        className="w-full flex items-center gap-2 p-2 text-xs text-muted-foreground hover:bg-accent/30 transition-colors"
+      >
+        <svg
+          className={cn('w-3 h-3 transition-transform', open && 'rotate-90')}
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+        </svg>
+        <span>Past Trips ({count})</span>
+      </button>
+      {open && (
+        <div className="p-2 pt-0 space-y-2">
+          {trips.map((trip) => (
+            <TripCard
+              key={trip.id}
+              trip={trip}
+              watches={watches}
+              travellers={travellers}
+              hotelOpportunities={hotelOpportunities}
+              onRefresh={onRefresh}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function TripCard({ trip, watches, travellers, hotelOpportunities, onRefresh }: { trip: TripView; watches?: WatchView[]; travellers?: TravelerProfile[]; hotelOpportunities?: HotelOpportunityView[]; onRefresh?: () => void }) {
   const [expanded, setExpanded] = useState(false); // Default collapsed — click to expand
 
@@ -2779,20 +2815,34 @@ export function MemberDetail({
               <Section title="Trips" count={context.trips.length} defaultOpen={false}>
                 {context.trips.length === 0 ? (
                   <p className="text-sm text-muted-foreground">No trips</p>
-                ) : (
-                  <>
-                    {context.trips.map((trip) => (
-                      <TripCard
-                        key={trip.id}
-                        trip={trip}
-                        watches={context.watches}
-                        travellers={context.travellers}
-                        hotelOpportunities={context.hotel_opportunities}
-                        onRefresh={onRefresh}
-                      />
-                    ))}
-                  </>
-                )}
+                ) : (() => {
+                  const activeTrips = context.trips.filter(t => t.status !== 'PAST');
+                  const pastTrips = context.trips.filter(t => t.status === 'PAST');
+                  return (
+                    <>
+                      {activeTrips.map((trip) => (
+                        <TripCard
+                          key={trip.id}
+                          trip={trip}
+                          watches={context.watches}
+                          travellers={context.travellers}
+                          hotelOpportunities={context.hotel_opportunities}
+                          onRefresh={onRefresh}
+                        />
+                      ))}
+                      {pastTrips.length > 0 && (
+                        <PastTripsDisclosure
+                          count={pastTrips.length}
+                          trips={pastTrips}
+                          watches={context.watches}
+                          travellers={context.travellers}
+                          hotelOpportunities={context.hotel_opportunities}
+                          onRefresh={onRefresh}
+                        />
+                      )}
+                    </>
+                  );
+                })()}
               </Section>
 
               {/* Escalations - only show if any exist */}
