@@ -498,7 +498,7 @@ export function FlightWatchConversionDetail({
               </div>
               {insightsSnapshot?.is_fallback && (
                 <span className="inline-flex items-center rounded border border-yellow-500/30 bg-yellow-500/10 px-2 py-0.5 text-xs font-medium text-yellow-400">
-                  Fallback - no SerpAPI data
+                  Estimated — no historical pricing data
                 </span>
               )}
             </div>
@@ -523,7 +523,7 @@ export function FlightWatchConversionDetail({
                 </div>
                 <div className="rounded-md border border-border bg-background/50 p-3">
                   <div className="text-xs text-muted-foreground">
-                    {insightsSnapshot.is_fallback ? 'Derived Range' : 'Typical Range'}
+                    {insightsSnapshot.is_fallback ? 'Estimated Range' : 'Typical Range'}
                   </div>
                   <div className="text-sm font-medium">
                     {formatMoneyCents(insightsSnapshot.typical_low_cents)} -{' '}
