@@ -221,6 +221,13 @@ export interface PriceInsightsSnapshot {
   cheapest_price_cents: number | null;
   hold_target_cents: number | null;
   is_fallback: boolean;
+  user_target_price_cents?: number | null;
+  user_target_currency?: string | null;
+  user_target_set_at?: string | null;
+  selected_result_index?: number | null;
+  selected_result_set_at?: string | null;
+  selected_result_source?: string | null;
+  selected_result_snapshot?: FlightResultSnapshot | null;
 }
 
 export interface FlightConversionFulfillmentContext {
