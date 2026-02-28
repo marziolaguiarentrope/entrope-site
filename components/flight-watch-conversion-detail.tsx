@@ -206,17 +206,39 @@ function LegLine({ label, leg }: { label: string; leg: FlightResultLegSnapshot |
   );
 }
 
-function SnapshotCard({ result, index, isRoundTrip }: { result: FlightResultSnapshot; index: number; isRoundTrip: boolean }) {
+function SnapshotCard({
+  result,
+  index,
+  isRoundTrip,
+  isSelected = false,
+}: {
+  result: FlightResultSnapshot;
+  index: number;
+  isRoundTrip: boolean;
+  isSelected?: boolean;
+}) {
   const currency = result.currency || 'USD';
   const airlinePrice = formatMoneyCents(result.price_cents, currency);
   const axelPrice = formatMoneyCents(result.axel_price_cents, currency);
   const savings = formatMoneyCents(result.axel_savings_cents, currency);
 
   return (
-    <div className="rounded-lg border border-border bg-accent/20 p-3 space-y-2">
+    <div
+      className={cn(
+        'rounded-lg border p-3 space-y-2',
+        isSelected ? 'border-primary/60 bg-primary/10' : 'border-border bg-accent/20',
+      )}
+    >
       <div className="flex items-start justify-between gap-3">
         <div>
-          <div className="text-sm font-semibold">{carrierLabel(result)}</div>
+          <div className="text-sm font-semibold flex items-center gap-2">
+            <span>{carrierLabel(result)}</span>
+            {isSelected && (
+              <span className="inline-flex items-center rounded border border-primary/40 bg-primary/15 px-2 py-0.5 text-[11px] font-medium text-primary">
+                Selected
+              </span>
+            )}
+          </div>
           <div className="text-xs text-muted-foreground">
             Result #{index + 1} · {stopLabel(result.outbound?.stops)} · {formatDuration(result.outbound?.duration_minutes)}
           </div>
@@ -273,6 +295,20 @@ export function FlightWatchConversionDetail({
   const isRoundTrip = Boolean(returnDate);
   const resultsSnapshot = context?.results_snapshot || [];
   const insightsSnapshot = context?.price_insights_snapshot || null;
+  const userTargetPriceCents = insightsSnapshot?.user_target_price_cents ?? null;
+  const userTargetCurrency = insightsSnapshot?.user_target_currency || 'USD';
+  const userTargetSetAt = insightsSnapshot?.user_target_set_at ?? null;
+  const selectedResultIndex = insightsSnapshot?.selected_result_index ?? null;
+  const selectedResultSetAt = insightsSnapshot?.selected_result_set_at ?? null;
+  const selectedResultSource = insightsSnapshot?.selected_result_source ?? null;
+  const selectedResultSnapshot = insightsSnapshot?.selected_result_snapshot ?? null;
+  const selectedResultFromList =
+    selectedResultIndex !== null &&
+    selectedResultIndex >= 0 &&
+    selectedResultIndex < resultsSnapshot.length
+      ? resultsSnapshot[selectedResultIndex]
+      : null;
+  const selectedResultToRender = selectedResultFromList || selectedResultSnapshot;
   const canReply = task.status !== 'completed' && task.status !== 'blocked';
   const canClaim = task.status === 'pending';
   const canUnclaim = task.status === 'claimed';
@@ -508,7 +544,7 @@ export function FlightWatchConversionDetail({
                 No price insights snapshot stored. This conversion predates the persistence feature.
               </div>
             ) : (
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
                 <div className="rounded-md border border-border bg-background/50 p-3">
                   <div className="text-xs text-muted-foreground">Hold Target</div>
                   <div className="text-lg font-semibold">
@@ -536,6 +572,29 @@ export function FlightWatchConversionDetail({
                     {formatMoneyCents(insightsSnapshot.cheapest_price_cents)}
                   </div>
                 </div>
+                <div className="rounded-md border border-border bg-background/50 p-3">
+                  <div className="text-xs text-muted-foreground">User Target</div>
+                  <div className="text-sm font-medium">
+                    {formatMoneyCents(userTargetPriceCents, userTargetCurrency)}
+                  </div>
+                  <div className="text-[11px] text-muted-foreground mt-1">
+                    {userTargetSetAt ? `Set ${formatDateTime(userTargetSetAt)}` : 'Not set'}
+                  </div>
+                </div>
+                <div className="rounded-md border border-border bg-background/50 p-3">
+                  <div className="text-xs text-muted-foreground">Selected Result</div>
+                  <div className="text-sm font-medium">
+                    {selectedResultIndex !== null ? `Result #${selectedResultIndex + 1}` : 'Not set'}
+                  </div>
+                  <div className="text-[11px] text-muted-foreground mt-1">
+                    {selectedResultSetAt ? formatDateTime(selectedResultSetAt) : '—'}
+                  </div>
+                  {selectedResultSource && (
+                    <div className="text-[11px] text-muted-foreground mt-1 capitalize">
+                      Source: {selectedResultSource.replace(/_/g, ' ')}
+                    </div>
+                  )}
+                </div>
               </div>
             )}
           </section>
@@ -553,6 +612,16 @@ export function FlightWatchConversionDetail({
               </div>
             </div>
 
+            {selectedResultIndex !== null && (
+              <div className="mb-3 rounded-md border border-primary/30 bg-primary/10 p-2 text-xs">
+                <span className="font-medium">Customer selected</span>{' '}
+                <span>Result #{selectedResultIndex + 1}</span>
+                {selectedResultSetAt && (
+                  <span className="text-muted-foreground">{` • ${formatDateTime(selectedResultSetAt)}`}</span>
+                )}
+              </div>
+            )}
+
             {!context ? (
               <div className="rounded-md border border-dashed border-border p-3 text-sm text-muted-foreground">
                 Fulfillment context unavailable. The quote request may have been deleted or the snapshot was not persisted.
@@ -569,8 +638,23 @@ export function FlightWatchConversionDetail({
                     result={result}
                     index={index}
                     isRoundTrip={isRoundTrip}
+                    isSelected={selectedResultIndex === index}
                   />
                 ))}
+              </div>
+            )}
+
+            {context && selectedResultToRender && !selectedResultFromList && (
+              <div className="mt-3 space-y-2">
+                <div className="text-xs text-muted-foreground">
+                  Selected result snapshot (stored on quote request)
+                </div>
+                <SnapshotCard
+                  result={selectedResultToRender}
+                  index={selectedResultIndex ?? 0}
+                  isRoundTrip={isRoundTrip}
+                  isSelected
+                />
               </div>
             )}
           </section>
