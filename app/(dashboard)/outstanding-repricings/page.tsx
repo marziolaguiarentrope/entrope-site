@@ -479,9 +479,16 @@ export default function OutstandingRepricingsPage() {
     const elapsedInterval = setInterval(() => setElapsed(e => e + 1), 1000);
 
     try {
-      // Step 1: Get all active hotel opportunities
-      const oppResponse = await api.listHotelOpportunitiesActive({ limit: 500 });
-      const opportunities = oppResponse.opportunities;
+      // Step 1: Get all active hotel opportunities (paginate in batches of 100)
+      const opportunities: HotelOpportunity[] = [];
+      let offset = 0;
+      const batchSize = 100;
+      while (true) {
+        const batch = await api.listHotelOpportunitiesActive({ limit: batchSize, offset });
+        opportunities.push(...batch.opportunities);
+        if (batch.opportunities.length < batchSize || opportunities.length >= batch.total) break;
+        offset += batchSize;
+      }
 
       if (opportunities.length === 0) {
         setRows([]);
