@@ -152,12 +152,14 @@ function saveContactedSet(set: Set<string>): void {
 
 function generateNotificationText(row: RepricingRow): string {
   const name = row.first_name || 'there';
-  const savingsStr = row.savings_amount != null && row.original_price_currency
-    ? formatMoneyPrecise(row.savings_amount, row.original_price_currency)
-    : 'a great saving';
-  const destination = row.location || row.hotel_name || 'your upcoming trip';
+  const destination = row.location || row.hotel_name || 'your upcoming stay';
 
-  return `Hey ${name}! You have a ${savingsStr} saving on your hotel in ${destination}. Head to your Axel dashboard to claim it!`;
+  if (row.savings_amount != null && row.original_price_currency) {
+    const savings = formatMoneyPrecise(row.savings_amount, row.original_price_currency);
+    return `Hey ${name}! Great news — we found ${savings} in savings on your hotel in ${destination}. Open your Axel dashboard to claim it!`;
+  }
+
+  return `Hey ${name}! We found a lower price on your hotel in ${destination}. Open your Axel dashboard to check it out!`;
 }
 
 // ── Sort Logic ──────────────────────────────────────────
