@@ -156,10 +156,10 @@ function generateNotificationText(row: RepricingRow): string {
 
   if (row.savings_amount != null && row.original_price_currency) {
     const savings = formatMoneyPrecise(row.savings_amount, row.original_price_currency);
-    return `Hey ${name}! Great news — we found ${savings} in savings on your hotel in ${destination}. Open your Axel dashboard to claim it!`;
+    return `Hey ${name}, we found ${savings} in savings on your hotel in ${destination}. Open your Axel dashboard to claim it.`;
   }
 
-  return `Hey ${name}! We found a lower price on your hotel in ${destination}. Open your Axel dashboard to check it out!`;
+  return `Hey ${name}, we found a lower price on your hotel in ${destination}. Open your Axel dashboard to check it out.`;
 }
 
 // ── Sort Logic ──────────────────────────────────────────
