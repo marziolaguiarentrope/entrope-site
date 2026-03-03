@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { FileText, Plane, Hotel, AlertTriangle, LogOut, ListTodo, Search, Contact, BarChart3, TrendingUp, Wrench, Mail, Filter, MessageSquare } from 'lucide-react';
+import { FileText, Plane, Hotel, AlertTriangle, LogOut, ListTodo, Search, Contact, BarChart3, TrendingUp, Wrench, Mail, Filter, MessageSquare, DollarSign } from 'lucide-react';
 import { useAuth } from '@/contexts/auth-context';
 import { api } from '@/lib/api';
 import { cn } from '@/lib/utils';
@@ -15,6 +15,7 @@ const navItems = [
   { href: '/flight-watch-conversions', icon: Plane, label: 'Flight Conversions' },
   { href: '/flight-repricing-funnel', icon: Filter, label: 'Flight Funnel' },
   { href: '/hotel-repricing-tracking', icon: Hotel, label: 'Hotel Repricing Tracking' },
+  { href: '/outstanding-repricings', icon: DollarSign, label: 'Outstanding Repricings' },
   { href: '/user-search', icon: Search, label: 'User Search' },
   { href: '/axel-brain-messages', icon: MessageSquare, label: 'Axel Brain Send' },
   { href: '/users-list', icon: Contact, label: 'Users List' },

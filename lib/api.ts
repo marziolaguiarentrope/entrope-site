@@ -801,6 +801,62 @@ class ApiClient {
     return { userInfoMap, bookingEnrichmentMap };
   }
 
+  /**
+   * Like batchEnrichFromMembers but also extracts subscription_status and first_name.
+   * Used by the outstanding repricings page for outreach.
+   */
+  async batchEnrichWithSubscription(userIds: string[]): Promise<{
+    userInfoMap: Map<string, UserEnrichedInfo>;
+    bookingEnrichmentMap: Map<string, BookingEnrichment>;
+  }> {
+    const unique = [...new Set(userIds.filter(Boolean))];
+    const results = await Promise.allSettled(
+      unique.map(id => this.getMember(id))
+    );
+
+    const userInfoMap = new Map<string, UserEnrichedInfo>();
+    const bookingEnrichmentMap = new Map<string, BookingEnrichment>();
+
+    results.forEach((r, i) => {
+      if (r.status !== 'fulfilled') return;
+      const ctx = r.value;
+      const userId = unique[i];
+
+      userInfoMap.set(userId, {
+        id: userId,
+        email: ctx.user_extras?.email ?? null,
+        phone: ctx.user_extras?.phone ?? null,
+        name: ctx.user?.first_name ?? ctx.user_extras?.email ?? null,
+        subscription_status: ctx.user?.subscription_status ?? null,
+        first_name: ctx.user?.first_name ?? null,
+      });
+
+      for (const trip of ctx.trips) {
+        for (const booking of trip.bookings) {
+          if (booking.type === 'HOTEL' && booking.hotel) {
+            const h = booking.hotel;
+            bookingEnrichmentMap.set(booking.id, {
+              id: booking.id,
+              user_id: userId,
+              hotel_name: h.hotel_name,
+              hotel_city: h.hotel_city,
+              room_type: h.room_type,
+              guests: h.guests,
+              total_price: h.total_price,
+              confirmation_code: h.confirmation_code,
+              booked_with: h.booked_with,
+              check_in: h.check_in,
+              check_out: h.check_out,
+              status: booking.status,
+            });
+          }
+        }
+      }
+    });
+
+    return { userInfoMap, bookingEnrichmentMap };
+  }
+
   async listHotelOpportunitiesCompleted(params?: {
     limit?: number;
     offset?: number;
@@ -939,6 +995,12 @@ export interface UserBasicInfo {
   email: string | null;
   phone: string | null;
   name: string | null;
+}
+
+/** UserBasicInfo extended with subscription status for repricing outreach. */
+export interface UserEnrichedInfo extends UserBasicInfo {
+  subscription_status: string | null; // 'PAYING' | 'FREE'
+  first_name: string | null;
 }
 
 /**
