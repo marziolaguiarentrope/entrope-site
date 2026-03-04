@@ -19,12 +19,13 @@ type SortDir = 'asc' | 'desc';
 type StatusTotals = Record<FlightConversionTaskStatus, number>;
 
 const STATUS_PAGE_LIMIT = 100;
-const STATUSES: FlightConversionTaskStatus[] = ['pending', 'claimed', 'completed', 'blocked'];
+const STATUSES: FlightConversionTaskStatus[] = ['pending', 'claimed', 'completed', 'blocked', 'failed'];
 const EMPTY_STATUS_TOTALS: StatusTotals = {
   pending: 0,
   claimed: 0,
   completed: 0,
   blocked: 0,
+  failed: 0,
 };
 
 function timeAgo(dateString: string): string {
@@ -153,6 +154,7 @@ function StatusBadge({ status }: { status: string }) {
     claimed: 'bg-blue-500/20 text-blue-400',
     completed: 'bg-green-500/20 text-green-400',
     blocked: 'bg-red-500/20 text-red-400',
+    failed: 'bg-red-500/20 text-red-400',
   };
   return (
     <span className={cn('px-2 py-0.5 text-xs rounded font-medium whitespace-nowrap', colors[status] || 'bg-zinc-500/20 text-zinc-300')}>
@@ -260,11 +262,12 @@ export default function FlightWatchConversionsPage() {
     setError(null);
 
     try {
-      const [pending, claimed, completed, blocked] = await Promise.all([
+      const [pending, claimed, completed, blocked, failed] = await Promise.all([
         api.listFlightConversions({ status: 'pending', limit: STATUS_PAGE_LIMIT, offset: 0 }),
         api.listFlightConversions({ status: 'claimed', limit: STATUS_PAGE_LIMIT, offset: 0 }),
         api.listFlightConversions({ status: 'completed', limit: STATUS_PAGE_LIMIT, offset: 0 }),
         api.listFlightConversions({ status: 'blocked', limit: STATUS_PAGE_LIMIT, offset: 0 }),
+        api.listFlightConversions({ status: 'failed', limit: STATUS_PAGE_LIMIT, offset: 0 }),
       ]);
 
       setStatusTotals({
@@ -272,10 +275,11 @@ export default function FlightWatchConversionsPage() {
         claimed: claimed.total,
         completed: completed.total,
         blocked: blocked.total,
+        failed: failed.total,
       });
 
       const byId = new Map<string, FlightConversionListItem>();
-      [...pending.items, ...claimed.items, ...completed.items, ...blocked.items].forEach((item) => {
+      [...pending.items, ...claimed.items, ...completed.items, ...blocked.items, ...failed.items].forEach((item) => {
         byId.set(item.task.id, item);
       });
       const merged = Array.from(byId.values());
@@ -349,6 +353,7 @@ export default function FlightWatchConversionsPage() {
     claimed: items.filter((item) => item.task.status === 'claimed').length,
     completed: items.filter((item) => item.task.status === 'completed').length,
     blocked: items.filter((item) => item.task.status === 'blocked').length,
+    failed: items.filter((item) => item.task.status === 'failed').length,
   }), [items]);
 
   const hasTruncatedStatus = STATUSES.some((status) => statusTotals[status] > loadedStatusCounts[status]);
@@ -361,7 +366,7 @@ export default function FlightWatchConversionsPage() {
   const searched = useMemo(() => tabFiltered.filter((item) => matchesSearch(item, search)), [tabFiltered, search]);
   const sorted = useMemo(() => sortItems(searched, sortKey, sortDir), [searched, sortKey, sortDir]);
 
-  const totalAcrossStatuses = statusTotals.pending + statusTotals.claimed + statusTotals.completed + statusTotals.blocked;
+  const totalAcrossStatuses = statusTotals.pending + statusTotals.claimed + statusTotals.completed + statusTotals.blocked + statusTotals.failed;
 
   function handleSort(key: SortKey) {
     if (key === sortKey) {
@@ -416,6 +421,8 @@ export default function FlightWatchConversionsPage() {
           <span className="font-medium text-green-400">{statusTotals.completed}</span> completed
           <span className="mx-1">·</span>
           <span className="font-medium text-red-400">{statusTotals.blocked}</span> blocked
+          <span className="mx-1">·</span>
+          <span className="font-medium text-red-400">{statusTotals.failed}</span> failed
         </span>
       </div>
 
@@ -451,6 +458,12 @@ export default function FlightWatchConversionsPage() {
               className={cn('px-4 py-1.5 text-sm font-medium rounded-md transition-colors', tab === 'blocked' ? 'bg-background shadow-sm text-foreground' : 'text-muted-foreground hover:text-foreground')}
             >
               Blocked {statusTotals.blocked > 0 && <span className="ml-1 text-xs opacity-70">({statusTotals.blocked})</span>}
+            </button>
+            <button
+              onClick={() => setTab('failed')}
+              className={cn('px-4 py-1.5 text-sm font-medium rounded-md transition-colors', tab === 'failed' ? 'bg-background shadow-sm text-foreground' : 'text-muted-foreground hover:text-foreground')}
+            >
+              Failed {statusTotals.failed > 0 && <span className="ml-1 text-xs opacity-70">({statusTotals.failed})</span>}
             </button>
             <button
               onClick={() => setTab('all')}
