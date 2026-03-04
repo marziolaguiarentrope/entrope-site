@@ -326,9 +326,15 @@ export function FlightWatchConversionDetail({
     setSuccess(null);
   };
 
+  /** Claim a task — uses generic /tasks/ endpoint for failed tasks (flight-conversion endpoint rejects them). */
+  async function claimAny(taskId: string): Promise<Task> {
+    if (isFailed) return api.claimTask(taskId);
+    return api.claimFlightConversionTask(taskId);
+  }
+
   async function autoClaimIfNeeded(): Promise<Task | null> {
     if (task.status !== 'pending' && task.status !== 'failed') return task;
-    const updated = await api.claimFlightConversionTask(task.id);
+    const updated = await claimAny(task.id);
     onTaskUpdate(updated);
     return updated;
   }
@@ -338,7 +344,7 @@ export function FlightWatchConversionDetail({
     clearFlash();
     setActionLoading('claim');
     try {
-      const updated = await api.claimFlightConversionTask(task.id);
+      const updated = await claimAny(task.id);
       onTaskUpdate(updated);
       setSuccess('Task claimed');
     } catch (err) {
@@ -375,7 +381,10 @@ export function FlightWatchConversionDetail({
       if (task.status === 'pending' || task.status === 'failed') {
         await autoClaimIfNeeded();
       }
-      const updated = await api.blockFlightConversionTask(task.id, blockReason.trim());
+      // Use generic endpoint for failed tasks
+      const updated = isFailed
+        ? await api.blockTask(task.id, blockReason.trim())
+        : await api.blockFlightConversionTask(task.id, blockReason.trim());
       onTaskUpdate(updated);
       setSuccess('Task blocked');
     } catch (err) {
@@ -393,13 +402,21 @@ export function FlightWatchConversionDetail({
       if (task.status === 'pending' || task.status === 'failed') {
         await autoClaimIfNeeded();
       }
-      const updated = await api.completeFlightConversionTask(task.id, {
-        outcome: completionOutcome,
-        contacted_via: effectiveMessageIds.length > 0 ? 'email' : undefined,
-        message_ids: effectiveMessageIds,
-        fulfillment_outcome: fulfillmentOutcome.trim() || undefined,
-        notes: completionNotes.trim() || undefined,
-      });
+      // Use generic endpoint for failed tasks, flight-conversion endpoint for others
+      const updated = isFailed
+        ? await api.completeTask(task.id, completionOutcome, {
+            contacted_via: effectiveMessageIds.length > 0 ? 'email' : undefined,
+            message_ids: effectiveMessageIds,
+            fulfillment_outcome: fulfillmentOutcome.trim() || undefined,
+            notes: completionNotes.trim() || undefined,
+          })
+        : await api.completeFlightConversionTask(task.id, {
+            outcome: completionOutcome,
+            contacted_via: effectiveMessageIds.length > 0 ? 'email' : undefined,
+            message_ids: effectiveMessageIds,
+            fulfillment_outcome: fulfillmentOutcome.trim() || undefined,
+            notes: completionNotes.trim() || undefined,
+          });
       onTaskUpdate(updated);
       setSuccess('Task completed');
     } catch (err) {
