@@ -169,7 +169,7 @@ export interface PendingEmailDetail {
   member_url: string | null;
 }
 
-export type FlightConversionTaskStatus = 'pending' | 'claimed' | 'blocked' | 'completed' | 'failed';
+export type FlightConversionTaskStatus = 'pending' | 'claimed' | 'blocked' | 'completed';
 
 export interface FlightConversionSummary {
   quote_request_id: string | null;
