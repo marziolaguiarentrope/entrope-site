@@ -309,11 +309,12 @@ export function FlightWatchConversionDetail({
       ? resultsSnapshot[selectedResultIndex]
       : null;
   const selectedResultToRender = selectedResultFromList || selectedResultSnapshot;
+  const isFailed = task.status === 'failed';
   const canReply = task.status !== 'completed' && task.status !== 'blocked';
-  const canClaim = task.status === 'pending';
+  const canClaim = task.status === 'pending' || isFailed;
   const canUnclaim = task.status === 'claimed';
-  const canBlock = task.status === 'claimed' || task.status === 'pending';
-  const canComplete = task.status === 'claimed' || task.status === 'pending';
+  const canBlock = task.status === 'claimed' || task.status === 'pending' || isFailed;
+  const canComplete = task.status === 'claimed' || task.status === 'pending' || isFailed;
 
   const memberHref = task.user_id ? `/users-list/${task.user_id}` : null;
   const userEmail = (detail.user?.email as string | null | undefined) ?? null;
@@ -325,8 +326,8 @@ export function FlightWatchConversionDetail({
     setSuccess(null);
   };
 
-  async function autoClaimIfPending(): Promise<Task | null> {
-    if (task.status !== 'pending') return task;
+  async function autoClaimIfNeeded(): Promise<Task | null> {
+    if (task.status !== 'pending' && task.status !== 'failed') return task;
     const updated = await api.claimFlightConversionTask(task.id);
     onTaskUpdate(updated);
     return updated;
@@ -371,8 +372,8 @@ export function FlightWatchConversionDetail({
     clearFlash();
     setActionLoading('block');
     try {
-      if (task.status === 'pending') {
-        await autoClaimIfPending();
+      if (task.status === 'pending' || task.status === 'failed') {
+        await autoClaimIfNeeded();
       }
       const updated = await api.blockFlightConversionTask(task.id, blockReason.trim());
       onTaskUpdate(updated);
@@ -389,8 +390,8 @@ export function FlightWatchConversionDetail({
     clearFlash();
     setActionLoading('complete');
     try {
-      if (task.status === 'pending') {
-        await autoClaimIfPending();
+      if (task.status === 'pending' || task.status === 'failed') {
+        await autoClaimIfNeeded();
       }
       const updated = await api.completeFlightConversionTask(task.id, {
         outcome: completionOutcome,
@@ -419,8 +420,8 @@ export function FlightWatchConversionDetail({
     clearFlash();
     setActionLoading('send');
     try {
-      if (task.status === 'pending') {
-        await autoClaimIfPending();
+      if (task.status === 'pending' || task.status === 'failed') {
+        await autoClaimIfNeeded();
       }
 
       const idempotencyKey = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
