@@ -311,7 +311,7 @@ export function FlightWatchConversionDetail({
   const selectedResultToRender = selectedResultFromList || selectedResultSnapshot;
   const isFailed = task.status === 'failed';
   const canReply = task.status !== 'completed' && task.status !== 'blocked';
-  const canClaim = task.status === 'pending' || isFailed;
+  const canClaim = task.status === 'pending';
   const canUnclaim = task.status === 'claimed';
   const canBlock = task.status === 'claimed' || task.status === 'pending' || isFailed;
   const canComplete = task.status === 'claimed' || task.status === 'pending' || isFailed;
@@ -372,7 +372,7 @@ export function FlightWatchConversionDetail({
     clearFlash();
     setActionLoading('block');
     try {
-      if (task.status === 'pending' || task.status === 'failed') {
+      if (task.status === 'pending') {
         await autoClaimIfNeeded();
       }
       const updated = await api.blockFlightConversionTask(task.id, blockReason.trim());
@@ -390,7 +390,8 @@ export function FlightWatchConversionDetail({
     clearFlash();
     setActionLoading('complete');
     try {
-      if (task.status === 'pending' || task.status === 'failed') {
+      // Only auto-claim pending tasks; failed tasks skip claim and complete directly
+      if (task.status === 'pending') {
         await autoClaimIfNeeded();
       }
       const updated = await api.completeFlightConversionTask(task.id, {
@@ -420,7 +421,7 @@ export function FlightWatchConversionDetail({
     clearFlash();
     setActionLoading('send');
     try {
-      if (task.status === 'pending' || task.status === 'failed') {
+      if (task.status === 'pending') {
         await autoClaimIfNeeded();
       }
 
