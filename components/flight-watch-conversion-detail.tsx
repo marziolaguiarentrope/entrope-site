@@ -372,10 +372,15 @@ export function FlightWatchConversionDetail({
     clearFlash();
     setActionLoading('block');
     try {
-      if (task.status === 'pending') {
-        await autoClaimIfNeeded();
+      let updated: Task;
+      if (isFailed) {
+        updated = await api.blockTask(task.id, blockReason.trim());
+      } else {
+        if (task.status === 'pending') {
+          await autoClaimIfNeeded();
+        }
+        updated = await api.blockFlightConversionTask(task.id, blockReason.trim());
       }
-      const updated = await api.blockFlightConversionTask(task.id, blockReason.trim());
       onTaskUpdate(updated);
       setSuccess('Task blocked');
     } catch (err) {
@@ -390,17 +395,27 @@ export function FlightWatchConversionDetail({
     clearFlash();
     setActionLoading('complete');
     try {
-      // Only auto-claim pending tasks; failed tasks skip claim and complete directly
-      if (task.status === 'pending') {
-        await autoClaimIfNeeded();
+      let updated: Task;
+      if (isFailed) {
+        // Failed tasks: use generic /tasks/ endpoint (flight-conversion endpoint rejects them)
+        updated = await api.completeTask(task.id, completionOutcome, {
+          contacted_via: effectiveMessageIds.length > 0 ? 'email' : undefined,
+          message_ids: effectiveMessageIds,
+          fulfillment_outcome: fulfillmentOutcome.trim() || undefined,
+          notes: completionNotes.trim() || undefined,
+        });
+      } else {
+        if (task.status === 'pending') {
+          await autoClaimIfNeeded();
+        }
+        updated = await api.completeFlightConversionTask(task.id, {
+          outcome: completionOutcome,
+          contacted_via: effectiveMessageIds.length > 0 ? 'email' : undefined,
+          message_ids: effectiveMessageIds,
+          fulfillment_outcome: fulfillmentOutcome.trim() || undefined,
+          notes: completionNotes.trim() || undefined,
+        });
       }
-      const updated = await api.completeFlightConversionTask(task.id, {
-        outcome: completionOutcome,
-        contacted_via: effectiveMessageIds.length > 0 ? 'email' : undefined,
-        message_ids: effectiveMessageIds,
-        fulfillment_outcome: fulfillmentOutcome.trim() || undefined,
-        notes: completionNotes.trim() || undefined,
-      });
       onTaskUpdate(updated);
       setSuccess('Task completed');
     } catch (err) {
