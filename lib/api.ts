@@ -169,7 +169,7 @@ export interface PendingEmailDetail {
   member_url: string | null;
 }
 
-export type FlightConversionTaskStatus = 'pending' | 'claimed' | 'blocked' | 'completed';
+export type FlightConversionTaskStatus = 'pending' | 'claimed' | 'blocked' | 'completed' | 'failed';
 
 export interface FlightConversionSummary {
   quote_request_id: string | null;
@@ -533,10 +533,7 @@ class ApiClient {
     });
   }
 
-  // Failed task transition endpoints — ALL confirmed non-existent (FAC-239 not yet implemented):
-  // /flight-conversions/{id}/retry → 404, /reopen → 404, /reset → 404, PATCH → 405
-  // /tasks/{id}/retry → 404, /reopen → 404, /reset → 405, PATCH → 405
-  // /claim → 400 "Cannot claim task with status failed"
+  // FAC-239: Failed tasks can now be claimed (→ claimed), then completed/blocked via normal flow.
 
   // Hotel Opportunity Actions
   async confirmBooking(

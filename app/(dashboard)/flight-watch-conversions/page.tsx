@@ -12,15 +12,15 @@ import {
 import { FlightWatchConversionDetail } from '@/components/flight-watch-conversion-detail';
 import { cn } from '@/lib/utils';
 
-type TabFilter = FlightConversionTaskStatus | 'failed' | 'all';
+type TabFilter = FlightConversionTaskStatus | 'all';
 type SortKey = 'converted' | 'route' | 'savings' | 'status' | 'created';
 type SortDir = 'asc' | 'desc';
 
-type StatusTotals = Record<FlightConversionTaskStatus | 'failed', number>;
+type StatusTotals = Record<FlightConversionTaskStatus, number>;
 
 const STATUS_PAGE_LIMIT = 100;
-/** Statuses the backend accepts as a filter param */
-const API_FILTERABLE_STATUSES: FlightConversionTaskStatus[] = ['pending', 'claimed', 'completed', 'blocked'];
+/** Statuses the backend accepts as a filter param (FAC-239 added 'failed') */
+const API_FILTERABLE_STATUSES: FlightConversionTaskStatus[] = ['pending', 'claimed', 'completed', 'blocked', 'failed'];
 const EMPTY_STATUS_TOTALS: StatusTotals = {
   pending: 0,
   claimed: 0,
@@ -263,36 +263,28 @@ export default function FlightWatchConversionsPage() {
     setError(null);
 
     try {
-      // Fetch by each API-supported status + one unfiltered call to discover 'failed' items
-      const [pending, claimed, completed, blocked, unfiltered] = await Promise.all([
+      // FAC-239: fetch all statuses including 'failed' natively
+      const [pending, claimed, completed, blocked, failed] = await Promise.all([
         api.listFlightConversions({ status: 'pending', limit: STATUS_PAGE_LIMIT, offset: 0 }),
         api.listFlightConversions({ status: 'claimed', limit: STATUS_PAGE_LIMIT, offset: 0 }),
         api.listFlightConversions({ status: 'completed', limit: STATUS_PAGE_LIMIT, offset: 0 }),
         api.listFlightConversions({ status: 'blocked', limit: STATUS_PAGE_LIMIT, offset: 0 }),
-        api.listFlightConversions({ limit: STATUS_PAGE_LIMIT, offset: 0 }),
+        api.listFlightConversions({ status: 'failed', limit: STATUS_PAGE_LIMIT, offset: 0 }),
       ]);
-
-      // 'failed' isn't a supported backend filter — derive count from totals
-      const knownTotal = pending.total + claimed.total + completed.total + blocked.total;
-      const failedTotal = Math.max(0, unfiltered.total - knownTotal);
-      // Extract failed items from the unfiltered response
-      const knownStatuses = new Set<string>(['pending', 'claimed', 'completed', 'blocked']);
-      const failedItems = unfiltered.items.filter((item) => !knownStatuses.has(item.task.status));
 
       setStatusTotals({
         pending: pending.total,
         claimed: claimed.total,
         completed: completed.total,
         blocked: blocked.total,
-        failed: failedTotal,
+        failed: failed.total,
       });
 
       const byId = new Map<string, FlightConversionListItem>();
-      [...pending.items, ...claimed.items, ...completed.items, ...blocked.items, ...failedItems].forEach((item) => {
+      [...pending.items, ...claimed.items, ...completed.items, ...blocked.items, ...failed.items].forEach((item) => {
         byId.set(item.task.id, item);
       });
-      const merged = Array.from(byId.values());
-      setItems(merged);
+      setItems(Array.from(byId.values()));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch flight conversion tasks');
       setStatusTotals(EMPTY_STATUS_TOTALS);
@@ -362,18 +354,13 @@ export default function FlightWatchConversionsPage() {
     claimed: items.filter((item) => item.task.status === 'claimed').length,
     completed: items.filter((item) => item.task.status === 'completed').length,
     blocked: items.filter((item) => item.task.status === 'blocked').length,
-    failed: items.filter((item) => !['pending', 'claimed', 'completed', 'blocked'].includes(item.task.status)).length,
+    failed: items.filter((item) => item.task.status === 'failed').length,
   }), [items]);
 
-  const hasTruncatedStatus = API_FILTERABLE_STATUSES.some((status) => statusTotals[status] > loadedStatusCounts[status])
-    || statusTotals.failed > loadedStatusCounts.failed;
+  const hasTruncatedStatus = API_FILTERABLE_STATUSES.some((status) => statusTotals[status] > loadedStatusCounts[status]);
 
   const tabFiltered = useMemo(() => {
     if (tab === 'all') return items;
-    if (tab === 'failed') {
-      const knownStatuses = new Set(['pending', 'claimed', 'completed', 'blocked']);
-      return items.filter((item) => !knownStatuses.has(item.task.status));
-    }
     return items.filter((item) => item.task.status === tab);
   }, [items, tab]);
 

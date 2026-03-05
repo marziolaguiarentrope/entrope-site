@@ -311,7 +311,7 @@ export function FlightWatchConversionDetail({
   const selectedResultToRender = selectedResultFromList || selectedResultSnapshot;
   const isFailed = task.status === 'failed';
   const canReply = task.status !== 'completed' && task.status !== 'blocked';
-  const canClaim = task.status === 'pending';
+  const canClaim = task.status === 'pending' || isFailed;
   const canUnclaim = task.status === 'claimed';
   const canBlock = task.status === 'claimed' || task.status === 'pending' || isFailed;
   const canComplete = task.status === 'claimed' || task.status === 'pending' || isFailed;
@@ -337,30 +337,14 @@ export function FlightWatchConversionDetail({
   }
 
   /**
-   * Attempt to transition a failed task back to a workable state.
-   * Currently the backend (FAC-239 still in Triage) does NOT support any
-   * transition out of "failed" — claim/complete/block/retry all reject it.
-   * This function tries the claim endpoint in case FAC-239 gets deployed,
-   * and throws a clear message if it still doesn't work.
+   * Claim a failed task so it can be completed/blocked through the normal flow.
+   * FAC-239: Backend now accepts claim on failed tasks (failed → claimed).
    */
   async function rescueFailedTask(): Promise<Task> {
     if (task.status !== 'failed') return task;
-
-    // Try claiming the failed task — FAC-239 requests this be allowed
-    try {
-      const updated = await api.claimFlightConversionTask(task.id);
-      onTaskUpdate(updated);
-      return updated;
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.warn('[rescue] Claim failed task rejected:', msg);
-    }
-
-    throw new Error(
-      'Backend does not yet support actions on failed tasks. ' +
-      'FAC-239 (still in Triage) needs to be implemented first — ' +
-      'it will allow claiming/completing/blocking failed tasks.'
-    );
+    const updated = await api.claimFlightConversionTask(task.id);
+    onTaskUpdate(updated);
+    return updated;
   }
 
   async function handleClaim() {
