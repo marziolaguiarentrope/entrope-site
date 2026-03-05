@@ -337,21 +337,39 @@ export function FlightWatchConversionDetail({
   }
 
   /**
-   * Cascade through every possible backend endpoint to rescue a failed task.
-   * Focuses on the two endpoints that returned 422 (they exist!) with
-   * multiple body variations. Returns the updated task once ANY strategy
-   * succeeds, or throws with a detailed log of every attempt.
+   * Try to rescue a failed task via POST /flight-conversions/{id}/retry.
+   * This is the ONLY endpoint confirmed to exist (returned 422, not 404).
+   * All other endpoints are confirmed dead: PATCH → 405, reopen/reset → 404, claim → 400.
+   *
+   * We try a few body variations and surface the FULL 422 error response
+   * so we can see exactly what Pydantic fields the backend expects.
    */
   async function rescueFailedTask(): Promise<Task> {
     if (task.status !== 'failed') return task;
 
-    const errors: string[] = [];
+    // Body variations to try — kept minimal to avoid console noise
+    const retryBodies: Array<{ label: string; body: Record<string, unknown> }> = [
+      { label: 'empty {}', body: {} },
+      { label: '{failure_reason: retry}', body: { failure_reason: 'retry' } },
+      { label: '{reason: operator_override}', body: { reason: 'operator_override' } },
+    ];
 
-    async function tryStrategy(label: string, fn: () => Promise<Task>): Promise<Task | null> {
+    // Add valid_failure_reasons from the task itself
+    if (task.valid_failure_reasons?.length) {
+      retryBodies.push({
+        label: `{failure_reason: "${task.valid_failure_reasons[0]}"}`,
+        body: { failure_reason: task.valid_failure_reasons[0] },
+      });
+    }
+
+    const errors: string[] = [];
+    for (const { label, body } of retryBodies) {
       try {
-        const updated = await fn();
-        console.log(`[rescue] ✅ ${label} succeeded:`, updated.status);
+        console.log(`[rescue] Trying POST /flight-conversions/${task.id}/retry with`, label);
+        const updated = await api.retryFlightConversionTask(task.id, body);
+        console.log(`[rescue] ✅ Success with ${label}:`, updated.status);
         onTaskUpdate(updated);
+        // If task is now pending, auto-claim it
         if (updated.status === 'pending') {
           try {
             const claimed = await api.claimFlightConversionTask(updated.id);
@@ -364,84 +382,16 @@ export function FlightWatchConversionDetail({
         return updated;
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        console.warn(`[rescue] ❌ ${label}:`, msg);
-        errors.push(`${label}: ${msg}`);
-        return null;
+        console.warn(`[rescue] ❌ retry (${label}):`, msg);
+        errors.push(`retry (${label}): ${msg}`);
       }
     }
 
-    // ── Priority: POST /flight-conversions/{id}/retry with body variations ──
-    // This endpoint returned 422 (exists!) — try different body shapes
-    const retryBodies: Array<{ label: string; body: Record<string, unknown> }> = [
-      { label: 'empty {}',                body: {} },
-      { label: '{force: true}',           body: { force: true } },
-      { label: '{override: true}',        body: { override: true } },
-      { label: '{reason: operator}',      body: { reason: 'operator_override' } },
-      { label: '{failure_reason: retry}',  body: { failure_reason: 'retry' } },
-      { label: '{action: retry}',         body: { action: 'retry' } },
-      { label: '{target_status: pending}', body: { target_status: 'pending' } },
-    ];
-
-    // Also try with each valid_failure_reason from the task
-    if (task.valid_failure_reasons && task.valid_failure_reasons.length > 0) {
-      for (const reason of task.valid_failure_reasons) {
-        retryBodies.push(
-          { label: `{failure_reason: "${reason}"}`, body: { failure_reason: reason } },
-          { label: `{reason: "${reason}"}`,         body: { reason } },
-        );
-      }
-    }
-
-    for (const { label, body } of retryBodies) {
-      const result = await tryStrategy(
-        `POST /flight-conversions/{id}/retry (${label})`,
-        () => api.retryFlightConversionTask(task.id, body),
-      );
-      if (result) return result;
-    }
-
-    // ── PATCH /flight-conversions/{id} with body variations ──
-    // This also returned 422 (exists!) — try different field patterns
-    const patchBodies: Array<{ label: string; body: Record<string, unknown> }> = [
-      { label: '{status: pending}',                body: { status: 'pending' } },
-      { label: '{status: PENDING}',                body: { status: 'PENDING' } },
-      { label: '{task_status: pending}',           body: { task_status: 'pending' } },
-      { label: '{state: pending}',                 body: { state: 'pending' } },
-      { label: '{status: claimed}',                body: { status: 'claimed' } },
-      { label: '{status: completed, outcome}',     body: { status: 'completed', outcome: 'success' } },
-      { label: '{task: {status: pending}}',        body: { task: { status: 'pending' } } },
-      { label: '{force_status: pending}',          body: { force_status: 'pending' } },
-    ];
-
-    for (const { label, body } of patchBodies) {
-      const result = await tryStrategy(
-        `PATCH /flight-conversions/{id} (${label})`,
-        () => api.patchFlightConversionTask(task.id, body),
-      );
-      if (result) return result;
-    }
-
-    // ── Fallback: other endpoints (lower priority since they were 404/405) ──
-    const fallbackStrategies: Array<{ label: string; fn: () => Promise<Task> }> = [
-      { label: 'POST /tasks/{id}/retry {}',              fn: () => api.retryTask(task.id) },
-      { label: 'POST /flight-conversions/{id}/reopen',   fn: () => api.reopenFlightConversionTask(task.id) },
-      { label: 'POST /tasks/{id}/reopen',                fn: () => api.reopenTask(task.id) },
-      { label: 'POST /flight-conversions/{id}/reset',    fn: () => api.resetFlightConversionTask(task.id) },
-      { label: 'POST /tasks/{id}/reset',                 fn: () => api.resetTask(task.id) },
-      { label: 'POST /flight-conversions/{id}/claim',    fn: () => api.claimFlightConversionTask(task.id) },
-      { label: 'POST /tasks/{id}/claim',                 fn: () => api.claimTask(task.id) },
-      { label: 'PATCH /tasks/{id} → pending',            fn: () => api.patchTask(task.id, { status: 'pending' }) },
-    ];
-
-    for (const { label, fn } of fallbackStrategies) {
-      const result = await tryStrategy(label, fn);
-      if (result) return result;
-    }
-
-    // Nothing worked — throw with full details
+    // Show the FULL error from the first attempt (contains 422 Pydantic validation details)
     throw new Error(
-      `Cannot transition task out of "failed" status. Tried ${errors.length} strategies:\n` +
-      errors.map((e, i) => `  ${i + 1}. ${e}`).join('\n')
+      `Cannot rescue failed task via /retry endpoint.\n\n` +
+      `Backend response:\n${errors[0]}\n\n` +
+      `All ${errors.length} body variations failed. The 422 response above shows what fields the backend expects.`
     );
   }
 
@@ -487,42 +437,12 @@ export function FlightWatchConversionDetail({
       const reason = blockReason.trim();
 
       if (isFailed) {
-        const errors: string[] = [];
-
-        // Phase 1: rescue then block normally
-        try {
-          await rescueFailedTask();
-          const updated = await api.blockFlightConversionTask(task.id, reason);
-          onTaskUpdate(updated);
-          setSuccess('Task blocked');
-          return;
-        } catch (err) {
-          errors.push(err instanceof Error ? err.message : String(err));
-        }
-
-        // Phase 2: direct block attempts
-        const directBlockStrategies: Array<{ label: string; fn: () => Promise<Task> }> = [
-          { label: 'POST /flight-conversions/{id}/block',     fn: () => api.blockFlightConversionTask(task.id, reason) },
-          { label: 'POST /tasks/{id}/block',                  fn: () => api.blockTask(task.id, reason) },
-          { label: 'PATCH /tasks/{id} → blocked',             fn: () => api.patchTask(task.id, { status: 'blocked', blocked_reason: reason }) },
-          { label: 'PATCH /flight-conversions/{id} → blocked', fn: () => api.patchFlightConversionTask(task.id, { status: 'blocked', blocked_reason: reason }) },
-        ];
-
-        for (const { label, fn } of directBlockStrategies) {
-          try {
-            const updated = await fn();
-            onTaskUpdate(updated);
-            setSuccess('Task blocked');
-            return;
-          } catch (err) {
-            errors.push(`${label}: ${err instanceof Error ? err.message : String(err)}`);
-          }
-        }
-
-        throw new Error(
-          `Could not block failed task. All strategies exhausted:\n` +
-          errors.map((e, i) => `${i + 1}. ${e}`).join('\n')
-        );
+        // Rescue first (retry endpoint), then block normally
+        await rescueFailedTask();
+        const updated = await api.blockFlightConversionTask(task.id, reason);
+        onTaskUpdate(updated);
+        setSuccess('Task blocked');
+        return;
       }
 
       // Normal flow
@@ -553,45 +473,12 @@ export function FlightWatchConversionDetail({
       };
 
       if (isFailed) {
-        // ── Failed task: cascading strategy ──
-        const errors: string[] = [];
-
-        // Phase 1: try to rescue (transition out of failed) → then complete normally
-        try {
-          await rescueFailedTask();
-          // Rescue succeeded — task is now pending/claimed, complete normally
-          const updated = await api.completeFlightConversionTask(task.id, completePayload);
-          onTaskUpdate(updated);
-          setSuccess('Task completed');
-          return;
-        } catch (err) {
-          errors.push(err instanceof Error ? err.message : String(err));
-        }
-
-        // Phase 2: direct complete attempts (skip rescue, just force complete)
-        const directCompleteStrategies: Array<{ label: string; fn: () => Promise<Task> }> = [
-          { label: 'POST /flight-conversions/{id}/complete',     fn: () => api.completeFlightConversionTask(task.id, completePayload) },
-          { label: 'POST /tasks/{id}/complete',                  fn: () => api.completeTask(task.id, completionOutcome, { ...completePayload }) },
-          { label: 'PATCH /tasks/{id} → completed',              fn: () => api.patchTask(task.id, { status: 'completed', outcome: completionOutcome }) },
-          { label: 'PATCH /flight-conversions/{id} → completed', fn: () => api.patchFlightConversionTask(task.id, { status: 'completed', outcome: completionOutcome }) },
-        ];
-
-        for (const { label, fn } of directCompleteStrategies) {
-          try {
-            const updated = await fn();
-            onTaskUpdate(updated);
-            setSuccess('Task completed');
-            return;
-          } catch (err) {
-            errors.push(`${label}: ${err instanceof Error ? err.message : String(err)}`);
-          }
-        }
-
-        // Nothing worked
-        throw new Error(
-          `Could not complete failed task. All strategies exhausted:\n` +
-          errors.map((e, i) => `${i + 1}. ${e}`).join('\n')
-        );
+        // Rescue first (retry endpoint), then complete normally
+        await rescueFailedTask();
+        const updated = await api.completeFlightConversionTask(task.id, completePayload);
+        onTaskUpdate(updated);
+        setSuccess('Task completed');
+        return;
       }
 
       // ── Normal flow for non-failed tasks ──

@@ -540,40 +540,10 @@ class ApiClient {
     });
   }
 
-  async reopenFlightConversionTask(taskId: string): Promise<Task> {
-    return this.fetch<Task>(`/flight-conversions/${taskId}/reopen`, { method: 'POST' });
-  }
-
-  async resetFlightConversionTask(taskId: string): Promise<Task> {
-    return this.fetch<Task>(`/flight-conversions/${taskId}/reset`, { method: 'POST' });
-  }
-
-  async patchFlightConversionTask(taskId: string, data: Record<string, unknown>): Promise<Task> {
-    return this.fetch<Task>(`/flight-conversions/${taskId}`, {
-      method: 'PATCH',
-      body: JSON.stringify(data),
-    });
-  }
+  // NOTE: reopen (404), reset (404), PATCH (405) endpoints confirmed non-existent — removed
 
   // Generic task rescue endpoints (for failed task transitions)
-  async retryTask(taskId: string): Promise<Task> {
-    return this.fetch<Task>(`/tasks/${taskId}/retry`, { method: 'POST' });
-  }
-
-  async reopenTask(taskId: string): Promise<Task> {
-    return this.fetch<Task>(`/tasks/${taskId}/reopen`, { method: 'POST' });
-  }
-
-  async resetTask(taskId: string): Promise<Task> {
-    return this.fetch<Task>(`/tasks/${taskId}/reset`, { method: 'POST' });
-  }
-
-  async patchTask(taskId: string, data: Record<string, unknown>): Promise<Task> {
-    return this.fetch<Task>(`/tasks/${taskId}`, {
-      method: 'PATCH',
-      body: JSON.stringify(data),
-    });
-  }
+  // NOTE: /tasks/{id}/retry (404), reopen (404), reset (405), PATCH (405) endpoints confirmed non-existent — removed
 
   // Hotel Opportunity Actions
   async confirmBooking(
