@@ -311,7 +311,7 @@ export function FlightWatchConversionDetail({
   const selectedResultToRender = selectedResultFromList || selectedResultSnapshot;
   const isFailed = task.status === 'failed';
   const canReply = task.status !== 'completed' && task.status !== 'blocked';
-  const canClaim = task.status === 'pending';
+  const canClaim = task.status === 'pending' || isFailed;
   const canUnclaim = task.status === 'claimed';
   const canBlock = task.status === 'claimed' || task.status === 'pending' || isFailed;
   const canComplete = task.status === 'claimed' || task.status === 'pending' || isFailed;
@@ -372,15 +372,10 @@ export function FlightWatchConversionDetail({
     clearFlash();
     setActionLoading('block');
     try {
-      let updated: Task;
-      if (isFailed) {
-        updated = await api.blockTask(task.id, blockReason.trim());
-      } else {
-        if (task.status === 'pending') {
-          await autoClaimIfNeeded();
-        }
-        updated = await api.blockFlightConversionTask(task.id, blockReason.trim());
+      if (task.status === 'pending' || task.status === 'failed') {
+        await autoClaimIfNeeded();
       }
+      const updated = await api.blockFlightConversionTask(task.id, blockReason.trim());
       onTaskUpdate(updated);
       setSuccess('Task blocked');
     } catch (err) {
@@ -395,27 +390,16 @@ export function FlightWatchConversionDetail({
     clearFlash();
     setActionLoading('complete');
     try {
-      let updated: Task;
-      if (isFailed) {
-        // Failed tasks: use generic /tasks/ endpoint (flight-conversion endpoint rejects them)
-        updated = await api.completeTask(task.id, completionOutcome, {
-          contacted_via: effectiveMessageIds.length > 0 ? 'email' : undefined,
-          message_ids: effectiveMessageIds,
-          fulfillment_outcome: fulfillmentOutcome.trim() || undefined,
-          notes: completionNotes.trim() || undefined,
-        });
-      } else {
-        if (task.status === 'pending') {
-          await autoClaimIfNeeded();
-        }
-        updated = await api.completeFlightConversionTask(task.id, {
-          outcome: completionOutcome,
-          contacted_via: effectiveMessageIds.length > 0 ? 'email' : undefined,
-          message_ids: effectiveMessageIds,
-          fulfillment_outcome: fulfillmentOutcome.trim() || undefined,
-          notes: completionNotes.trim() || undefined,
-        });
+      if (task.status === 'pending' || task.status === 'failed') {
+        await autoClaimIfNeeded();
       }
+      const updated = await api.completeFlightConversionTask(task.id, {
+        outcome: completionOutcome,
+        contacted_via: effectiveMessageIds.length > 0 ? 'email' : undefined,
+        message_ids: effectiveMessageIds,
+        fulfillment_outcome: fulfillmentOutcome.trim() || undefined,
+        notes: completionNotes.trim() || undefined,
+      });
       onTaskUpdate(updated);
       setSuccess('Task completed');
     } catch (err) {
@@ -436,7 +420,7 @@ export function FlightWatchConversionDetail({
     clearFlash();
     setActionLoading('send');
     try {
-      if (task.status === 'pending') {
+      if (task.status === 'pending' || task.status === 'failed') {
         await autoClaimIfNeeded();
       }
 
