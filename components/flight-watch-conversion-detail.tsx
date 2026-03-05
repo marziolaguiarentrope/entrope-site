@@ -326,17 +326,82 @@ export function FlightWatchConversionDetail({
     setSuccess(null);
   };
 
-  async function retryIfFailed(): Promise<void> {
-    if (task.status !== 'failed') return;
-    const updated = await api.retryFlightConversionTask(task.id);
-    onTaskUpdate(updated);
-  }
-
+  /**
+   * For non-failed tasks, claim if pending so downstream actions work.
+   */
   async function autoClaimIfNeeded(): Promise<Task | null> {
-    if (task.status !== 'pending' && task.status !== 'failed') return task;
+    if (task.status !== 'pending') return task;
     const updated = await api.claimFlightConversionTask(task.id);
     onTaskUpdate(updated);
     return updated;
+  }
+
+  /**
+   * Cascade through every possible backend endpoint to rescue a failed task.
+   * Returns the updated task once ANY strategy succeeds, or throws with a
+   * detailed log of every endpoint that was tried.
+   */
+  async function rescueFailedTask(): Promise<Task> {
+    if (task.status !== 'failed') return task;
+
+    // ── Phase 1: try to transition out of "failed" ──
+    const rescueStrategies: Array<{ label: string; fn: () => Promise<Task> }> = [
+      { label: 'POST /flight-conversions/{id}/retry',   fn: () => api.retryFlightConversionTask(task.id) },
+      { label: 'POST /tasks/{id}/retry',                fn: () => api.retryTask(task.id) },
+      { label: 'POST /flight-conversions/{id}/reopen',  fn: () => api.reopenFlightConversionTask(task.id) },
+      { label: 'POST /tasks/{id}/reopen',               fn: () => api.reopenTask(task.id) },
+      { label: 'POST /flight-conversions/{id}/reset',   fn: () => api.resetFlightConversionTask(task.id) },
+      { label: 'POST /tasks/{id}/reset',                fn: () => api.resetTask(task.id) },
+      { label: 'PATCH /tasks/{id} → pending',           fn: () => api.patchTask(task.id, { status: 'pending' }) },
+      { label: 'PATCH /flight-conversions/{id} → pending', fn: () => api.patchFlightConversionTask(task.id, { status: 'pending' }) },
+    ];
+
+    const errors: string[] = [];
+    for (const { label, fn } of rescueStrategies) {
+      try {
+        const updated = await fn();
+        onTaskUpdate(updated);
+        // Succeeded — now claim if the task is back to pending
+        if (updated.status === 'pending') {
+          try {
+            const claimed = await api.claimFlightConversionTask(updated.id);
+            onTaskUpdate(claimed);
+            return claimed;
+          } catch {
+            return updated; // claim failed, but at least we're out of failed
+          }
+        }
+        return updated;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        errors.push(`${label}: ${msg}`);
+      }
+    }
+
+    // ── Phase 2: if no rescue worked, try to force-complete/force-claim directly ──
+    const directStrategies: Array<{ label: string; fn: () => Promise<Task> }> = [
+      { label: 'POST /flight-conversions/{id}/claim (direct)', fn: () => api.claimFlightConversionTask(task.id) },
+      { label: 'POST /tasks/{id}/claim (direct)',              fn: () => api.claimTask(task.id) },
+      { label: 'PATCH /tasks/{id} → claimed',                 fn: () => api.patchTask(task.id, { status: 'claimed' }) },
+      { label: 'PATCH /flight-conversions/{id} → claimed',    fn: () => api.patchFlightConversionTask(task.id, { status: 'claimed' }) },
+    ];
+
+    for (const { label, fn } of directStrategies) {
+      try {
+        const updated = await fn();
+        onTaskUpdate(updated);
+        return updated;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        errors.push(`${label}: ${msg}`);
+      }
+    }
+
+    // Nothing worked — throw with full details
+    throw new Error(
+      `Cannot transition task out of "failed" status. Tried ${errors.length} strategies:\n` +
+      errors.map((e, i) => `  ${i + 1}. ${e}`).join('\n')
+    );
   }
 
   async function handleClaim() {
@@ -378,11 +443,52 @@ export function FlightWatchConversionDetail({
     clearFlash();
     setActionLoading('block');
     try {
-      await retryIfFailed();
-      if (task.status === 'pending' || task.status === 'failed') {
+      const reason = blockReason.trim();
+
+      if (isFailed) {
+        const errors: string[] = [];
+
+        // Phase 1: rescue then block normally
+        try {
+          await rescueFailedTask();
+          const updated = await api.blockFlightConversionTask(task.id, reason);
+          onTaskUpdate(updated);
+          setSuccess('Task blocked');
+          return;
+        } catch (err) {
+          errors.push(err instanceof Error ? err.message : String(err));
+        }
+
+        // Phase 2: direct block attempts
+        const directBlockStrategies: Array<{ label: string; fn: () => Promise<Task> }> = [
+          { label: 'POST /flight-conversions/{id}/block',     fn: () => api.blockFlightConversionTask(task.id, reason) },
+          { label: 'POST /tasks/{id}/block',                  fn: () => api.blockTask(task.id, reason) },
+          { label: 'PATCH /tasks/{id} → blocked',             fn: () => api.patchTask(task.id, { status: 'blocked', blocked_reason: reason }) },
+          { label: 'PATCH /flight-conversions/{id} → blocked', fn: () => api.patchFlightConversionTask(task.id, { status: 'blocked', blocked_reason: reason }) },
+        ];
+
+        for (const { label, fn } of directBlockStrategies) {
+          try {
+            const updated = await fn();
+            onTaskUpdate(updated);
+            setSuccess('Task blocked');
+            return;
+          } catch (err) {
+            errors.push(`${label}: ${err instanceof Error ? err.message : String(err)}`);
+          }
+        }
+
+        throw new Error(
+          `Could not block failed task. All strategies exhausted:\n` +
+          errors.map((e, i) => `${i + 1}. ${e}`).join('\n')
+        );
+      }
+
+      // Normal flow
+      if (task.status === 'pending') {
         await autoClaimIfNeeded();
       }
-      const updated = await api.blockFlightConversionTask(task.id, blockReason.trim());
+      const updated = await api.blockFlightConversionTask(task.id, reason);
       onTaskUpdate(updated);
       setSuccess('Task blocked');
     } catch (err) {
@@ -397,17 +503,61 @@ export function FlightWatchConversionDetail({
     clearFlash();
     setActionLoading('complete');
     try {
-      await retryIfFailed();
-      if (task.status === 'pending' || task.status === 'failed') {
-        await autoClaimIfNeeded();
-      }
-      const updated = await api.completeFlightConversionTask(task.id, {
+      const completePayload = {
         outcome: completionOutcome,
         contacted_via: effectiveMessageIds.length > 0 ? 'email' : undefined,
         message_ids: effectiveMessageIds,
         fulfillment_outcome: fulfillmentOutcome.trim() || undefined,
         notes: completionNotes.trim() || undefined,
-      });
+      };
+
+      if (isFailed) {
+        // ── Failed task: cascading strategy ──
+        const errors: string[] = [];
+
+        // Phase 1: try to rescue (transition out of failed) → then complete normally
+        try {
+          await rescueFailedTask();
+          // Rescue succeeded — task is now pending/claimed, complete normally
+          const updated = await api.completeFlightConversionTask(task.id, completePayload);
+          onTaskUpdate(updated);
+          setSuccess('Task completed');
+          return;
+        } catch (err) {
+          errors.push(err instanceof Error ? err.message : String(err));
+        }
+
+        // Phase 2: direct complete attempts (skip rescue, just force complete)
+        const directCompleteStrategies: Array<{ label: string; fn: () => Promise<Task> }> = [
+          { label: 'POST /flight-conversions/{id}/complete',     fn: () => api.completeFlightConversionTask(task.id, completePayload) },
+          { label: 'POST /tasks/{id}/complete',                  fn: () => api.completeTask(task.id, completionOutcome, { ...completePayload }) },
+          { label: 'PATCH /tasks/{id} → completed',              fn: () => api.patchTask(task.id, { status: 'completed', outcome: completionOutcome }) },
+          { label: 'PATCH /flight-conversions/{id} → completed', fn: () => api.patchFlightConversionTask(task.id, { status: 'completed', outcome: completionOutcome }) },
+        ];
+
+        for (const { label, fn } of directCompleteStrategies) {
+          try {
+            const updated = await fn();
+            onTaskUpdate(updated);
+            setSuccess('Task completed');
+            return;
+          } catch (err) {
+            errors.push(`${label}: ${err instanceof Error ? err.message : String(err)}`);
+          }
+        }
+
+        // Nothing worked
+        throw new Error(
+          `Could not complete failed task. All strategies exhausted:\n` +
+          errors.map((e, i) => `${i + 1}. ${e}`).join('\n')
+        );
+      }
+
+      // ── Normal flow for non-failed tasks ──
+      if (task.status === 'pending') {
+        await autoClaimIfNeeded();
+      }
+      const updated = await api.completeFlightConversionTask(task.id, completePayload);
       onTaskUpdate(updated);
       setSuccess('Task completed');
     } catch (err) {
@@ -428,8 +578,13 @@ export function FlightWatchConversionDetail({
     clearFlash();
     setActionLoading('send');
     try {
-      await retryIfFailed();
-      if (task.status === 'pending' || task.status === 'failed') {
+      if (isFailed) {
+        try {
+          await rescueFailedTask();
+        } catch {
+          // If rescue fails, still try to send — the send endpoint might work regardless
+        }
+      } else if (task.status === 'pending') {
         await autoClaimIfNeeded();
       }
 
