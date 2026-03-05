@@ -533,8 +533,11 @@ class ApiClient {
     });
   }
 
-  async retryFlightConversionTask(taskId: string): Promise<Task> {
-    return this.fetch<Task>(`/flight-conversions/${taskId}/retry`, { method: 'POST' });
+  async retryFlightConversionTask(taskId: string, body?: Record<string, unknown>): Promise<Task> {
+    return this.fetch<Task>(`/flight-conversions/${taskId}/retry`, {
+      method: 'POST',
+      body: JSON.stringify(body ?? {}),
+    });
   }
 
   async reopenFlightConversionTask(taskId: string): Promise<Task> {

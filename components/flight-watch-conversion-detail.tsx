@@ -338,63 +338,104 @@ export function FlightWatchConversionDetail({
 
   /**
    * Cascade through every possible backend endpoint to rescue a failed task.
-   * Returns the updated task once ANY strategy succeeds, or throws with a
-   * detailed log of every endpoint that was tried.
+   * Focuses on the two endpoints that returned 422 (they exist!) with
+   * multiple body variations. Returns the updated task once ANY strategy
+   * succeeds, or throws with a detailed log of every attempt.
    */
   async function rescueFailedTask(): Promise<Task> {
     if (task.status !== 'failed') return task;
 
-    // ── Phase 1: try to transition out of "failed" ──
-    const rescueStrategies: Array<{ label: string; fn: () => Promise<Task> }> = [
-      { label: 'POST /flight-conversions/{id}/retry',   fn: () => api.retryFlightConversionTask(task.id) },
-      { label: 'POST /tasks/{id}/retry',                fn: () => api.retryTask(task.id) },
-      { label: 'POST /flight-conversions/{id}/reopen',  fn: () => api.reopenFlightConversionTask(task.id) },
-      { label: 'POST /tasks/{id}/reopen',               fn: () => api.reopenTask(task.id) },
-      { label: 'POST /flight-conversions/{id}/reset',   fn: () => api.resetFlightConversionTask(task.id) },
-      { label: 'POST /tasks/{id}/reset',                fn: () => api.resetTask(task.id) },
-      { label: 'PATCH /tasks/{id} → pending',           fn: () => api.patchTask(task.id, { status: 'pending' }) },
-      { label: 'PATCH /flight-conversions/{id} → pending', fn: () => api.patchFlightConversionTask(task.id, { status: 'pending' }) },
-    ];
-
     const errors: string[] = [];
-    for (const { label, fn } of rescueStrategies) {
+
+    async function tryStrategy(label: string, fn: () => Promise<Task>): Promise<Task | null> {
       try {
         const updated = await fn();
+        console.log(`[rescue] ✅ ${label} succeeded:`, updated.status);
         onTaskUpdate(updated);
-        // Succeeded — now claim if the task is back to pending
         if (updated.status === 'pending') {
           try {
             const claimed = await api.claimFlightConversionTask(updated.id);
             onTaskUpdate(claimed);
             return claimed;
           } catch {
-            return updated; // claim failed, but at least we're out of failed
+            return updated;
           }
         }
         return updated;
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
+        console.warn(`[rescue] ❌ ${label}:`, msg);
         errors.push(`${label}: ${msg}`);
+        return null;
       }
     }
 
-    // ── Phase 2: if no rescue worked, try to force-complete/force-claim directly ──
-    const directStrategies: Array<{ label: string; fn: () => Promise<Task> }> = [
-      { label: 'POST /flight-conversions/{id}/claim (direct)', fn: () => api.claimFlightConversionTask(task.id) },
-      { label: 'POST /tasks/{id}/claim (direct)',              fn: () => api.claimTask(task.id) },
-      { label: 'PATCH /tasks/{id} → claimed',                 fn: () => api.patchTask(task.id, { status: 'claimed' }) },
-      { label: 'PATCH /flight-conversions/{id} → claimed',    fn: () => api.patchFlightConversionTask(task.id, { status: 'claimed' }) },
+    // ── Priority: POST /flight-conversions/{id}/retry with body variations ──
+    // This endpoint returned 422 (exists!) — try different body shapes
+    const retryBodies: Array<{ label: string; body: Record<string, unknown> }> = [
+      { label: 'empty {}',                body: {} },
+      { label: '{force: true}',           body: { force: true } },
+      { label: '{override: true}',        body: { override: true } },
+      { label: '{reason: operator}',      body: { reason: 'operator_override' } },
+      { label: '{failure_reason: retry}',  body: { failure_reason: 'retry' } },
+      { label: '{action: retry}',         body: { action: 'retry' } },
+      { label: '{target_status: pending}', body: { target_status: 'pending' } },
     ];
 
-    for (const { label, fn } of directStrategies) {
-      try {
-        const updated = await fn();
-        onTaskUpdate(updated);
-        return updated;
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        errors.push(`${label}: ${msg}`);
+    // Also try with each valid_failure_reason from the task
+    if (task.valid_failure_reasons && task.valid_failure_reasons.length > 0) {
+      for (const reason of task.valid_failure_reasons) {
+        retryBodies.push(
+          { label: `{failure_reason: "${reason}"}`, body: { failure_reason: reason } },
+          { label: `{reason: "${reason}"}`,         body: { reason } },
+        );
       }
+    }
+
+    for (const { label, body } of retryBodies) {
+      const result = await tryStrategy(
+        `POST /flight-conversions/{id}/retry (${label})`,
+        () => api.retryFlightConversionTask(task.id, body),
+      );
+      if (result) return result;
+    }
+
+    // ── PATCH /flight-conversions/{id} with body variations ──
+    // This also returned 422 (exists!) — try different field patterns
+    const patchBodies: Array<{ label: string; body: Record<string, unknown> }> = [
+      { label: '{status: pending}',                body: { status: 'pending' } },
+      { label: '{status: PENDING}',                body: { status: 'PENDING' } },
+      { label: '{task_status: pending}',           body: { task_status: 'pending' } },
+      { label: '{state: pending}',                 body: { state: 'pending' } },
+      { label: '{status: claimed}',                body: { status: 'claimed' } },
+      { label: '{status: completed, outcome}',     body: { status: 'completed', outcome: 'success' } },
+      { label: '{task: {status: pending}}',        body: { task: { status: 'pending' } } },
+      { label: '{force_status: pending}',          body: { force_status: 'pending' } },
+    ];
+
+    for (const { label, body } of patchBodies) {
+      const result = await tryStrategy(
+        `PATCH /flight-conversions/{id} (${label})`,
+        () => api.patchFlightConversionTask(task.id, body),
+      );
+      if (result) return result;
+    }
+
+    // ── Fallback: other endpoints (lower priority since they were 404/405) ──
+    const fallbackStrategies: Array<{ label: string; fn: () => Promise<Task> }> = [
+      { label: 'POST /tasks/{id}/retry {}',              fn: () => api.retryTask(task.id) },
+      { label: 'POST /flight-conversions/{id}/reopen',   fn: () => api.reopenFlightConversionTask(task.id) },
+      { label: 'POST /tasks/{id}/reopen',                fn: () => api.reopenTask(task.id) },
+      { label: 'POST /flight-conversions/{id}/reset',    fn: () => api.resetFlightConversionTask(task.id) },
+      { label: 'POST /tasks/{id}/reset',                 fn: () => api.resetTask(task.id) },
+      { label: 'POST /flight-conversions/{id}/claim',    fn: () => api.claimFlightConversionTask(task.id) },
+      { label: 'POST /tasks/{id}/claim',                 fn: () => api.claimTask(task.id) },
+      { label: 'PATCH /tasks/{id} → pending',            fn: () => api.patchTask(task.id, { status: 'pending' }) },
+    ];
+
+    for (const { label, fn } of fallbackStrategies) {
+      const result = await tryStrategy(label, fn);
+      if (result) return result;
     }
 
     // Nothing worked — throw with full details
