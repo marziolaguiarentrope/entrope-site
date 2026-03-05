@@ -533,6 +533,10 @@ class ApiClient {
     });
   }
 
+  async retryFlightConversionTask(taskId: string): Promise<Task> {
+    return this.fetch<Task>(`/flight-conversions/${taskId}/retry`, { method: 'POST' });
+  }
+
   // Hotel Opportunity Actions
   async confirmBooking(
     opportunityId: string,

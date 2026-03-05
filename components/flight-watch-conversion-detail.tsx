@@ -326,6 +326,12 @@ export function FlightWatchConversionDetail({
     setSuccess(null);
   };
 
+  async function retryIfFailed(): Promise<void> {
+    if (task.status !== 'failed') return;
+    const updated = await api.retryFlightConversionTask(task.id);
+    onTaskUpdate(updated);
+  }
+
   async function autoClaimIfNeeded(): Promise<Task | null> {
     if (task.status !== 'pending' && task.status !== 'failed') return task;
     const updated = await api.claimFlightConversionTask(task.id);
@@ -372,7 +378,8 @@ export function FlightWatchConversionDetail({
     clearFlash();
     setActionLoading('block');
     try {
-      if (task.status === 'pending') {
+      await retryIfFailed();
+      if (task.status === 'pending' || task.status === 'failed') {
         await autoClaimIfNeeded();
       }
       const updated = await api.blockFlightConversionTask(task.id, blockReason.trim());
@@ -390,7 +397,8 @@ export function FlightWatchConversionDetail({
     clearFlash();
     setActionLoading('complete');
     try {
-      if (task.status === 'pending') {
+      await retryIfFailed();
+      if (task.status === 'pending' || task.status === 'failed') {
         await autoClaimIfNeeded();
       }
       const updated = await api.completeFlightConversionTask(task.id, {
@@ -420,7 +428,8 @@ export function FlightWatchConversionDetail({
     clearFlash();
     setActionLoading('send');
     try {
-      if (task.status === 'pending') {
+      await retryIfFailed();
+      if (task.status === 'pending' || task.status === 'failed') {
         await autoClaimIfNeeded();
       }
 
