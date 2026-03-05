@@ -337,61 +337,29 @@ export function FlightWatchConversionDetail({
   }
 
   /**
-   * Try to rescue a failed task via POST /flight-conversions/{id}/retry.
-   * This is the ONLY endpoint confirmed to exist (returned 422, not 404).
-   * All other endpoints are confirmed dead: PATCH → 405, reopen/reset → 404, claim → 400.
-   *
-   * We try a few body variations and surface the FULL 422 error response
-   * so we can see exactly what Pydantic fields the backend expects.
+   * Attempt to transition a failed task back to a workable state.
+   * Currently the backend (FAC-239 still in Triage) does NOT support any
+   * transition out of "failed" — claim/complete/block/retry all reject it.
+   * This function tries the claim endpoint in case FAC-239 gets deployed,
+   * and throws a clear message if it still doesn't work.
    */
   async function rescueFailedTask(): Promise<Task> {
     if (task.status !== 'failed') return task;
 
-    // Body variations to try — kept minimal to avoid console noise
-    const retryBodies: Array<{ label: string; body: Record<string, unknown> }> = [
-      { label: 'empty {}', body: {} },
-      { label: '{failure_reason: retry}', body: { failure_reason: 'retry' } },
-      { label: '{reason: operator_override}', body: { reason: 'operator_override' } },
-    ];
-
-    // Add valid_failure_reasons from the task itself
-    if (task.valid_failure_reasons?.length) {
-      retryBodies.push({
-        label: `{failure_reason: "${task.valid_failure_reasons[0]}"}`,
-        body: { failure_reason: task.valid_failure_reasons[0] },
-      });
+    // Try claiming the failed task — FAC-239 requests this be allowed
+    try {
+      const updated = await api.claimFlightConversionTask(task.id);
+      onTaskUpdate(updated);
+      return updated;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn('[rescue] Claim failed task rejected:', msg);
     }
 
-    const errors: string[] = [];
-    for (const { label, body } of retryBodies) {
-      try {
-        console.log(`[rescue] Trying POST /flight-conversions/${task.id}/retry with`, label);
-        const updated = await api.retryFlightConversionTask(task.id, body);
-        console.log(`[rescue] ✅ Success with ${label}:`, updated.status);
-        onTaskUpdate(updated);
-        // If task is now pending, auto-claim it
-        if (updated.status === 'pending') {
-          try {
-            const claimed = await api.claimFlightConversionTask(updated.id);
-            onTaskUpdate(claimed);
-            return claimed;
-          } catch {
-            return updated;
-          }
-        }
-        return updated;
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        console.warn(`[rescue] ❌ retry (${label}):`, msg);
-        errors.push(`retry (${label}): ${msg}`);
-      }
-    }
-
-    // Show the FULL error from the first attempt (contains 422 Pydantic validation details)
     throw new Error(
-      `Cannot rescue failed task via /retry endpoint.\n\n` +
-      `Backend response:\n${errors[0]}\n\n` +
-      `All ${errors.length} body variations failed. The 422 response above shows what fields the backend expects.`
+      'Backend does not yet support actions on failed tasks. ' +
+      'FAC-239 (still in Triage) needs to be implemented first — ' +
+      'it will allow claiming/completing/blocking failed tasks.'
     );
   }
 

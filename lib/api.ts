@@ -533,17 +533,10 @@ class ApiClient {
     });
   }
 
-  async retryFlightConversionTask(taskId: string, body?: Record<string, unknown>): Promise<Task> {
-    return this.fetch<Task>(`/flight-conversions/${taskId}/retry`, {
-      method: 'POST',
-      body: JSON.stringify(body ?? {}),
-    });
-  }
-
-  // NOTE: reopen (404), reset (404), PATCH (405) endpoints confirmed non-existent — removed
-
-  // Generic task rescue endpoints (for failed task transitions)
-  // NOTE: /tasks/{id}/retry (404), reopen (404), reset (405), PATCH (405) endpoints confirmed non-existent — removed
+  // Failed task transition endpoints — ALL confirmed non-existent (FAC-239 not yet implemented):
+  // /flight-conversions/{id}/retry → 404, /reopen → 404, /reset → 404, PATCH → 405
+  // /tasks/{id}/retry → 404, /reopen → 404, /reset → 405, PATCH → 405
+  // /claim → 400 "Cannot claim task with status failed"
 
   // Hotel Opportunity Actions
   async confirmBooking(
