@@ -12,6 +12,7 @@ const navItems = [
   { href: '/tasks', icon: ListTodo, label: 'Tasks' },
   { href: '/manual-import', icon: FileText, label: 'Manual Import' },
   { href: '/complete-repricings', icon: Plane, label: 'Complete Repricings' },
+  { href: '/agent-flight-bookings', icon: Plane, label: 'Agent Flight Bookings' },
   { href: '/flight-watch-conversions', icon: Plane, label: 'Flight Conversions' },
   { href: '/flight-repricing-funnel', icon: Filter, label: 'Flight Funnel' },
   { href: '/hotel-repricing-tracking', icon: Hotel, label: 'Hotel Repricing Tracking' },
@@ -30,6 +31,7 @@ export function Sidebar() {
   const pathname = usePathname();
   const { user, logout } = useAuth();
   const [pendingCount, setPendingCount] = useState<number | null>(null);
+  const [pendingAgentFlightBookingCount, setPendingAgentFlightBookingCount] = useState<number | null>(null);
   const [pendingFlightConversionCount, setPendingFlightConversionCount] = useState<number | null>(null);
   const refreshTimer = useRef<NodeJS.Timeout | null>(null);
 
@@ -38,10 +40,15 @@ export function Sidebar() {
 
     const fetchPendingCount = async () => {
       try {
-        const [pendingEmails, pendingFlightConversions] = await Promise.all([
+        const [pendingEmails, pendingAgentFlightBookings, pendingFlightConversions] = await Promise.all([
           api.listPendingEmails({
             status: 'PENDING',
             limit: 1,
+            offset: 0,
+          }),
+          api.listAgentFlightBookings({
+            status: 'pending',
+            limit: 500,
             offset: 0,
           }),
           // Backend returns page-sized totals here, so fetch a larger page for a closer count.
@@ -53,11 +60,13 @@ export function Sidebar() {
         ]);
         if (!cancelled) {
           setPendingCount(pendingEmails.total);
+          setPendingAgentFlightBookingCount(pendingAgentFlightBookings.total);
           setPendingFlightConversionCount(pendingFlightConversions.total);
         }
       } catch {
         if (!cancelled) {
           setPendingCount(null);
+          setPendingAgentFlightBookingCount(null);
           setPendingFlightConversionCount(null);
         }
       }
@@ -103,6 +112,11 @@ export function Sidebar() {
               {item.href === '/pending-emails' && pendingCount !== null && pendingCount > 0 && (
                 <span className="ml-auto px-1.5 py-0.5 text-[10px] font-semibold rounded bg-yellow-500/20 text-yellow-400">
                   {pendingCount}
+                </span>
+              )}
+              {item.href === '/agent-flight-bookings' && pendingAgentFlightBookingCount !== null && pendingAgentFlightBookingCount > 0 && (
+                <span className="ml-auto px-1.5 py-0.5 text-[10px] font-semibold rounded bg-sky-500/20 text-sky-400">
+                  {pendingAgentFlightBookingCount >= 500 ? '500+' : pendingAgentFlightBookingCount}
                 </span>
               )}
               {item.href === '/flight-watch-conversions' && pendingFlightConversionCount !== null && pendingFlightConversionCount > 0 && (

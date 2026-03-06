@@ -193,6 +193,65 @@ export interface FlightConversionListResponse {
   total: number;
 }
 
+export type AgentFlightBookingTaskStatus = 'pending' | 'claimed' | 'blocked' | 'completed' | 'failed';
+
+export interface AgentFlightBookingTraveler {
+  first_name?: string | null;
+  last_name?: string | null;
+  date_of_birth?: string | null;
+  gender?: string | null;
+  [key: string]: unknown;
+}
+
+export interface AgentFlightBookingSummary {
+  booking_id: string | null;
+  booking_status: string | null;
+  record_locator: string | null;
+  booking_provider: string | null;
+  origin: string | null;
+  destination: string | null;
+  outbound_departure: string | null;
+  return_departure: string | null;
+  trip_type: string | null;
+  carrier_code: string | null;
+  carrier_name: string | null;
+  flight_numbers: string[];
+  traveler_count: number;
+  travelers: AgentFlightBookingTraveler[];
+  cabin: string | null;
+  fare_family: string | null;
+  price_paid_cents: number | null;
+  currency: string | null;
+  user_id: string;
+}
+
+export interface AgentFlightBookingListItem {
+  task: Task;
+  summary: AgentFlightBookingSummary;
+}
+
+export interface AgentFlightBookingListResponse {
+  items: AgentFlightBookingListItem[];
+  total: number;
+}
+
+export interface AgentFlightBookingUser {
+  id: string;
+  email?: string | null;
+  phone?: string | null;
+  first_name?: string | null;
+  last_name?: string | null;
+  name?: string | null;
+  [key: string]: unknown;
+}
+
+export interface AgentFlightBookingDetail {
+  task: Task;
+  summary: AgentFlightBookingSummary;
+  flight_booking: FlightBookingDetail | null;
+  user: AgentFlightBookingUser | null;
+}
+
 export interface FlightResultLegSnapshot {
   stops: number;
   duration_minutes: number | null;
@@ -528,6 +587,58 @@ class ApiClient {
     },
   ): Promise<Task> {
     return this.fetch<Task>(`/flight-conversions/${taskId}/complete`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  // Agent flight booking fulfillment
+  async listAgentFlightBookings(params?: {
+    status?: AgentFlightBookingTaskStatus;
+    limit?: number;
+    offset?: number;
+    q?: string;
+  }): Promise<AgentFlightBookingListResponse> {
+    const searchParams = new URLSearchParams();
+    if (params?.status) searchParams.set('status', params.status);
+    if (params?.limit !== undefined) searchParams.set('limit', params.limit.toString());
+    if (params?.offset !== undefined) searchParams.set('offset', params.offset.toString());
+    if (params?.q) searchParams.set('q', params.q);
+
+    const query = searchParams.toString();
+    return this.fetch<AgentFlightBookingListResponse>(`/agent-flight-bookings/${query ? `?${query}` : ''}`);
+  }
+
+  async getAgentFlightBookingDetail(taskId: string): Promise<AgentFlightBookingDetail> {
+    return this.fetch<AgentFlightBookingDetail>(`/agent-flight-bookings/${taskId}`);
+  }
+
+  async claimAgentFlightBookingTask(taskId: string): Promise<Task> {
+    return this.fetch<Task>(`/agent-flight-bookings/${taskId}/claim`, { method: 'POST' });
+  }
+
+  async unclaimAgentFlightBookingTask(taskId: string): Promise<Task> {
+    return this.fetch<Task>(`/agent-flight-bookings/${taskId}/unclaim`, { method: 'POST' });
+  }
+
+  async blockAgentFlightBookingTask(taskId: string, reason: string): Promise<Task> {
+    return this.fetch<Task>(`/agent-flight-bookings/${taskId}/block`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    });
+  }
+
+  async completeAgentFlightBookingTask(
+    taskId: string,
+    data: {
+      outcome: 'success' | 'partial' | 'failure';
+      airline_confirmation_code?: string;
+      booking_provider?: string;
+      failure_reason?: string;
+      notes?: string;
+    },
+  ): Promise<Task> {
+    return this.fetch<Task>(`/agent-flight-bookings/${taskId}/complete`, {
       method: 'POST',
       body: JSON.stringify(data),
     });
