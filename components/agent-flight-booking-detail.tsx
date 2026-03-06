@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import {
   AgentFlightBookingDetail,
+  AgentFlightBookingSegment,
   AgentFlightBookingTraveler,
   api,
   FlightBookingPatchRequest,
@@ -82,6 +83,31 @@ function displayConfirmationCode(value: string | null | undefined): string {
     return 'Pending operator confirmation';
   }
   return normalized;
+}
+
+function formatSegmentDateTime(date: string | null | undefined, time: string | null | undefined): string {
+  return [date, time].filter(Boolean).join(' ') || '—';
+}
+
+function formatSegmentFlightCode(
+  carrier: string | null | undefined,
+  flightNumber: string | null | undefined,
+): string | null {
+  const normalizedCarrier = carrier?.trim() || '';
+  const normalizedFlightNumber = flightNumber?.trim() || '';
+  if (!normalizedCarrier && !normalizedFlightNumber) return null;
+  if (!normalizedFlightNumber) return normalizedCarrier;
+  if (normalizedCarrier && normalizedFlightNumber.toUpperCase().startsWith(normalizedCarrier.toUpperCase())) {
+    return normalizedFlightNumber;
+  }
+  return normalizedCarrier ? `${normalizedCarrier} ${normalizedFlightNumber}` : normalizedFlightNumber;
+}
+
+function segmentMarketingDisplay(segment: AgentFlightBookingSegment): string | null {
+  const marketing = formatSegmentFlightCode(segment.marketing_carrier, segment.marketing_flight_number);
+  const operating = formatSegmentFlightCode(segment.operating_carrier, segment.flight_number);
+  if (!marketing || marketing === operating) return null;
+  return marketing;
 }
 
 function StatusBadge({ status }: { status: string }) {
@@ -402,6 +428,56 @@ export function AgentFlightBookingDetailPanel({
               <DetailField label="Booking ID" value={summary.booking_id} monospace />
               <DetailField label="Task ID" value={task.id} monospace />
             </div>
+          </section>
+
+          <section className="space-y-3">
+            <div className="text-sm font-semibold">Itinerary Segments</div>
+            {summary.segments.length === 0 ? (
+              <div className="rounded-lg border border-dashed border-border p-4 text-sm text-muted-foreground">
+                Segment-level routing was not included on this task.
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {summary.segments.map((segment, index) => {
+                  const operatingFlight = formatSegmentFlightCode(segment.operating_carrier, segment.flight_number);
+                  const marketedFlight = segmentMarketingDisplay(segment);
+                  const segmentTripDetails = [segment.cabin, segment.fare_family].filter(Boolean).join(' · ');
+
+                  return (
+                    <div
+                      key={`${segment.origin || 'segment'}-${segment.destination || 'segment'}-${index}`}
+                      className="rounded-lg border border-border bg-accent/20 p-4"
+                    >
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <div className="text-sm font-medium">
+                            Segment {index + 1} · {routeLabel(segment.origin, segment.destination)}
+                          </div>
+                          <div className="mt-1 text-xs text-muted-foreground">
+                            {[
+                              operatingFlight,
+                              segmentTripDetails,
+                            ].filter(Boolean).join(' · ') || 'Flight details unavailable'}
+                          </div>
+                        </div>
+                        {marketedFlight && (
+                          <div className="rounded-md border border-border bg-background/60 px-2 py-1 text-xs text-muted-foreground">
+                            Marketed as {marketedFlight}
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                        <DetailField label="Departure" value={formatSegmentDateTime(segment.departure_date, segment.departure_time)} />
+                        <DetailField label="Arrival" value={formatSegmentDateTime(segment.arrival_date, segment.arrival_time)} />
+                        <DetailField label="Operating Flight" value={operatingFlight} monospace />
+                        <DetailField label="Fare" value={segmentTripDetails || '—'} />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </section>
 
           <section className="space-y-3">

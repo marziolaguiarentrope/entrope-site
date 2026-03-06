@@ -203,6 +203,21 @@ export interface AgentFlightBookingTraveler {
   [key: string]: unknown;
 }
 
+export interface AgentFlightBookingSegment {
+  origin: string | null;
+  destination: string | null;
+  departure_date: string | null;
+  departure_time: string | null;
+  arrival_date: string | null;
+  arrival_time: string | null;
+  flight_number: string | null;
+  operating_carrier: string | null;
+  marketing_carrier: string | null;
+  marketing_flight_number: string | null;
+  cabin: string | null;
+  fare_family: string | null;
+}
+
 export interface AgentFlightBookingSummary {
   booking_id: string | null;
   booking_status: string | null;
@@ -220,6 +235,7 @@ export interface AgentFlightBookingSummary {
   travelers: AgentFlightBookingTraveler[];
   cabin: string | null;
   fare_family: string | null;
+  segments: AgentFlightBookingSegment[];
   price_paid_cents: number | null;
   currency: string | null;
   user_id: string;
