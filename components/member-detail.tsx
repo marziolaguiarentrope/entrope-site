@@ -2691,6 +2691,15 @@ export function MemberDetail({
                 <span className="text-muted-foreground">Joined</span>
                 <span>{formatDate(member.created_at)}</span>
               </div>
+              {(() => {
+                const dob = context?.travellers?.find(t => t.date_of_birth)?.date_of_birth;
+                return dob ? (
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Date of Birth</span>
+                    <span>{formatDate(dob)}</span>
+                  </div>
+                ) : null;
+              })()}
               {context?.user_extras?.stripe_customer_id && (
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Stripe</span>
