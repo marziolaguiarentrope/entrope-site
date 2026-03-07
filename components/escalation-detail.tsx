@@ -145,6 +145,33 @@ interface GuestInfo {
   isChild: boolean;
 }
 
+/** Check if a string looks like a UUID */
+function isUUID(s: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
+}
+
+/** Find a traveller by ID or by full name */
+function findTraveller(travellers: TravelerProfile[] | null, key: string): TravelerProfile | undefined {
+  if (!travellers) return undefined;
+  // First try matching by ID (guests[] often contains traveller profile UUIDs)
+  const byId = travellers.find(t => t.id === key);
+  if (byId) return byId;
+  // Fallback: match by full name
+  return travellers.find(t =>
+    `${t.first_name || ''} ${t.last_name || ''}`.trim().toLowerCase() === key.toLowerCase()
+  );
+}
+
+/** Resolve display name: if the raw value is a UUID, look up the traveller name */
+function resolveGuestName(raw: string, traveller: TravelerProfile | undefined): string {
+  if (traveller && (traveller.first_name || traveller.last_name)) {
+    return `${traveller.first_name || ''} ${traveller.last_name || ''}`.trim();
+  }
+  // Don't show a UUID as a name
+  if (isUUID(raw)) return 'Unknown Guest';
+  return raw;
+}
+
 /** Merge guest data from HotelBookingDetail, HotelBookingView, and TravelerProfiles */
 function mergeGuestInfo(
   detailGuests: GuestSummary[] | null,
@@ -154,29 +181,25 @@ function mergeGuestInfo(
   // Best case: HotelBookingDetail has structured guest data
   if (detailGuests && detailGuests.length > 0) {
     return detailGuests.map(g => {
-      // Try to enrich with traveller profile (match by name)
-      const matchedTraveller = travellers?.find(t =>
-        `${t.first_name || ''} ${t.last_name || ''}`.trim().toLowerCase() === g.name.toLowerCase()
-      );
-      const dob = g.date_of_birth || matchedTraveller?.date_of_birth || null;
-      const citizenship = g.citizenship || matchedTraveller?.passport_country || null;
+      // Match by ID first, then by name (g.name may be a UUID or actual name)
+      const matched = findTraveller(travellers, g.name) ?? findTraveller(travellers, g.id);
+      const dob = g.date_of_birth || matched?.date_of_birth || null;
+      const citizenship = g.citizenship || matched?.passport_country || null;
       const isChild = dob ? isUnder18(dob) : false;
-      return { name: g.name, isPrimary: g.is_primary, dob, citizenship, isChild };
+      return { name: resolveGuestName(g.name, matched), isPrimary: g.is_primary, dob, citizenship, isChild };
     });
   }
 
-  // Fallback: HotelBookingView.guests[] (just string names) + traveller cross-reference
+  // Fallback: HotelBookingView.guests[] (may contain UUIDs or names) + traveller cross-reference
   if (viewGuestNames && viewGuestNames.length > 0) {
-    return viewGuestNames.map((name, i) => {
-      const matchedTraveller = travellers?.find(t =>
-        `${t.first_name || ''} ${t.last_name || ''}`.trim().toLowerCase() === name.toLowerCase()
-      );
+    return viewGuestNames.map((entry, i) => {
+      const matched = findTraveller(travellers, entry);
       return {
-        name,
+        name: resolveGuestName(entry, matched),
         isPrimary: i === 0,
-        dob: matchedTraveller?.date_of_birth || null,
-        citizenship: matchedTraveller?.passport_country || null,
-        isChild: matchedTraveller?.date_of_birth ? isUnder18(matchedTraveller.date_of_birth) : false,
+        dob: matched?.date_of_birth || null,
+        citizenship: matched?.passport_country || null,
+        isChild: matched?.date_of_birth ? isUnder18(matched.date_of_birth) : false,
       };
     });
   }
