@@ -2,8 +2,9 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { Escalation, api, UserBasicInfo, HotelOpportunityView, HotelBookingView, BookingView, MemberContext, RawEmail } from '@/lib/api';
-import { cn, formatDate } from '@/lib/utils';
+import { Escalation, api, UserBasicInfo, HotelOpportunityView, HotelBookingView, BookingView, MemberContext, RawEmail, HotelBookingDetail, GuestSummary, TravelerProfile } from '@/lib/api';
+import { cn, formatDate, fromMinorUnits } from '@/lib/utils';
+import { convertToUSD, formatUSD } from '@/lib/currency';
 
 // ── Helpers ──────────────────────────────────────────────
 
@@ -135,6 +136,86 @@ function findBookingInTrips(
   return null;
 }
 
+/** Merged guest info from multiple sources */
+interface GuestInfo {
+  name: string;
+  isPrimary: boolean;
+  dob: string | null;
+  citizenship: string | null;
+  isChild: boolean;
+}
+
+/** Merge guest data from HotelBookingDetail, HotelBookingView, and TravelerProfiles */
+function mergeGuestInfo(
+  detailGuests: GuestSummary[] | null,
+  viewGuestNames: string[] | null,
+  travellers: TravelerProfile[] | null,
+): GuestInfo[] {
+  // Best case: HotelBookingDetail has structured guest data
+  if (detailGuests && detailGuests.length > 0) {
+    return detailGuests.map(g => {
+      // Try to enrich with traveller profile (match by name)
+      const matchedTraveller = travellers?.find(t =>
+        `${t.first_name || ''} ${t.last_name || ''}`.trim().toLowerCase() === g.name.toLowerCase()
+      );
+      const dob = g.date_of_birth || matchedTraveller?.date_of_birth || null;
+      const citizenship = g.citizenship || matchedTraveller?.passport_country || null;
+      const isChild = dob ? isUnder18(dob) : false;
+      return { name: g.name, isPrimary: g.is_primary, dob, citizenship, isChild };
+    });
+  }
+
+  // Fallback: HotelBookingView.guests[] (just string names) + traveller cross-reference
+  if (viewGuestNames && viewGuestNames.length > 0) {
+    return viewGuestNames.map((name, i) => {
+      const matchedTraveller = travellers?.find(t =>
+        `${t.first_name || ''} ${t.last_name || ''}`.trim().toLowerCase() === name.toLowerCase()
+      );
+      return {
+        name,
+        isPrimary: i === 0,
+        dob: matchedTraveller?.date_of_birth || null,
+        citizenship: matchedTraveller?.passport_country || null,
+        isChild: matchedTraveller?.date_of_birth ? isUnder18(matchedTraveller.date_of_birth) : false,
+      };
+    });
+  }
+
+  return [];
+}
+
+function isUnder18(dob: string): boolean {
+  const birth = new Date(dob);
+  const today = new Date();
+  let age = today.getFullYear() - birth.getFullYear();
+  const monthDiff = today.getMonth() - birth.getMonth();
+  if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birth.getDate())) age--;
+  return age < 18;
+}
+
+function calculateAge(dob: string): number {
+  const birth = new Date(dob);
+  const today = new Date();
+  let age = today.getFullYear() - birth.getFullYear();
+  const monthDiff = today.getMonth() - birth.getMonth();
+  if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birth.getDate())) age--;
+  return age;
+}
+
+/** Inline USD display for a price in minor units */
+function USDPrice({ amount, currency }: { amount: number; currency: string }) {
+  const [usd, setUsd] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (currency.toUpperCase() === 'USD') return;
+    const displayAmount = fromMinorUnits(amount, currency);
+    convertToUSD(displayAmount, currency).then(setUsd);
+  }, [amount, currency]);
+
+  if (currency.toUpperCase() === 'USD' || usd === null) return null;
+  return <span className="text-muted-foreground text-xs ml-1">(~{formatUSD(usd)})</span>;
+}
+
 function HotelOpportunityInfo({
   userId,
   opportunityId,
@@ -152,6 +233,8 @@ function HotelOpportunityInfo({
   const [hotelBooking, setHotelBooking] = useState<HotelBookingView | null>(null);
   const [bookingId, setBookingId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [guestInfo, setGuestInfo] = useState<GuestInfo[]>([]);
+  const [memberCtx, setMemberCtx] = useState<MemberContext | null>(null);
 
   // Source email state
   const [showEmail, setShowEmail] = useState(false);
@@ -164,19 +247,17 @@ function HotelOpportunityInfo({
     setLoading(true);
 
     api.getMember(userId)
-      .then(ctx => {
+      .then(async (ctx) => {
         if (cancelled) return;
+        setMemberCtx(ctx);
+
         // Find the matching opportunity
         const match = ctx.hotel_opportunities?.find(
           (o: HotelOpportunityView) => o.id === opportunityId
         );
         setOpportunity(match || null);
 
-        // Build a list of candidate booking IDs to try, in priority order:
-        // 1. escalation source_id (for booking_failure, source_type=booking — this IS the booking ID)
-        // 2. context.booking_id (from escalation context — always a string)
-        // 3. context.hotel_booking_id (from escalation context)
-        // 4. opportunity.hotel_booking_id (often null due to UUID/String Pydantic coercion)
+        // Build a list of candidate booking IDs to try, in priority order
         const candidateIds: string[] = [];
         if (escalationSourceId && (escalationSourceType === 'booking' || escalationSourceType === 'BOOKING')) {
           candidateIds.push(escalationSourceId);
@@ -186,7 +267,6 @@ function HotelOpportunityInfo({
         const ctxHotelBookingId = contextData.hotel_booking_id as string | undefined;
         if (ctxHotelBookingId) candidateIds.push(ctxHotelBookingId);
         if (match?.hotel_booking_id) candidateIds.push(match.hotel_booking_id);
-        // Also try escalation source_id even if source_type isn't 'booking' (fallback)
         if (escalationSourceId && escalationSourceType !== 'booking' && escalationSourceType !== 'BOOKING') {
           candidateIds.push(escalationSourceId);
         }
@@ -203,10 +283,30 @@ function HotelOpportunityInfo({
           }
         }
 
-        setBookingId(resolvedBookingId || candidateIds[0] || null);
+        const finalBookingId = resolvedBookingId || candidateIds[0] || null;
+        setBookingId(finalBookingId);
         if (foundBooking?.hotel) {
           setHotelBooking(foundBooking.hotel);
         }
+
+        // Try to fetch detailed guest info from HotelBookingDetail endpoint
+        let detailGuests: GuestSummary[] | null = null;
+        if (finalBookingId) {
+          try {
+            const detail = await api.getHotelBookingDetail(finalBookingId);
+            detailGuests = detail.guests || null;
+          } catch {
+            // Endpoint may not work — fallback to view data
+          }
+        }
+
+        // Merge guest info from all available sources
+        const merged = mergeGuestInfo(
+          detailGuests,
+          foundBooking?.hotel?.guests || null,
+          ctx.travellers || null,
+        );
+        setGuestInfo(merged);
       })
       .catch(() => {})
       .finally(() => { if (!cancelled) setLoading(false); });
@@ -225,7 +325,7 @@ function HotelOpportunityInfo({
     );
   }
 
-  // No opportunity AND no booking found — minimal fallback with available context data
+  // No opportunity AND no booking found — minimal fallback
   if (!opportunity && !hotelBooking) {
     return (
       <div className="bg-purple-500/5 border border-purple-500/20 rounded-lg p-3 space-y-2">
@@ -247,26 +347,32 @@ function HotelOpportunityInfo({
     );
   }
 
-  // Merge data: booking data has hotel details (name, city, dates, room),
-  // opportunity data has repricing-specific fields (status, pricing, payment)
+  // Merge data
   const hotelName = hotelBooking?.hotel_name || 'Hotel';
   const checkIn = hotelBooking?.check_in;
   const checkOut = hotelBooking?.check_out;
   const city = hotelBooking?.hotel_city;
   const roomType = hotelBooking?.room_type;
-  const guests = hotelBooking?.guests;
+  const guestNames = hotelBooking?.guests;
   const bookedWith = hotelBooking?.booked_with;
   const originalPrice = hotelBooking?.total_price || opportunity?.original_price;
   const targetPrice = opportunity?.target_price;
-  // Confirmation codes: confCode from escalation context may be the Axel code (AXL- prefix)
-  // hotelBooking?.confirmation_code is the original hotel's confirmation
   const hotelConfCode = hotelBooking?.confirmation_code;
   const axelConfCode = confCode?.startsWith('AXL') ? confCode : null;
   const originalConfirmation = hotelConfCode || (!axelConfCode ? confCode : null);
-  // Axel's new booking ID (from the repriced booking, if it exists)
   const newBookingId = opportunity?.new_booking_id;
   const oppStatus = opportunity?.status || 'unknown';
   const failureReason = opportunity?.failure_reason;
+  const nights = hotelBooking?.nights || (checkIn && checkOut ? Math.round((new Date(checkOut).getTime() - new Date(checkIn).getTime()) / 86400000) : null);
+
+  // Account owner info
+  const accountEmail = memberCtx?.user_extras?.email;
+  const accountPhone = memberCtx?.user_extras?.phone;
+  const accountName = memberCtx?.user?.first_name;
+
+  // Guest breakdown
+  const adults = guestInfo.filter(g => !g.isChild);
+  const children = guestInfo.filter(g => g.isChild);
 
   const statusColors: Record<string, string> = {
     active: 'text-blue-400',
@@ -280,23 +386,23 @@ function HotelOpportunityInfo({
     needs_intervention: 'text-red-400',
   };
 
+  const fmtPrice = (p: { amount: number; currency: string }) =>
+    new Intl.NumberFormat('en-US', { style: 'currency', currency: p.currency || 'USD' }).format(fromMinorUnits(p.amount, p.currency || 'USD'));
+
   return (
-    <div className="bg-purple-500/5 border border-purple-500/20 rounded-lg p-4 space-y-3">
-      {/* Header: Hotel name + status */}
+    <div className="bg-purple-500/5 border border-purple-500/20 rounded-lg p-3 space-y-2">
+      {/* Hotel header: name + status */}
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <p className="font-semibold truncate">{hotelName}</p>
-          {city && <p className="text-xs text-muted-foreground">{city}</p>}
-          {(checkIn || checkOut) && (
-            <p className="text-xs text-muted-foreground mt-0.5">
-              {checkIn ? formatDate(checkIn) : '?'}
-              {' → '}
-              {checkOut ? formatDate(checkOut) : '?'}
-            </p>
-          )}
+          <p className="font-semibold text-sm truncate">{hotelName}</p>
+          <p className="text-xs text-muted-foreground">
+            {city}{city && (checkIn || checkOut) ? ' · ' : ''}
+            {checkIn ? formatDate(checkIn) : '?'} → {checkOut ? formatDate(checkOut) : '?'}
+            {nights ? ` (${nights} night${nights !== 1 ? 's' : ''})` : ''}
+          </p>
         </div>
         <span className={cn(
-          'text-xs font-medium uppercase shrink-0 px-1.5 py-0.5 rounded',
+          'text-[10px] font-medium uppercase shrink-0 px-1.5 py-0.5 rounded',
           statusColors[oppStatus] || 'text-gray-400',
           'bg-accent/50',
         )}>
@@ -309,96 +415,160 @@ function HotelOpportunityInfo({
         <p className="text-xs text-red-400 bg-red-500/10 px-2 py-1 rounded">{failureReason}</p>
       )}
 
-      {/* Room + guest count */}
-      {(roomType || (guests && guests.length > 0)) && (
-        <div className="text-xs text-muted-foreground space-y-0.5">
-          {roomType && <p>{roomType}</p>}
-          {guests && guests.length > 0 && <p>{guests.length} guest{guests.length !== 1 ? 's' : ''}</p>}
+      {/* Guest Details */}
+      {(guestInfo.length > 0 || (guestNames && guestNames.length > 0)) && (
+        <div className="border-t border-purple-500/10 pt-2">
+          <p className="text-[10px] font-medium text-purple-400 uppercase tracking-wide mb-1">Guests</p>
+          <div className="space-y-0.5">
+            {guestInfo.length > 0 ? (
+              guestInfo.map((g, i) => (
+                <div key={i} className="flex items-center gap-2 text-xs">
+                  <span className="font-medium min-w-0 truncate">{g.name}</span>
+                  {g.isPrimary && <span className="text-[10px] bg-primary/20 text-primary px-1 rounded">primary</span>}
+                  {g.dob && (
+                    <span className="text-muted-foreground shrink-0">
+                      {g.isChild ? `age ${calculateAge(g.dob)}` : `DOB ${g.dob}`}
+                    </span>
+                  )}
+                  {g.citizenship && <span className="text-muted-foreground shrink-0">{g.citizenship}</span>}
+                </div>
+              ))
+            ) : (
+              guestNames?.map((name, i) => (
+                <p key={i} className="text-xs font-medium">{name}</p>
+              ))
+            )}
+          </div>
+          <p className="text-[10px] text-muted-foreground mt-1">
+            {adults.length > 0 || children.length > 0
+              ? `${adults.length} adult${adults.length !== 1 ? 's' : ''}${children.length > 0 ? `, ${children.length} child${children.length !== 1 ? 'ren' : ''} (${children.map(c => c.dob ? `age ${calculateAge(c.dob)}` : '?').join(', ')})` : ''}`
+              : `${guestNames?.length || 0} guest${(guestNames?.length || 0) !== 1 ? 's' : ''}`
+            }
+          </p>
         </div>
       )}
 
-      {/* Pricing row */}
-      {(originalPrice || targetPrice) && (() => {
-        const fmtPrice = (p: { amount: number; currency: string }) =>
-          new Intl.NumberFormat('en-US', { style: 'currency', currency: p.currency || 'USD' }).format(p.amount / 100);
-        const sameCurrency = originalPrice && targetPrice && originalPrice.currency === targetPrice.currency;
-        return (
-          <div className="flex items-center gap-3 text-sm flex-wrap">
-            {originalPrice && (
-              <span className={cn(targetPrice ? 'line-through text-muted-foreground' : 'font-medium')}>
-                {fmtPrice(originalPrice)}
-              </span>
-            )}
-            {targetPrice && (
-              <span className="text-green-400 font-medium">
-                {fmtPrice(targetPrice)}
-              </span>
-            )}
-            {sameCurrency && originalPrice.amount > targetPrice.amount && (
-              <span className="text-green-400 text-xs bg-green-500/10 px-1.5 py-0.5 rounded">
-                Save {fmtPrice({ amount: originalPrice.amount - targetPrice.amount, currency: originalPrice.currency })}
-              </span>
-            )}
-          </div>
-        );
-      })()}
-
-      {/* Key details grid */}
-      <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
-        {opportunity?.payment_status && (
+      {/* Room & Booking Details — compact grid */}
+      <div className="border-t border-purple-500/10 pt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-xs">
+        {roomType && (
           <>
-            <span className="text-muted-foreground">Payment</span>
-            <span className={cn(
-              'text-right font-medium',
-              ['paid', 'card_saved'].includes(opportunity.payment_status) && 'text-green-400',
-              opportunity.payment_status === 'pending' && 'text-yellow-400',
-              opportunity.payment_status === 'failed' && 'text-red-400',
-            )}>
-              {opportunity.payment_status.replace(/_/g, ' ')}
-              {opportunity.payment_amount ? ` (${formatMoney(opportunity.payment_amount, opportunity.payment_currency || 'USD')})` : ''}
-            </span>
-          </>
-        )}
-        {opportunity?.cancellation_capability && (
-          <>
-            <span className="text-muted-foreground">Cancellation</span>
-            <span className={cn(
-              'text-right text-sm',
-              opportunity.cancellation_capability === 'we_cancel' ? 'text-green-400' : 'text-yellow-400',
-            )}>
-              {opportunity.cancellation_capability === 'we_cancel' ? 'Auto' : 'Manual'}
-            </span>
-          </>
-        )}
-        {originalConfirmation && (
-          <>
-            <span className="text-muted-foreground">Hotel Conf.</span>
-            <span className="text-right font-mono text-xs">{originalConfirmation}</span>
-          </>
-        )}
-        {axelConfCode && (
-          <>
-            <span className="text-muted-foreground">Axel Conf.</span>
-            <span className="text-right font-mono text-xs">{axelConfCode}</span>
-          </>
-        )}
-        {newBookingId && (
-          <>
-            <span className="text-muted-foreground">Axel Booking</span>
-            <span className="text-right font-mono text-xs truncate max-w-[160px]" title={newBookingId}>{newBookingId.slice(0, 8)}…</span>
+            <span className="text-muted-foreground">Room</span>
+            <span className="font-medium truncate">{roomType}</span>
           </>
         )}
         {bookedWith && (
           <>
             <span className="text-muted-foreground">Booked with</span>
-            <span className="text-right text-xs">{bookedWith}</span>
+            <span>{bookedWith}</span>
+          </>
+        )}
+        {originalConfirmation && (
+          <>
+            <span className="text-muted-foreground">Hotel Conf.</span>
+            <span className="font-mono">{originalConfirmation}</span>
+          </>
+        )}
+        {axelConfCode && (
+          <>
+            <span className="text-muted-foreground">Axel Conf.</span>
+            <span className="font-mono">{axelConfCode}</span>
+          </>
+        )}
+        {newBookingId && (
+          <>
+            <span className="text-muted-foreground">Axel Booking</span>
+            <span className="font-mono truncate" title={newBookingId}>{newBookingId.slice(0, 10)}…</span>
+          </>
+        )}
+        {opportunity?.cancellation_capability && (
+          <>
+            <span className="text-muted-foreground">Cancellation</span>
+            <span className={opportunity.cancellation_capability === 'we_cancel' ? 'text-green-400' : 'text-yellow-400'}>
+              {opportunity.cancellation_capability === 'we_cancel' ? 'Auto' : 'Manual'}
+            </span>
           </>
         )}
       </div>
 
+      {/* Pricing with USD conversion */}
+      {(originalPrice || targetPrice) && (
+        <div className="border-t border-purple-500/10 pt-2">
+          <p className="text-[10px] font-medium text-purple-400 uppercase tracking-wide mb-1">Pricing</p>
+          <div className="space-y-0.5 text-xs">
+            {originalPrice && (
+              <div className="flex items-center gap-1">
+                <span className="text-muted-foreground w-14 shrink-0">Original</span>
+                <span className={cn(targetPrice ? 'line-through text-muted-foreground' : 'font-medium')}>
+                  {fmtPrice(originalPrice)}
+                </span>
+                <USDPrice amount={originalPrice.amount} currency={originalPrice.currency} />
+              </div>
+            )}
+            {targetPrice && (
+              <div className="flex items-center gap-1">
+                <span className="text-muted-foreground w-14 shrink-0">Target</span>
+                <span className="text-green-400 font-medium">{fmtPrice(targetPrice)}</span>
+                <USDPrice amount={targetPrice.amount} currency={targetPrice.currency} />
+              </div>
+            )}
+            {originalPrice && targetPrice && originalPrice.currency === targetPrice.currency && originalPrice.amount > targetPrice.amount && (
+              <div className="flex items-center gap-1">
+                <span className="text-muted-foreground w-14 shrink-0">Savings</span>
+                <span className="text-green-400 font-medium">
+                  {fmtPrice({ amount: originalPrice.amount - targetPrice.amount, currency: originalPrice.currency })}
+                </span>
+                <USDPrice amount={originalPrice.amount - targetPrice.amount} currency={originalPrice.currency} />
+              </div>
+            )}
+          </div>
+          {opportunity?.payment_status && (
+            <div className="flex items-center gap-1 text-xs mt-1">
+              <span className="text-muted-foreground">Payment:</span>
+              <span className={cn(
+                'font-medium',
+                ['paid', 'card_saved'].includes(opportunity.payment_status) && 'text-green-400',
+                opportunity.payment_status === 'pending' && 'text-yellow-400',
+                opportunity.payment_status === 'failed' && 'text-red-400',
+              )}>
+                {opportunity.payment_status.replace(/_/g, ' ')}
+                {opportunity.payment_amount ? ` (${fmtPrice({ amount: opportunity.payment_amount, currency: opportunity.payment_currency || 'USD' })})` : ''}
+              </span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Account owner — inline */}
+      <div className="border-t border-purple-500/10 pt-2">
+        <p className="text-[10px] font-medium text-purple-400 uppercase tracking-wide mb-1">Account</p>
+        <div className="flex items-center justify-between">
+          <div className="min-w-0 text-xs space-y-0.5">
+            {accountName && <p className="font-medium">{accountName}</p>}
+            {accountEmail && (
+              <div className="flex items-center gap-1">
+                <span className="text-muted-foreground truncate">{accountEmail}</span>
+                <CopyButton value={accountEmail} />
+              </div>
+            )}
+            {accountPhone && (
+              <div className="flex items-center gap-1">
+                <span className="text-muted-foreground">{accountPhone}</span>
+                <CopyButton value={accountPhone} />
+              </div>
+            )}
+          </div>
+          <Link
+            href={`/users-list/${userId}`}
+            className="text-xs text-primary hover:underline shrink-0 ml-2"
+          >
+            View →
+          </Link>
+        </div>
+      </div>
+
       {/* Source Email */}
       {(opportunity?.hotel_booking_id || bookingId) && (
-        <div className="pt-2 border-t border-purple-500/10">
+        <div className="border-t border-purple-500/10 pt-2">
           <button
             onClick={async () => {
               if (emailFetched) { setShowEmail(!showEmail); return; }
@@ -449,8 +619,8 @@ function HotelOpportunityInfo({
         </div>
       )}
 
-      {/* Link to user profile (booking view) + compact IDs */}
-      <div className="pt-2 border-t border-purple-500/10 flex items-center justify-between">
+      {/* Compact IDs */}
+      <div className="border-t border-purple-500/10 pt-2 flex items-center justify-between">
         <div className="flex flex-wrap gap-3">
           <IdPill label="Opportunity" value={opportunityId} />
           {(opportunity?.hotel_booking_id || bookingId) && (
@@ -696,10 +866,10 @@ export function EscalationDetail({ escalation, onClose, onUpdate, renderInline }
   const content = (
     <>
       {/* Header */}
-      <div className="sticky top-0 bg-card border-b border-border p-4 flex items-center justify-between z-10">
+      <div className="sticky top-0 bg-card border-b border-border px-3 py-2 flex items-center justify-between z-10">
         <div className="flex items-center gap-3">
           <div>
-            <h2 className="text-lg font-semibold">Escalation</h2>
+            <h2 className="text-sm font-semibold">Escalation</h2>
             <div className="flex items-center gap-2 mt-0.5">
               <span className={cn('px-2 py-0.5 text-xs font-medium rounded', statusColors[escalation.status] || 'bg-gray-500/20 text-gray-400')}>
                 {escalation.status}
@@ -727,25 +897,25 @@ export function EscalationDetail({ escalation, onClose, onUpdate, renderInline }
         )}
       </div>
 
-      <div className="p-4 space-y-4">
-        {/* Type badge */}
+      <div className="p-3 space-y-3">
+        {/* Type badge + time */}
         <div className="flex items-center gap-2">
-          <span className="text-sm font-medium bg-accent/50 px-2 py-1 rounded">{escalation.type.replace(/_/g, ' ')}</span>
+          <span className="text-xs font-medium bg-accent/50 px-2 py-0.5 rounded">{escalation.type.replace(/_/g, ' ')}</span>
           <span className="text-xs text-muted-foreground">{timeAgo(escalation.created_at)}</span>
         </div>
 
         {/* Action Needed — most prominent */}
         {actionNeeded && (
-          <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-3">
-            <p className="text-xs font-medium text-yellow-400 mb-1">⚠ Action Needed</p>
+          <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-2">
+            <p className="text-xs font-medium text-yellow-400 mb-0.5">Action Needed</p>
             <p className="text-sm font-medium">{actionNeeded}</p>
           </div>
         )}
 
         {/* Reason */}
-        <div className="bg-accent/50 rounded-lg p-3">
-          <p className="text-xs font-medium text-muted-foreground mb-1">Reason</p>
-          <p className="text-sm">{escalation.reason}</p>
+        <div className="bg-accent/50 rounded-lg p-2">
+          <p className="text-[10px] font-medium text-muted-foreground mb-0.5">Reason</p>
+          <p className="text-xs">{escalation.reason}</p>
         </div>
 
         {/* Hotel Opportunity Info — primary info card for repricing escalations */}
@@ -759,8 +929,8 @@ export function EscalationDetail({ escalation, onClose, onUpdate, renderInline }
           />
         )}
 
-        {/* Customer */}
-        <CustomerInfoSection userId={escalation.user_id} />
+        {/* Customer — only show standalone section when hotel info card is NOT shown (it has account info inline) */}
+        {!opportunityId && <CustomerInfoSection userId={escalation.user_id} />}
 
         {/* Error */}
         {error && (
