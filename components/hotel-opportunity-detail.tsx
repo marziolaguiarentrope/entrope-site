@@ -5,6 +5,8 @@ import Link from 'next/link';
 import { HotelOpportunity, BookingEnrichment, api, RawEmail, UserBasicInfo, MemberContext, HotelOpportunityView } from '@/lib/api';
 import { cn, formatDate, fromMinorUnits } from '@/lib/utils';
 
+const TERMINAL_STATUSES = new Set(['completed', 'failed', 'declined', 'expired', 'withdrawn', 'cancelled']);
+
 // ── Helpers ──────────────────────────────────────────────
 
 function formatMoney(amount: number | null | undefined, currency: string | null | undefined): string {
@@ -559,6 +561,38 @@ export function HotelOpportunityDetail({
   const [confirmingManual, setConfirmingManual] = useState(false);
   const [manualSuccess, setManualSuccess] = useState(false);
 
+  // Cancel opportunity state
+  const [showCancelOpp, setShowCancelOpp] = useState(false);
+  const [cancelOppReason, setCancelOppReason] = useState('');
+  const [cancellingOpp, setCancellingOpp] = useState(false);
+  const [cancelOppSuccess, setCancelOppSuccess] = useState(false);
+  const [cancelOppError, setCancelOppError] = useState<string | null>(null);
+
+  const isTerminal = TERMINAL_STATUSES.has(opportunity.status);
+
+  async function handleCancelOpportunity() {
+    if (!cancelOppReason.trim()) {
+      setCancelOppError('Please enter a reason for cancellation');
+      return;
+    }
+    setCancellingOpp(true);
+    setCancelOppError(null);
+    try {
+      await api.cancelOpportunity(opportunity.id, cancelOppReason.trim());
+      setCancelOppSuccess(true);
+      onUpdate({ ...opportunity, status: 'cancelled' });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to cancel opportunity';
+      if (msg.includes('404') || msg.includes('Not Found')) {
+        setCancelOppError('This action is not yet available — a backend update is needed. Please contact engineering.');
+      } else {
+        setCancelOppError(msg);
+      }
+    } finally {
+      setCancellingOpp(false);
+    }
+  }
+
   async function handleMarkCancelled() {
     if (!opportunity.old_booking_id) {
       setError('No booking ID available');
@@ -947,6 +981,69 @@ export function HotelOpportunityDetail({
           <div className="bg-green-500/10 rounded-lg p-4">
             <p className="text-green-400 font-medium">Original booking has been cancelled.</p>
             <p className="text-sm text-muted-foreground mt-1">This step is complete — the repricing can proceed.</p>
+          </div>
+        )}
+
+        {/* Cancel Opportunity — available for ALL non-terminal opportunities */}
+        {!isTerminal && !cancelOppSuccess && (
+          <div className="border-t border-border pt-4 mt-4">
+            {!showCancelOpp ? (
+              <button
+                onClick={() => setShowCancelOpp(true)}
+                className="w-full py-2 px-4 border border-red-500/40 text-red-400 rounded-lg font-medium hover:bg-red-500/10 transition-colors text-sm"
+              >
+                Cancel This Repricing
+              </button>
+            ) : (
+              <div className="space-y-3 bg-red-500/5 border border-red-500/20 rounded-lg p-4">
+                <div>
+                  <p className="text-red-400 font-medium text-sm">Cancel Repricing Opportunity</p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    This will cancel the entire repricing opportunity. The original booking will remain unchanged.
+                  </p>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-muted-foreground mb-1">
+                    Reason for cancellation *
+                  </label>
+                  <textarea
+                    value={cancelOppReason}
+                    onChange={(e) => setCancelOppReason(e.target.value)}
+                    placeholder="e.g., Customer requested cancellation, duplicate opportunity, etc."
+                    rows={2}
+                    className="w-full px-3 py-2 bg-background border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-red-500/50 resize-none"
+                  />
+                </div>
+                {cancelOppError && (
+                  <div className="bg-red-500/10 text-red-400 p-2 rounded text-xs">
+                    {cancelOppError}
+                  </div>
+                )}
+                <div className="flex gap-2">
+                  <button
+                    onClick={handleCancelOpportunity}
+                    disabled={cancellingOpp || !cancelOppReason.trim()}
+                    className="flex-1 py-2 px-4 bg-red-600 text-white rounded-lg font-medium hover:bg-red-700 disabled:opacity-50 transition-colors text-sm"
+                  >
+                    {cancellingOpp ? 'Cancelling...' : 'Yes, Cancel Repricing'}
+                  </button>
+                  <button
+                    onClick={() => { setShowCancelOpp(false); setCancelOppError(null); setCancelOppReason(''); }}
+                    className="py-2 px-4 bg-accent text-foreground rounded-lg font-medium hover:bg-accent/80 transition-colors text-sm"
+                  >
+                    Go Back
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Cancel opportunity success */}
+        {cancelOppSuccess && (
+          <div className="bg-green-500/10 rounded-lg p-4 mt-4">
+            <p className="text-green-400 font-medium">Repricing opportunity has been cancelled.</p>
+            <p className="text-sm text-muted-foreground mt-1">The original booking remains unchanged.</p>
           </div>
         )}
       </div>

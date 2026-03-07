@@ -32,112 +32,40 @@ function formatMoney(amount: number | null | undefined, currency: string | null 
   }).format(fromMinorUnits(amount, cur));
 }
 
+function shortDate(dateStr: string | null): string {
+  if (!dateStr) return '?';
+  const d = new Date(dateStr + 'T00:00:00');
+  return d.toLocaleDateString('en-US', { month: 'numeric', day: 'numeric' });
+}
+
 // ── Types ────────────────────────────────────────────────
 
-type TabFilter = 'all' | 'current' | 'past';
-type OpportunityType = 'pending_payment' | 'pending_cancel' | 'active' | 'completed';
-type SortKey = 'payment_due' | 'hotel' | 'check_in' | 'created' | 'original_price' | 'new_price' | 'savings' | 'account_name' | 'status';
-type SortDir = 'asc' | 'desc';
+type PipelineStage = 'pending_payment' | 'pending_cancel' | 'active' | 'needs_intervention' | 'done';
 
-type EnrichedOpportunity = HotelOpportunity & { opp_type: OpportunityType };
+type EnrichedOpportunity = HotelOpportunity & { stage: PipelineStage };
 
-// ── Column definitions ───────────────────────────────────
-
-interface ColumnDef {
-  id: string;
-  label: string;
-  sortKey?: SortKey;
-  minWidth: number;
-  defaultWidth: number;
-}
-
-const COLUMNS: ColumnDef[] = [
-  { id: 'status', label: 'Status', sortKey: 'status', minWidth: 80, defaultWidth: 110 },
-  { id: 'payment_due', label: 'Payment Due', sortKey: 'payment_due', minWidth: 90, defaultWidth: 110 },
-  { id: 'account_name', label: 'Account', sortKey: 'account_name', minWidth: 100, defaultWidth: 150 },
-  { id: 'guest_name', label: 'Reservation Name', minWidth: 100, defaultWidth: 140 },
-  { id: 'hotel', label: 'Hotel', sortKey: 'hotel', minWidth: 120, defaultWidth: 200 },
-  { id: 'check_in_out', label: 'Check-In / Out', sortKey: 'check_in', minWidth: 140, defaultWidth: 170 },
-  { id: 'conf_code', label: 'Conf Code', minWidth: 100, defaultWidth: 130 },
-  { id: 'original_price', label: 'Original Price', sortKey: 'original_price', minWidth: 90, defaultWidth: 110 },
-  { id: 'new_price', label: 'New Price', sortKey: 'new_price', minWidth: 90, defaultWidth: 110 },
-  { id: 'savings', label: 'Savings', sortKey: 'savings', minWidth: 80, defaultWidth: 100 },
-  { id: 'type', label: 'Type', minWidth: 70, defaultWidth: 90 },
-  { id: 'created', label: 'Created', sortKey: 'created', minWidth: 70, defaultWidth: 90 },
-];
-
-// Terminal statuses — these go in the "past" tab; everything else is "current"
+// Terminal statuses
 const TERMINAL_STATUSES = new Set(['completed', 'failed', 'declined', 'expired', 'withdrawn', 'cancelled']);
 
-// ── Sort Logic ───────────────────────────────────────────
+// ── Pipeline Stage Config ────────────────────────────────
 
-function sortOpportunities(
-  opps: EnrichedOpportunity[],
-  key: SortKey,
-  dir: SortDir,
-  userInfoMap: Map<string, UserBasicInfo>,
-  bookingEnrichmentMap: Map<string, BookingEnrichment>,
-): EnrichedOpportunity[] {
-  return [...opps].sort((a, b) => {
-    let aVal: string | number;
-    let bVal: string | number;
-
-    switch (key) {
-      case 'payment_due':
-        aVal = a.payment_due_at ? new Date(a.payment_due_at).getTime() : Infinity;
-        bVal = b.payment_due_at ? new Date(b.payment_due_at).getTime() : Infinity;
-        break;
-      case 'hotel':
-        aVal = (a.hotel_name || '').toLowerCase();
-        bVal = (b.hotel_name || '').toLowerCase();
-        break;
-      case 'check_in':
-        aVal = a.check_in ? new Date(a.check_in + 'T00:00:00').getTime() : Infinity;
-        bVal = b.check_in ? new Date(b.check_in + 'T00:00:00').getTime() : Infinity;
-        break;
-      case 'created':
-        aVal = new Date(a.created_at).getTime();
-        bVal = new Date(b.created_at).getTime();
-        break;
-      case 'original_price': {
-        const aBe = a.old_booking_id ? bookingEnrichmentMap.get(a.old_booking_id) : undefined;
-        const bBe = b.old_booking_id ? bookingEnrichmentMap.get(b.old_booking_id) : undefined;
-        aVal = aBe?.total_price?.amount ?? 0;
-        bVal = bBe?.total_price?.amount ?? 0;
-        break;
-      }
-      case 'new_price':
-        aVal = a.payment_amount ?? 0;
-        bVal = b.payment_amount ?? 0;
-        break;
-      case 'savings': {
-        const aBe2 = a.old_booking_id ? bookingEnrichmentMap.get(a.old_booking_id) : undefined;
-        const bBe2 = b.old_booking_id ? bookingEnrichmentMap.get(b.old_booking_id) : undefined;
-        const aOrig = aBe2?.total_price?.amount ?? 0;
-        const bOrig = bBe2?.total_price?.amount ?? 0;
-        aVal = aOrig && a.payment_amount ? aOrig - a.payment_amount : 0;
-        bVal = bOrig && b.payment_amount ? bOrig - b.payment_amount : 0;
-        break;
-      }
-      case 'account_name':
-        aVal = (userInfoMap.get(a.user_id)?.name || '').toLowerCase();
-        bVal = (userInfoMap.get(b.user_id)?.name || '').toLowerCase();
-        break;
-      case 'status':
-        aVal = a.status;
-        bVal = b.status;
-        break;
-      default:
-        return 0;
-    }
-
-    if (aVal < bVal) return dir === 'asc' ? -1 : 1;
-    if (aVal > bVal) return dir === 'asc' ? 1 : -1;
-    return 0;
-  });
+interface StageConfig {
+  key: PipelineStage;
+  label: string;
+  accent: string;       // border/badge color
+  bgAccent: string;     // header background
+  textAccent: string;   // count badge text
 }
 
-// ── Search Logic ─────────────────────────────────────────
+const STAGES: StageConfig[] = [
+  { key: 'pending_payment', label: 'Pending Payment', accent: 'border-yellow-500/40', bgAccent: 'bg-yellow-500/10', textAccent: 'text-yellow-400' },
+  { key: 'pending_cancel', label: 'Pending Cancel', accent: 'border-red-500/40', bgAccent: 'bg-red-500/10', textAccent: 'text-red-400' },
+  { key: 'active', label: 'Active', accent: 'border-blue-500/40', bgAccent: 'bg-blue-500/10', textAccent: 'text-blue-400' },
+  { key: 'needs_intervention', label: 'Needs Intervention', accent: 'border-orange-500/40', bgAccent: 'bg-orange-500/10', textAccent: 'text-orange-400' },
+  { key: 'done', label: 'Done', accent: 'border-zinc-500/30', bgAccent: 'bg-zinc-500/10', textAccent: 'text-zinc-400' },
+];
+
+// ── Search matching ──────────────────────────────────────
 
 function matchesSearch(
   opp: EnrichedOpportunity,
@@ -155,6 +83,8 @@ function matchesSearch(
     opp.hotel_name?.toLowerCase().includes(q) ||
     opp.old_booking_confirmation_code?.toLowerCase().includes(q) ||
     opp.status?.toLowerCase().includes(q) ||
+    opp.id?.toLowerCase().includes(q) ||
+    opp.old_booking_id?.toLowerCase().includes(q) ||
     u?.email?.toLowerCase().includes(q) ||
     u?.phone?.toLowerCase().includes(q) ||
     u?.name?.toLowerCase().includes(q) ||
@@ -163,7 +93,17 @@ function matchesSearch(
   );
 }
 
-// ── StatusBadge ──────────────────────────────────────────
+// ── Stage Badge ──────────────────────────────────────────
+
+function StageBadge({ stage }: { stage: PipelineStage }) {
+  const config = STAGES.find(s => s.key === stage);
+  if (!config) return null;
+  return (
+    <span className={cn('px-2 py-0.5 text-xs rounded font-medium whitespace-nowrap', config.bgAccent, config.textAccent)}>
+      {config.label}
+    </span>
+  );
+}
 
 function StatusBadge({ status }: { status: string }) {
   const colors: Record<string, string> = {
@@ -186,220 +126,313 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
-function TypeBadge({ type }: { type: OpportunityType }) {
-  if (type === 'pending_payment') return <span className="px-2 py-0.5 text-xs bg-yellow-500/20 text-yellow-400 rounded font-medium whitespace-nowrap">Payment</span>;
-  if (type === 'pending_cancel') return <span className="px-2 py-0.5 text-xs bg-red-500/20 text-red-400 rounded font-medium whitespace-nowrap">Cancel</span>;
-  if (type === 'active') return <span className="px-2 py-0.5 text-xs bg-blue-500/20 text-blue-400 rounded font-medium whitespace-nowrap">Active</span>;
-  return <span className="px-2 py-0.5 text-xs bg-zinc-500/20 text-zinc-400 rounded font-medium whitespace-nowrap">Completed</span>;
-}
+// ── Kanban Card ──────────────────────────────────────────
 
-// ── Resizable Header ─────────────────────────────────────
-
-function ResizableHeader({
-  column,
-  width,
-  onResize,
-  sortKey: currentSortKey,
-  sortDir,
-  onSort,
-}: {
-  column: ColumnDef;
-  width: number;
-  onResize: (id: string, width: number) => void;
-  sortKey: SortKey;
-  sortDir: SortDir;
-  onSort: (key: SortKey) => void;
-}) {
-  const isActive = column.sortKey === currentSortKey;
-  const startX = useRef(0);
-  const startW = useRef(0);
-
-  function handleMouseDown(e: React.MouseEvent) {
-    e.preventDefault();
-    e.stopPropagation();
-    startX.current = e.clientX;
-    startW.current = width;
-
-    function handleMouseMove(ev: MouseEvent) {
-      const delta = ev.clientX - startX.current;
-      const newWidth = Math.max(column.minWidth, startW.current + delta);
-      onResize(column.id, newWidth);
-    }
-
-    function handleMouseUp() {
-      document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseup', handleMouseUp);
-    }
-
-    document.addEventListener('mousemove', handleMouseMove);
-    document.addEventListener('mouseup', handleMouseUp);
-  }
-
-  return (
-    <th
-      className="relative text-left text-xs font-medium text-muted-foreground select-none whitespace-nowrap group"
-      style={{ width, minWidth: column.minWidth }}
-    >
-      <div
-        className={cn(
-          'px-3 py-2',
-          column.sortKey && 'cursor-pointer hover:text-foreground',
-        )}
-        onClick={() => column.sortKey && onSort(column.sortKey)}
-      >
-        {column.label}
-        {isActive && <span className="ml-1">{sortDir === 'asc' ? '↑' : '↓'}</span>}
-      </div>
-      {/* Resize handle */}
-      <div
-        onMouseDown={handleMouseDown}
-        className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-primary/30 group-hover:bg-border/50 transition-colors"
-      />
-    </th>
-  );
-}
-
-// ── Loading Shimmer ──────────────────────────────────────
-
-function Shimmer({ className }: { className?: string }) {
-  return (
-    <span className={cn('inline-block bg-muted-foreground/15 rounded animate-pulse', className || 'h-3.5 w-16')} />
-  );
-}
-
-// ── Table Row ────────────────────────────────────────────
-
-function OpportunityRow({
+function KanbanCard({
   opp,
   onClick,
   userInfo,
   bookingEnrichment,
-  columnWidths,
   enriching,
 }: {
   opp: EnrichedOpportunity;
   onClick: () => void;
   userInfo?: UserBasicInfo;
   bookingEnrichment?: BookingEnrichment;
-  columnWidths: Record<string, number>;
   enriching: boolean;
 }) {
   const guestName = bookingEnrichment?.guests?.[0] || null;
   const originalPrice = bookingEnrichment?.total_price || null;
   const newPrice = opp.payment_amount;
   const newCurrency = opp.payment_currency;
+  const confCode = opp.old_booking_confirmation_code || bookingEnrichment?.confirmation_code;
+  const hotelName = bookingEnrichment?.hotel_name || opp.hotel_name || 'Unknown Hotel';
 
-  // Calculate savings (only when same currency)
-  let savingsAmount: number | null = null;
-  let savingsCurrency: string | null = null;
-  if (originalPrice && newPrice && originalPrice.currency === (newCurrency || 'USD')) {
-    const diff = originalPrice.amount - newPrice;
-    if (diff > 0) {
-      savingsAmount = diff;
-      savingsCurrency = originalPrice.currency;
-    }
-  }
-
-  // Axel conf code: the old_booking_confirmation_code is the hotel's code
-  const confCode = opp.old_booking_confirmation_code;
+  // Urgency: overdue payment or cancel deadline within 24h
+  const now = Date.now();
+  const paymentOverdue = opp.payment_due_at && new Date(opp.payment_due_at).getTime() < now && !TERMINAL_STATUSES.has(opp.status);
+  const cancelUrgent = opp.cancellation_scheduled_at && (new Date(opp.cancellation_scheduled_at).getTime() - now) < 86400_000 && !TERMINAL_STATUSES.has(opp.status);
+  const isUrgent = paymentOverdue || cancelUrgent;
+  const isIntervention = opp.status === 'needs_intervention';
+  const isDone = opp.stage === 'done';
 
   return (
-    <tr onClick={onClick} className="border-b border-border last:border-0 hover:bg-accent/50 transition-colors cursor-pointer">
-      {/* Status */}
-      <td className="px-3 py-3" style={{ width: columnWidths.status }}>
-        <StatusBadge status={opp.status} />
-      </td>
-      {/* Payment Due */}
-      <td className="px-3 py-3 text-xs whitespace-nowrap" style={{ width: columnWidths.payment_due }}>
-        {opp.payment_due_at ? (
-          <span className={cn(
-            new Date(opp.payment_due_at) < new Date() && opp.status !== 'completed' && 'text-red-400 font-medium',
-          )}>
-            {formatDate(opp.payment_due_at)}
-          </span>
-        ) : '—'}
-      </td>
-      {/* Account Name (linked) */}
-      <td className="px-3 py-3 text-sm" style={{ width: columnWidths.account_name }}>
-        {enriching && !userInfo ? <Shimmer className="h-3.5 w-20" /> : userInfo?.name ? (
-          <Link
-            href={`/users-list/${opp.user_id}`}
-            onClick={(e) => e.stopPropagation()}
-            className="text-primary hover:underline truncate block max-w-full"
-          >
-            {userInfo.name}
-          </Link>
+    <div
+      onClick={onClick}
+      className={cn(
+        'rounded-lg border p-3 cursor-pointer transition-all hover:shadow-md hover:border-foreground/20 space-y-1.5',
+        'bg-card',
+        isDone && 'opacity-60',
+        isUrgent ? 'border-l-[3px] border-l-red-500 border-t-border border-r-border border-b-border'
+          : isIntervention ? 'border-l-[3px] border-l-orange-500 border-t-border border-r-border border-b-border'
+          : 'border-border',
+      )}
+    >
+      {/* Hotel name */}
+      <p className="text-sm font-medium truncate">{hotelName}</p>
+
+      {/* Guest + dates */}
+      <p className="text-xs text-muted-foreground truncate">
+        {enriching && !bookingEnrichment ? (
+          <span className="inline-block bg-muted-foreground/15 rounded animate-pulse h-3 w-20" />
         ) : (
-          <span className="text-muted-foreground truncate block">—</span>
+          <>
+            {guestName || userInfo?.name || '—'}
+            {' · '}
+            {shortDate(opp.check_in)} → {shortDate(opp.check_out)}
+          </>
         )}
-      </td>
-      {/* Reservation Name (guest name) */}
-      <td className="px-3 py-3 text-xs text-muted-foreground truncate" style={{ width: columnWidths.guest_name }}>
-        {enriching && !bookingEnrichment ? <Shimmer className="h-3 w-24" /> : guestName || '—'}
-      </td>
-      {/* Hotel */}
-      <td className="px-3 py-3 text-sm truncate" style={{ width: columnWidths.hotel }}>
-        {opp.hotel_name || '—'}
-      </td>
-      {/* Check-In / Out */}
-      <td className="px-3 py-3 text-xs whitespace-nowrap" style={{ width: columnWidths.check_in_out }}>
-        {formatDate(opp.check_in)} – {formatDate(opp.check_out)}
-      </td>
-      {/* Conf Code */}
-      <td className="px-3 py-3 text-xs font-mono text-muted-foreground whitespace-nowrap" style={{ width: columnWidths.conf_code }}>
-        {confCode || '—'}
-      </td>
-      {/* Original Price */}
-      <td className="px-3 py-3 text-xs whitespace-nowrap text-right" style={{ width: columnWidths.original_price }}>
-        {enriching && !bookingEnrichment ? <Shimmer className="h-3 w-14" /> : originalPrice ? (
+      </p>
+
+      {/* Pricing */}
+      <div className="flex items-center gap-1.5 text-xs">
+        {originalPrice ? (
           <span className={cn(newPrice ? 'line-through text-muted-foreground' : 'font-mono')}>
             {formatMoney(originalPrice.amount, originalPrice.currency)}
           </span>
-        ) : '—'}
-      </td>
-      {/* New Price */}
-      <td className="px-3 py-3 text-xs font-mono whitespace-nowrap text-right" style={{ width: columnWidths.new_price }}>
+        ) : null}
         {newPrice ? (
-          <span className="text-green-400 font-medium">
-            {formatMoney(newPrice, newCurrency)}
+          <>
+            {originalPrice && <span className="text-muted-foreground">→</span>}
+            <span className="text-green-400 font-medium font-mono">
+              {formatMoney(newPrice, newCurrency)}
+            </span>
+          </>
+        ) : null}
+        {!originalPrice && !newPrice && enriching && (
+          <span className="inline-block bg-muted-foreground/15 rounded animate-pulse h-3 w-16" />
+        )}
+      </div>
+
+      {/* Status pills */}
+      <div className="flex items-center gap-1.5 flex-wrap">
+        {opp.payment_status && (
+          <span className={cn(
+            'px-1.5 py-0.5 text-[10px] rounded font-medium',
+            ['paid', 'collected', 'card_saved'].includes(opp.payment_status) ? 'bg-green-500/15 text-green-400'
+              : ['pending', 'awaiting_card'].includes(opp.payment_status) ? 'bg-yellow-500/15 text-yellow-400'
+              : opp.payment_status === 'overdue' ? 'bg-red-500/15 text-red-400'
+              : 'bg-zinc-500/15 text-zinc-400',
+          )}>
+            {opp.payment_status.replace(/_/g, ' ')}
           </span>
-        ) : '—'}
-      </td>
-      {/* Savings */}
-      <td className="px-3 py-3 text-xs whitespace-nowrap text-right" style={{ width: columnWidths.savings }}>
-        {enriching && !bookingEnrichment ? <Shimmer className="h-3 w-12" /> : savingsAmount ? (
-          <span className="text-green-400 bg-green-500/10 px-1.5 py-0.5 rounded font-medium">
-            {formatMoney(savingsAmount, savingsCurrency)}
+        )}
+        {opp.cancellation_capability && (
+          <span className={cn(
+            'px-1.5 py-0.5 text-[10px] rounded font-medium',
+            opp.cancellation_capability === 'we_cancel' ? 'bg-green-500/15 text-green-400' : 'bg-yellow-500/15 text-yellow-400',
+          )}>
+            {opp.cancellation_capability === 'we_cancel' ? 'we cancel' : 'they cancel'}
           </span>
-        ) : '—'}
-      </td>
-      {/* Type */}
-      <td className="px-3 py-3" style={{ width: columnWidths.type }}>
-        <TypeBadge type={opp.opp_type} />
-      </td>
-      {/* Created */}
-      <td className="px-3 py-3 text-xs text-muted-foreground whitespace-nowrap" style={{ width: columnWidths.created }}>
-        {timeAgo(opp.created_at)}
-      </td>
-    </tr>
+        )}
+        {opp.old_booking_status && opp.stage === 'pending_cancel' && (
+          <span className={cn(
+            'px-1.5 py-0.5 text-[10px] rounded font-medium',
+            opp.old_booking_status === 'active' ? 'bg-yellow-500/15 text-yellow-400' : 'bg-green-500/15 text-green-400',
+          )}>
+            booking {opp.old_booking_status}
+          </span>
+        )}
+        {isDone && (
+          <StatusBadge status={opp.status} />
+        )}
+      </div>
+
+      {/* Footer: conf code + time */}
+      <div className="flex items-center justify-between text-[10px] text-muted-foreground pt-0.5">
+        <span className="font-mono truncate max-w-[120px]">{confCode || '—'}</span>
+        <span className="shrink-0 ml-2">{timeAgo(opp.created_at)}</span>
+      </div>
+    </div>
+  );
+}
+
+// ── Kanban Column ────────────────────────────────────────
+
+function KanbanColumn({
+  config,
+  opportunities,
+  collapsed,
+  onToggle,
+  onCardClick,
+  userInfoMap,
+  bookingEnrichmentMap,
+  enriching,
+}: {
+  config: StageConfig;
+  opportunities: EnrichedOpportunity[];
+  collapsed: boolean;
+  onToggle: () => void;
+  onCardClick: (opp: EnrichedOpportunity) => void;
+  userInfoMap: Map<string, UserBasicInfo>;
+  bookingEnrichmentMap: Map<string, BookingEnrichment>;
+  enriching: boolean;
+}) {
+  const count = opportunities.length;
+
+  if (collapsed) {
+    return (
+      <div
+        onClick={onToggle}
+        className={cn(
+          'flex-shrink-0 w-12 rounded-lg border cursor-pointer transition-colors hover:bg-accent/50 flex flex-col items-center py-3 gap-2',
+          config.accent,
+          config.bgAccent,
+        )}
+        title={`${config.label} (${count}) — click to expand`}
+      >
+        <span className={cn('text-sm font-bold', config.textAccent)}>{count}</span>
+        <span className={cn('text-[10px] font-medium [writing-mode:vertical-rl] [text-orientation:mixed]', config.textAccent)}>
+          {config.label}
+        </span>
+      </div>
+    );
+  }
+
+  return (
+    <div className={cn('flex-shrink-0 w-72 flex flex-col rounded-lg border', config.accent)}>
+      {/* Column header */}
+      <div
+        className={cn('px-3 py-2.5 rounded-t-lg flex items-center justify-between cursor-pointer', config.bgAccent)}
+        onClick={config.key === 'done' ? onToggle : undefined}
+      >
+        <div className="flex items-center gap-2 min-w-0">
+          <h3 className={cn('text-sm font-semibold truncate', config.textAccent)}>
+            {config.label}
+          </h3>
+          <span className={cn('text-xs font-bold px-1.5 py-0.5 rounded-full', config.bgAccent, config.textAccent)}>
+            {count}
+          </span>
+        </div>
+        {config.key === 'done' && (
+          <button className="text-xs text-muted-foreground hover:text-foreground">collapse</button>
+        )}
+      </div>
+
+      {/* Cards */}
+      <div className="flex-1 overflow-y-auto p-2 space-y-2 max-h-[calc(100vh-220px)]">
+        {count === 0 ? (
+          <p className="text-xs text-muted-foreground text-center py-4">No items</p>
+        ) : (
+          opportunities.map(opp => (
+            <KanbanCard
+              key={opp.id}
+              opp={opp}
+              onClick={() => onCardClick(opp)}
+              userInfo={userInfoMap.get(opp.user_id)}
+              bookingEnrichment={opp.old_booking_id ? bookingEnrichmentMap.get(opp.old_booking_id) : undefined}
+              enriching={enriching}
+            />
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Search Results Table ─────────────────────────────────
+
+function SearchResultsTable({
+  results,
+  userInfoMap,
+  bookingEnrichmentMap,
+  enriching,
+  onRowClick,
+}: {
+  results: EnrichedOpportunity[];
+  userInfoMap: Map<string, UserBasicInfo>;
+  bookingEnrichmentMap: Map<string, BookingEnrichment>;
+  enriching: boolean;
+  onRowClick: (opp: EnrichedOpportunity) => void;
+}) {
+  return (
+    <div className="bg-card border border-border rounded-lg overflow-hidden">
+      {results.length === 0 ? (
+        <p className="text-center text-muted-foreground py-8 text-sm">No results match your search</p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead className="border-b border-border bg-accent/30">
+              <tr>
+                <th className="text-left text-xs font-medium text-muted-foreground px-3 py-2 whitespace-nowrap">Stage</th>
+                <th className="text-left text-xs font-medium text-muted-foreground px-3 py-2 whitespace-nowrap">Status</th>
+                <th className="text-left text-xs font-medium text-muted-foreground px-3 py-2 whitespace-nowrap">Hotel</th>
+                <th className="text-left text-xs font-medium text-muted-foreground px-3 py-2 whitespace-nowrap">Guest</th>
+                <th className="text-left text-xs font-medium text-muted-foreground px-3 py-2 whitespace-nowrap">Account</th>
+                <th className="text-left text-xs font-medium text-muted-foreground px-3 py-2 whitespace-nowrap">Check-In / Out</th>
+                <th className="text-left text-xs font-medium text-muted-foreground px-3 py-2 whitespace-nowrap">Conf Code</th>
+                <th className="text-right text-xs font-medium text-muted-foreground px-3 py-2 whitespace-nowrap">Original</th>
+                <th className="text-right text-xs font-medium text-muted-foreground px-3 py-2 whitespace-nowrap">New Price</th>
+                <th className="text-left text-xs font-medium text-muted-foreground px-3 py-2 whitespace-nowrap">Created</th>
+              </tr>
+            </thead>
+            <tbody>
+              {results.map(opp => {
+                const u = userInfoMap.get(opp.user_id);
+                const be = opp.old_booking_id ? bookingEnrichmentMap.get(opp.old_booking_id) : undefined;
+                const guestName = be?.guests?.[0] || null;
+                const originalPrice = be?.total_price || null;
+
+                return (
+                  <tr
+                    key={opp.id}
+                    onClick={() => onRowClick(opp)}
+                    className="border-b border-border last:border-0 hover:bg-accent/50 transition-colors cursor-pointer"
+                  >
+                    <td className="px-3 py-2.5"><StageBadge stage={opp.stage} /></td>
+                    <td className="px-3 py-2.5"><StatusBadge status={opp.status} /></td>
+                    <td className="px-3 py-2.5 text-sm truncate max-w-[200px]">{opp.hotel_name || '—'}</td>
+                    <td className="px-3 py-2.5 text-xs text-muted-foreground truncate max-w-[140px]">
+                      {enriching && !be ? <span className="inline-block bg-muted-foreground/15 rounded animate-pulse h-3 w-20" /> : guestName || '—'}
+                    </td>
+                    <td className="px-3 py-2.5 text-sm">
+                      {enriching && !u ? <span className="inline-block bg-muted-foreground/15 rounded animate-pulse h-3 w-20" /> : u?.name ? (
+                        <Link
+                          href={`/users-list/${opp.user_id}`}
+                          onClick={(e) => e.stopPropagation()}
+                          className="text-primary hover:underline truncate block max-w-[140px]"
+                        >
+                          {u.name}
+                        </Link>
+                      ) : '—'}
+                    </td>
+                    <td className="px-3 py-2.5 text-xs whitespace-nowrap">
+                      {formatDate(opp.check_in)} – {formatDate(opp.check_out)}
+                    </td>
+                    <td className="px-3 py-2.5 text-xs font-mono text-muted-foreground whitespace-nowrap">
+                      {opp.old_booking_confirmation_code || '—'}
+                    </td>
+                    <td className="px-3 py-2.5 text-xs whitespace-nowrap text-right">
+                      {enriching && !be ? <span className="inline-block bg-muted-foreground/15 rounded animate-pulse h-3 w-14" /> : originalPrice
+                        ? <span className={cn(opp.payment_amount ? 'line-through text-muted-foreground' : 'font-mono')}>{formatMoney(originalPrice.amount, originalPrice.currency)}</span>
+                        : '—'}
+                    </td>
+                    <td className="px-3 py-2.5 text-xs font-mono whitespace-nowrap text-right">
+                      {opp.payment_amount ? (
+                        <span className="text-green-400 font-medium">{formatMoney(opp.payment_amount, opp.payment_currency)}</span>
+                      ) : '—'}
+                    </td>
+                    <td className="px-3 py-2.5 text-xs text-muted-foreground whitespace-nowrap">{timeAgo(opp.created_at)}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
   );
 }
 
 // ── Main Page ────────────────────────────────────────────
 
 export default function HotelRepricingTrackingPage() {
-  // Filters & sorting
-  const [tab, setTab] = useState<TabFilter>('current');
   const [search, setSearch] = useState('');
-  const [sortKey, setSortKey] = useState<SortKey>('payment_due');
-  const [sortDir, setSortDir] = useState<SortDir>('asc');
-  const [paymentStatusFilter, setPaymentStatusFilter] = useState<string>('all');
 
   // Data
   const [opportunities, setOpportunities] = useState<EnrichedOpportunity[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [counts, setCounts] = useState({ payment: 0, cancel: 0, active: 0, completed: 0 });
 
   // Enrichment
   const [userInfoMap, setUserInfoMap] = useState<Map<string, UserBasicInfo>>(new Map());
@@ -409,32 +442,11 @@ export default function HotelRepricingTrackingPage() {
   // Detail panel
   const [selectedOpportunity, setSelectedOpportunity] = useState<EnrichedOpportunity | null>(null);
 
-  // Column widths (resizable)
-  const [columnWidths, setColumnWidths] = useState<Record<string, number>>(() => {
-    const widths: Record<string, number> = {};
-    COLUMNS.forEach(c => { widths[c.id] = c.defaultWidth; });
-    return widths;
-  });
-
-  function handleColumnResize(id: string, width: number) {
-    setColumnWidths(prev => ({ ...prev, [id]: width }));
-  }
+  // Done column collapsed
+  const [doneCollapsed, setDoneCollapsed] = useState(true);
 
   // Auto-refresh
   const refreshTimer = useRef<NodeJS.Timeout | null>(null);
-
-  // Reset sort when switching tabs
-  useEffect(() => {
-    if (tab === 'current') {
-      setSortKey('payment_due');
-      setSortDir('asc');
-    } else {
-      setSortKey('created');
-      setSortDir('desc');
-    }
-    setPaymentStatusFilter('all');
-    setSearch('');
-  }, [tab]);
 
   // Fetch data
   const fetchData = useCallback(async () => {
@@ -442,76 +454,45 @@ export default function HotelRepricingTrackingPage() {
     setError(null);
 
     try {
-      // Always fetch pending-payment + pending-cancel for opp_type tagging + counts
-      const [paymentRes, cancelRes] = await Promise.all([
+      // Fetch all endpoints in parallel
+      const [paymentRes, cancelRes, activeRes, completedRes] = await Promise.allSettled([
         api.listHotelOpportunitiesPendingPayment({ limit: 100 }),
         api.listHotelOpportunitiesPendingCancel({ limit: 100 }),
+        api.listHotelOpportunitiesActive({ limit: 100 }),
+        api.listHotelOpportunitiesCompleted({ limit: 100 }),
       ]);
 
-      const paymentIds = new Set(paymentRes.opportunities.map(o => o.id));
-      const cancelIds = new Set(cancelRes.opportunities.map(o => o.id));
+      const paymentOpps = paymentRes.status === 'fulfilled' ? paymentRes.value.opportunities : [];
+      const cancelOpps = cancelRes.status === 'fulfilled' ? cancelRes.value.opportunities : [];
+      const activeOpps = activeRes.status === 'fulfilled' ? activeRes.value.opportunities : [];
+      const completedOpps = completedRes.status === 'fulfilled' ? completedRes.value.opportunities : [];
 
-      setCounts(prev => ({
-        ...prev,
-        payment: paymentRes.total,
-        cancel: cancelRes.total,
-      }));
+      const paymentIds = new Set(paymentOpps.map(o => o.id));
+      const cancelIds = new Set(cancelOpps.map(o => o.id));
 
-      // Classify opp_type based on which sub-list the opportunity appears in
-      function classify(o: HotelOpportunity): OpportunityType {
+      function classify(o: HotelOpportunity): PipelineStage {
         if (paymentIds.has(o.id)) return 'pending_payment';
         if (cancelIds.has(o.id)) return 'pending_cancel';
-        if (TERMINAL_STATUSES.has(o.status)) return 'completed';
-        // Active but not in a specific sub-list (e.g. executing, needs_intervention, awaiting_customer)
+        if (TERMINAL_STATUSES.has(o.status)) return 'done';
+        if (o.status === 'needs_intervention') return 'needs_intervention';
         return 'active';
       }
 
-      let opps: EnrichedOpportunity[];
+      // Deduplicate: active endpoint returns everything non-terminal
+      const seen = new Set<string>();
+      const all: EnrichedOpportunity[] = [];
 
-      if (tab === 'current') {
-        // Use the /active endpoint — returns ALL non-terminal opportunities
-        const activeRes = await api.listHotelOpportunitiesActive({ limit: 100 });
-        opps = activeRes.opportunities.map(o => ({ ...o, opp_type: classify(o) }));
-        const activeCount = opps.filter(o => o.opp_type === 'active').length;
-        setCounts(prev => ({ ...prev, active: activeCount }));
-      } else if (tab === 'past') {
-        // Completed endpoint (may 404 if not deployed yet)
-        try {
-          const completedRes = await api.listHotelOpportunitiesCompleted({ limit: 100 });
-          opps = completedRes.opportunities.map(o => ({ ...o, opp_type: 'completed' as OpportunityType }));
-          setCounts(prev => ({ ...prev, completed: completedRes.total }));
-        } catch {
-          opps = [];
-        }
-      } else {
-        // "all" tab — fetch active + completed and merge
-        const [activeRes, completedRes] = await Promise.allSettled([
-          api.listHotelOpportunitiesActive({ limit: 100 }),
-          api.listHotelOpportunitiesCompleted({ limit: 100 }),
-        ]);
-
-        const activeOpps = activeRes.status === 'fulfilled'
-          ? activeRes.value.opportunities.map(o => ({ ...o, opp_type: classify(o) }))
-          : [];
-        const completedOpps = completedRes.status === 'fulfilled'
-          ? completedRes.value.opportunities.map(o => ({ ...o, opp_type: 'completed' as OpportunityType }))
-          : [];
-
-        if (completedRes.status === 'fulfilled') {
-          setCounts(prev => ({ ...prev, completed: completedRes.value.total }));
-        }
-
-        // Deduplicate (active takes priority)
-        const seen = new Set<string>();
-        opps = [];
-        for (const o of activeOpps) { if (!seen.has(o.id)) { seen.add(o.id); opps.push(o); } }
-        for (const o of completedOpps) { if (!seen.has(o.id)) { seen.add(o.id); opps.push(o); } }
+      for (const o of activeOpps) {
+        if (!seen.has(o.id)) { seen.add(o.id); all.push({ ...o, stage: classify(o) }); }
+      }
+      for (const o of completedOpps) {
+        if (!seen.has(o.id)) { seen.add(o.id); all.push({ ...o, stage: 'done' }); }
       }
 
-      setOpportunities(opps);
+      setOpportunities(all);
 
-      // Non-blocking enrichment — single batch call extracts both user info + booking data
-      const userIds = opps.map(o => o.user_id);
+      // Background enrichment
+      const userIds = all.map(o => o.user_id);
       setEnriching(true);
       api.batchEnrichFromMembers(userIds)
         .then(({ userInfoMap: uMap, bookingEnrichmentMap: bMap }) => {
@@ -526,220 +507,166 @@ export default function HotelRepricingTrackingPage() {
     } finally {
       setLoading(false);
     }
-  }, [tab]);
+  }, []);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
-  // Auto-refresh for current tab (every 30s) — paused while detail panel is open
+  // Auto-refresh every 30s — paused while detail panel is open or in search mode
   useEffect(() => {
     if (refreshTimer.current) clearInterval(refreshTimer.current);
-    if (tab === 'current' && !selectedOpportunity) {
+    if (!selectedOpportunity && !search) {
       refreshTimer.current = setInterval(fetchData, 30_000);
     }
-    return () => {
-      if (refreshTimer.current) clearInterval(refreshTimer.current);
+    return () => { if (refreshTimer.current) clearInterval(refreshTimer.current); };
+  }, [fetchData, selectedOpportunity, search]);
+
+  // Group by stage
+  const stageGroups = useMemo(() => {
+    const groups: Record<PipelineStage, EnrichedOpportunity[]> = {
+      pending_payment: [],
+      pending_cancel: [],
+      active: [],
+      needs_intervention: [],
+      done: [],
     };
-  }, [tab, fetchData, selectedOpportunity]);
-
-  // Filter by payment status
-  const paymentFiltered = useMemo(() => {
-    if (paymentStatusFilter === 'all') return opportunities;
-    return opportunities.filter(o => o.payment_status === paymentStatusFilter);
-  }, [opportunities, paymentStatusFilter]);
-
-  // Search + sort
-  const searched = useMemo(
-    () => paymentFiltered.filter(o => matchesSearch(o, search, userInfoMap, bookingEnrichmentMap)),
-    [paymentFiltered, search, userInfoMap, bookingEnrichmentMap]
-  );
-  const sorted = useMemo(
-    () => sortOpportunities(searched, sortKey, sortDir, userInfoMap, bookingEnrichmentMap),
-    [searched, sortKey, sortDir, userInfoMap, bookingEnrichmentMap]
-  );
-
-  // Sort handler
-  function handleSort(key: SortKey) {
-    if (key === sortKey) {
-      setSortDir(d => d === 'asc' ? 'desc' : 'asc');
-    } else {
-      setSortKey(key);
-      setSortDir(key === 'payment_due' || key === 'check_in' ? 'asc' : 'desc');
+    for (const opp of opportunities) {
+      groups[opp.stage].push(opp);
     }
-  }
-
-  // Get unique payment statuses for filter dropdown
-  const paymentStatuses = useMemo(() => {
-    const set = new Set<string>();
-    opportunities.forEach(o => {
-      if (o.payment_status) set.add(o.payment_status);
+    // Sort each column
+    groups.pending_payment.sort((a, b) => {
+      const aT = a.payment_due_at ? new Date(a.payment_due_at).getTime() : Infinity;
+      const bT = b.payment_due_at ? new Date(b.payment_due_at).getTime() : Infinity;
+      return aT - bT;
     });
-    return [...set].sort();
+    groups.pending_cancel.sort((a, b) => {
+      const aT = a.cancellation_scheduled_at ? new Date(a.cancellation_scheduled_at).getTime() : Infinity;
+      const bT = b.cancellation_scheduled_at ? new Date(b.cancellation_scheduled_at).getTime() : Infinity;
+      return aT - bT;
+    });
+    groups.active.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    groups.needs_intervention.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    groups.done.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    return groups;
   }, [opportunities]);
 
-  const currentCount = tab === 'current' ? opportunities.length : counts.payment + counts.cancel;
+  // Search results
+  const searchResults = useMemo(() => {
+    if (!search) return [];
+    return opportunities.filter(o => matchesSearch(o, search, userInfoMap, bookingEnrichmentMap));
+  }, [opportunities, search, userInfoMap, bookingEnrichmentMap]);
+
+  const isSearchMode = search.length > 0;
+
+  // Variant for detail panel
+  function getVariant(opp: EnrichedOpportunity): 'payment' | 'cancel' | 'active' {
+    if (opp.stage === 'pending_payment') return 'payment';
+    if (opp.stage === 'pending_cancel') return 'cancel';
+    return 'active';
+  }
+
+  const totalActive = opportunities.filter(o => o.stage !== 'done').length;
 
   return (
-    <div>
+    <div className="h-full flex flex-col">
       {/* Header */}
-      <div className="mb-6">
-        <h1 className="text-2xl font-semibold">Hotel Repricing Tracking</h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          Track payment status and cancellations for hotel repricings
-        </p>
-      </div>
-
-      {/* Summary Stats */}
-      <div className="flex items-center gap-4 text-xs text-muted-foreground mb-4">
-        <span>
-          <span className="font-medium text-yellow-400">{counts.payment}</span> pending payment
-          <span className="mx-1">·</span>
-          <span className="font-medium text-red-400">{counts.cancel}</span> pending cancel
-          {counts.active > 0 && (
-            <>
-              <span className="mx-1">·</span>
-              <span className="font-medium text-blue-400">{counts.active}</span> active
-            </>
-          )}
-        </span>
-        {counts.completed > 0 && (
-          <>
-            <span className="text-border">|</span>
-            <span>
-              <span className="font-medium text-green-400">{counts.completed}</span> completed
-            </span>
-          </>
-        )}
-      </div>
-
-      {/* Tab Toggle + Controls */}
-      <div className="flex flex-col lg:flex-row lg:items-center gap-3 mb-4">
-        {/* Tab toggle */}
-        <div className="flex gap-1 bg-accent/30 rounded-lg p-1">
-          <button
-            onClick={() => setTab('current')}
-            className={cn(
-              'px-4 py-1.5 text-sm font-medium rounded-md transition-colors',
-              tab === 'current' ? 'bg-background shadow-sm text-foreground' : 'text-muted-foreground hover:text-foreground'
-            )}
-          >
-            Current {currentCount > 0 && <span className="ml-1 text-xs opacity-70">({currentCount})</span>}
-          </button>
-          <button
-            onClick={() => setTab('past')}
-            className={cn(
-              'px-4 py-1.5 text-sm font-medium rounded-md transition-colors',
-              tab === 'past' ? 'bg-background shadow-sm text-foreground' : 'text-muted-foreground hover:text-foreground'
-            )}
-          >
-            Past {counts.completed > 0 && <span className="ml-1 text-xs opacity-70">({counts.completed})</span>}
-          </button>
-          <button
-            onClick={() => setTab('all')}
-            className={cn(
-              'px-4 py-1.5 text-sm font-medium rounded-md transition-colors',
-              tab === 'all' ? 'bg-background shadow-sm text-foreground' : 'text-muted-foreground hover:text-foreground'
-            )}
-          >
-            All
-          </button>
+      <div className="flex items-start justify-between gap-4 mb-4">
+        <div>
+          <h1 className="text-2xl font-semibold">Hotel Repricing Tracking</h1>
+          <p className="text-sm text-muted-foreground mt-0.5">
+            {totalActive} active repricing{totalActive !== 1 ? 's' : ''} across the pipeline
+          </p>
         </div>
-
-        {/* Payment Status filter */}
-        <select
-          value={paymentStatusFilter}
-          onChange={(e) => setPaymentStatusFilter(e.target.value)}
-          className="px-3 py-1.5 text-xs font-medium bg-accent/50 text-foreground rounded-lg border border-border focus:outline-none focus:ring-2 focus:ring-primary"
-        >
-          <option value="all">All Payment Status</option>
-          {paymentStatuses.map(s => (
-            <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>
-          ))}
-        </select>
-
-        {/* Search */}
-        <div className="flex-1 max-w-sm">
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search hotel, name, conf code..."
-            className="w-full px-3 py-1.5 text-sm bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
-          />
-        </div>
-
-        {/* Refresh */}
         <button
           onClick={fetchData}
           disabled={loading}
-          className="px-3 py-1.5 text-xs font-medium bg-accent/50 text-muted-foreground rounded-lg hover:bg-accent transition-colors disabled:opacity-50"
+          className="px-3 py-1.5 text-xs font-medium bg-accent/50 text-muted-foreground rounded-lg hover:bg-accent transition-colors disabled:opacity-50 shrink-0"
           title="Refresh"
         >
           {loading ? 'Loading...' : '↻ Refresh'}
         </button>
       </div>
 
-      {/* Table */}
-      <div className="bg-card border border-border rounded-lg overflow-hidden">
-        {error ? (
-          <div className="p-6 text-center">
-            <p className="text-red-400 mb-2">{error}</p>
-            <button onClick={fetchData} className="px-4 py-2 bg-primary text-primary-foreground rounded-lg text-sm font-medium hover:bg-primary/90 transition-colors">
-              Retry
-            </button>
-          </div>
-        ) : loading && opportunities.length === 0 ? (
-          <div className="p-6 text-center text-muted-foreground">Loading hotel repricings...</div>
-        ) : sorted.length === 0 ? (
-          <div className="p-6 text-center text-muted-foreground">
-            {search ? 'No repricings match your search' : 'No hotel repricings found'}
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full" style={{ tableLayout: 'fixed' }}>
-              <thead className="border-b border-border bg-accent/30">
-                <tr>
-                  {COLUMNS.map(col => (
-                    <ResizableHeader
-                      key={col.id}
-                      column={col}
-                      width={columnWidths[col.id]}
-                      onResize={handleColumnResize}
-                      sortKey={sortKey}
-                      sortDir={sortDir}
-                      onSort={handleSort}
-                    />
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {sorted.map(opp => (
-                  <OpportunityRow
-                    key={opp.id}
-                    opp={opp}
-                    onClick={() => setSelectedOpportunity(opp)}
-                    userInfo={userInfoMap.get(opp.user_id)}
-                    bookingEnrichment={opp.old_booking_id ? bookingEnrichmentMap.get(opp.old_booking_id) : undefined}
-                    columnWidths={columnWidths}
-                    enriching={enriching}
-                  />
-                ))}
-              </tbody>
-            </table>
-          </div>
+      {/* Search */}
+      <div className="mb-4 relative">
+        <input
+          type="text"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search by hotel, guest, account, conf code, email, phone, ID..."
+          className="w-full px-4 py-2.5 text-sm bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary pl-10"
+        />
+        <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <circle cx="11" cy="11" r="8" strokeWidth={2} />
+          <path strokeLinecap="round" strokeWidth={2} d="m21 21-4.35-4.35" />
+        </svg>
+        {search && (
+          <button
+            onClick={() => setSearch('')}
+            className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground text-sm"
+          >
+            Clear
+          </button>
         )}
       </div>
 
-      {/* Count info */}
-      {!loading && sorted.length > 0 && (
-        <div className="flex items-center justify-between mt-3 text-xs text-muted-foreground">
-          <span>
-            Showing {sorted.length}{search || paymentStatusFilter !== 'all' ? ` of ${opportunities.length}` : ''} repricings
-          </span>
-          {opportunities.length >= 100 && (
-            <span className="text-yellow-400">
-              Results may be truncated — showing first 100 per category.
-            </span>
-          )}
+      {/* Error */}
+      {error && (
+        <div className="mb-4 p-4 bg-red-500/10 border border-red-500/20 rounded-lg">
+          <p className="text-red-400 text-sm">{error}</p>
+          <button onClick={fetchData} className="mt-2 px-4 py-1.5 bg-primary text-primary-foreground rounded-lg text-sm font-medium hover:bg-primary/90 transition-colors">
+            Retry
+          </button>
+        </div>
+      )}
+
+      {/* Loading state */}
+      {loading && opportunities.length === 0 && !error && (
+        <div className="flex-1 flex items-center justify-center text-muted-foreground">
+          Loading hotel repricings...
+        </div>
+      )}
+
+      {/* Search Results */}
+      {isSearchMode && !loading && (
+        <div>
+          <div className="flex items-center justify-between mb-3">
+            <p className="text-sm text-muted-foreground">
+              {searchResults.length} result{searchResults.length !== 1 ? 's' : ''} for &quot;{search}&quot;
+            </p>
+          </div>
+          <SearchResultsTable
+            results={searchResults}
+            userInfoMap={userInfoMap}
+            bookingEnrichmentMap={bookingEnrichmentMap}
+            enriching={enriching}
+            onRowClick={(opp) => setSelectedOpportunity(opp)}
+          />
+        </div>
+      )}
+
+      {/* Kanban Board */}
+      {!isSearchMode && !loading && !error && (
+        <div className="flex-1 flex gap-3 overflow-x-auto pb-2">
+          {STAGES.map(config => (
+            <KanbanColumn
+              key={config.key}
+              config={config}
+              opportunities={stageGroups[config.key]}
+              collapsed={config.key === 'done' && doneCollapsed}
+              onToggle={() => { if (config.key === 'done') setDoneCollapsed(prev => !prev); }}
+              onCardClick={(opp) => setSelectedOpportunity(opp)}
+              userInfoMap={userInfoMap}
+              bookingEnrichmentMap={bookingEnrichmentMap}
+              enriching={enriching}
+            />
+          ))}
+        </div>
+      )}
+
+      {/* Truncation warning */}
+      {!loading && opportunities.length >= 100 && (
+        <div className="mt-2 text-xs text-yellow-400">
+          Results may be truncated — showing first 100 per category.
         </div>
       )}
 
@@ -749,15 +676,11 @@ export default function HotelRepricingTrackingPage() {
           opportunity={selectedOpportunity}
           bookingEnrichment={selectedOpportunity.old_booking_id ? bookingEnrichmentMap.get(selectedOpportunity.old_booking_id) : undefined}
           userInfo={userInfoMap.get(selectedOpportunity.user_id)}
-          variant={
-            selectedOpportunity.opp_type === 'pending_payment' ? 'payment'
-            : selectedOpportunity.opp_type === 'pending_cancel' ? 'cancel'
-            : 'active'
-          }
+          variant={getVariant(selectedOpportunity)}
           onClose={() => setSelectedOpportunity(null)}
           onUpdate={(updated) => {
-            setOpportunities(prev => prev.map(o => o.id === updated.id ? { ...updated, opp_type: o.opp_type } : o));
-            setSelectedOpportunity({ ...updated, opp_type: selectedOpportunity.opp_type });
+            setOpportunities(prev => prev.map(o => o.id === updated.id ? { ...updated, stage: o.stage } : o));
+            setSelectedOpportunity({ ...updated, stage: selectedOpportunity.stage });
           }}
         />
       )}

@@ -683,6 +683,17 @@ class ApiClient {
     });
   }
 
+  /**
+   * Cancel a repricing opportunity. Backend endpoint pending deployment (FAC ticket).
+   * Will return 404 until backend implements POST /hotel-opportunities/{id}/cancel.
+   */
+  async cancelOpportunity(opportunityId: string, reason: string): Promise<{ status: string }> {
+    return this.fetch<{ status: string }>(`/hotel-opportunities/${opportunityId}/cancel`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    });
+  }
+
   // Members
   async searchMemberByEmail(email: string): Promise<MemberSummary | null> {
     return this.fetch<MemberSummary | null>(`/members/search?email=${encodeURIComponent(email)}`);
