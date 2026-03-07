@@ -40,7 +40,7 @@ function shortDate(dateStr: string | null): string {
 
 // ── Types ────────────────────────────────────────────────
 
-type PipelineStage = 'pending_payment' | 'pending_cancel' | 'active' | 'needs_intervention' | 'done';
+type PipelineStage = 'pending_cancel' | 'active' | 'needs_intervention' | 'done';
 
 type EnrichedOpportunity = HotelOpportunity & { stage: PipelineStage };
 
@@ -58,7 +58,6 @@ interface StageConfig {
 }
 
 const STAGES: StageConfig[] = [
-  { key: 'pending_payment', label: 'Pending Payment', accent: 'border-yellow-500/40', bgAccent: 'bg-yellow-500/10', textAccent: 'text-yellow-400' },
   { key: 'pending_cancel', label: 'Pending Cancel', accent: 'border-red-500/40', bgAccent: 'bg-red-500/10', textAccent: 'text-red-400' },
   { key: 'active', label: 'Active', accent: 'border-blue-500/40', bgAccent: 'bg-blue-500/10', textAccent: 'text-blue-400' },
   { key: 'needs_intervention', label: 'Needs Intervention', accent: 'border-orange-500/40', bgAccent: 'bg-orange-500/10', textAccent: 'text-orange-400' },
@@ -442,6 +441,9 @@ export default function HotelRepricingTrackingPage() {
   // Detail panel
   const [selectedOpportunity, setSelectedOpportunity] = useState<EnrichedOpportunity | null>(null);
 
+  // Pending payment count (shown as info stat, not a column — not actionable by operators)
+  const [pendingPaymentCount, setPendingPaymentCount] = useState(0);
+
   // Done column collapsed
   const [doneCollapsed, setDoneCollapsed] = useState(true);
 
@@ -467,14 +469,14 @@ export default function HotelRepricingTrackingPage() {
       const activeOpps = activeRes.status === 'fulfilled' ? activeRes.value.opportunities : [];
       const completedOpps = completedRes.status === 'fulfilled' ? completedRes.value.opportunities : [];
 
-      const paymentIds = new Set(paymentOpps.map(o => o.id));
+      setPendingPaymentCount(paymentOpps.length);
       const cancelIds = new Set(cancelOpps.map(o => o.id));
 
       function classify(o: HotelOpportunity): PipelineStage {
-        if (paymentIds.has(o.id)) return 'pending_payment';
         if (cancelIds.has(o.id)) return 'pending_cancel';
         if (TERMINAL_STATUSES.has(o.status)) return 'done';
         if (o.status === 'needs_intervention') return 'needs_intervention';
+        // pending_payment items are not actionable by operators — group with active
         return 'active';
       }
 
@@ -523,7 +525,6 @@ export default function HotelRepricingTrackingPage() {
   // Group by stage
   const stageGroups = useMemo(() => {
     const groups: Record<PipelineStage, EnrichedOpportunity[]> = {
-      pending_payment: [],
       pending_cancel: [],
       active: [],
       needs_intervention: [],
@@ -533,11 +534,6 @@ export default function HotelRepricingTrackingPage() {
       groups[opp.stage].push(opp);
     }
     // Sort each column
-    groups.pending_payment.sort((a, b) => {
-      const aT = a.payment_due_at ? new Date(a.payment_due_at).getTime() : Infinity;
-      const bT = b.payment_due_at ? new Date(b.payment_due_at).getTime() : Infinity;
-      return aT - bT;
-    });
     groups.pending_cancel.sort((a, b) => {
       const aT = a.cancellation_scheduled_at ? new Date(a.cancellation_scheduled_at).getTime() : Infinity;
       const bT = b.cancellation_scheduled_at ? new Date(b.cancellation_scheduled_at).getTime() : Infinity;
@@ -559,7 +555,6 @@ export default function HotelRepricingTrackingPage() {
 
   // Variant for detail panel
   function getVariant(opp: EnrichedOpportunity): 'payment' | 'cancel' | 'active' {
-    if (opp.stage === 'pending_payment') return 'payment';
     if (opp.stage === 'pending_cancel') return 'cancel';
     return 'active';
   }
@@ -574,6 +569,9 @@ export default function HotelRepricingTrackingPage() {
           <h1 className="text-2xl font-semibold">Hotel Repricing Tracking</h1>
           <p className="text-sm text-muted-foreground mt-0.5">
             {totalActive} active repricing{totalActive !== 1 ? 's' : ''} across the pipeline
+            {pendingPaymentCount > 0 && (
+              <span className="ml-2 text-yellow-400/70">· {pendingPaymentCount} awaiting payment</span>
+            )}
           </p>
         </div>
         <button
