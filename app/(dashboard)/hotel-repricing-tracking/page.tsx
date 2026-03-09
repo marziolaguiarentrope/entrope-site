@@ -450,9 +450,9 @@ export default function HotelRepricingTrackingPage() {
   // Auto-refresh
   const refreshTimer = useRef<NodeJS.Timeout | null>(null);
 
-  // Fetch data
-  const fetchData = useCallback(async () => {
-    setLoading(true);
+  // Fetch data. `silent` skips the loading spinner (used for auto-refresh).
+  const fetchData = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
     setError(null);
 
     try {
@@ -507,17 +507,17 @@ export default function HotelRepricingTrackingPage() {
       setError(err instanceof Error ? err.message : 'Failed to fetch data');
       setOpportunities([]);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, []);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
-  // Auto-refresh every 30s — paused while detail panel is open or in search mode
+  // Auto-refresh every 30s (silent — no loading flash). Paused while detail panel open or searching.
   useEffect(() => {
     if (refreshTimer.current) clearInterval(refreshTimer.current);
     if (!selectedOpportunity && !search) {
-      refreshTimer.current = setInterval(fetchData, 30_000);
+      refreshTimer.current = setInterval(() => fetchData(true), 30_000);
     }
     return () => { if (refreshTimer.current) clearInterval(refreshTimer.current); };
   }, [fetchData, selectedOpportunity, search]);
@@ -534,9 +534,10 @@ export default function HotelRepricingTrackingPage() {
       groups[opp.stage].push(opp);
     }
     // Sort each column
+    // Pending cancel: nearest check-in first
     groups.pending_cancel.sort((a, b) => {
-      const aT = a.cancellation_scheduled_at ? new Date(a.cancellation_scheduled_at).getTime() : Infinity;
-      const bT = b.cancellation_scheduled_at ? new Date(b.cancellation_scheduled_at).getTime() : Infinity;
+      const aT = a.check_in ? new Date(a.check_in + 'T00:00:00').getTime() : Infinity;
+      const bT = b.check_in ? new Date(b.check_in + 'T00:00:00').getTime() : Infinity;
       return aT - bT;
     });
     groups.active.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
@@ -575,7 +576,7 @@ export default function HotelRepricingTrackingPage() {
           </p>
         </div>
         <button
-          onClick={fetchData}
+          onClick={() => fetchData()}
           disabled={loading}
           className="px-3 py-1.5 text-xs font-medium bg-accent/50 text-muted-foreground rounded-lg hover:bg-accent transition-colors disabled:opacity-50 shrink-0"
           title="Refresh"
@@ -611,7 +612,7 @@ export default function HotelRepricingTrackingPage() {
       {error && (
         <div className="mb-4 p-4 bg-red-500/10 border border-red-500/20 rounded-lg">
           <p className="text-red-400 text-sm">{error}</p>
-          <button onClick={fetchData} className="mt-2 px-4 py-1.5 bg-primary text-primary-foreground rounded-lg text-sm font-medium hover:bg-primary/90 transition-colors">
+          <button onClick={() => fetchData()} className="mt-2 px-4 py-1.5 bg-primary text-primary-foreground rounded-lg text-sm font-medium hover:bg-primary/90 transition-colors">
             Retry
           </button>
         </div>
