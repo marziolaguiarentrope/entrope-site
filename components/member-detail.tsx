@@ -2605,6 +2605,7 @@ export function MemberDetail({
             {emailConfirm && (
               <div className="bg-yellow-500/10 border border-yellow-500/30 rounded p-2 text-sm text-yellow-400">
                 Change email from <span className="font-mono">{member.email}</span> to <span className="font-mono">{newEmail.trim().toLowerCase()}</span>? Click Save again to confirm.
+                <br /><span className="text-xs text-yellow-400/70">Email will be auto-verified as an admin edit.</span>
               </div>
             )}
             <div className="flex gap-2">
