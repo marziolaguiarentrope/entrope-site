@@ -1101,6 +1101,33 @@ class ApiClient {
     const params = days ? `?days=${days}` : '';
     return this.fetch<BusinessDashboardResponse>(`/metrics/dashboard${params}`);
   }
+
+  // Hotel Bookings (Axel-booked only)
+  async listHotelBookings(params?: {
+    offset?: number;
+    limit?: number;
+    status?: string;
+    check_in_after?: string;
+    check_in_before?: string;
+    sort_by?: string;
+    sort_dir?: string;
+    q?: string;
+  }): Promise<HotelBookingListResponse> {
+    const searchParams = new URLSearchParams();
+    // Always filter to Axel-booked hotels only
+    searchParams.set('source', 'axel');
+    if (params?.offset !== undefined) searchParams.set('offset', params.offset.toString());
+    if (params?.limit !== undefined) searchParams.set('limit', params.limit.toString());
+    if (params?.status) searchParams.set('status', params.status);
+    if (params?.check_in_after) searchParams.set('check_in_after', params.check_in_after);
+    if (params?.check_in_before) searchParams.set('check_in_before', params.check_in_before);
+    if (params?.sort_by) searchParams.set('sort_by', params.sort_by);
+    if (params?.sort_dir) searchParams.set('sort_dir', params.sort_dir);
+    if (params?.q) searchParams.set('q', params.q);
+
+    const query = searchParams.toString();
+    return this.fetch<HotelBookingListResponse>(`/hotel-bookings${query ? `?${query}` : ''}`);
+  }
 }
 
 export interface HotelOpportunity {
@@ -1126,6 +1153,63 @@ export interface HotelOpportunity {
 export interface HotelOpportunityListResponse {
   opportunities: HotelOpportunity[];
   total: number;
+  limit: number;
+  offset: number;
+}
+
+// ── Hotel Bookings (Axel-booked, source='axel') ──────────
+
+export interface HotelBookingGuestItem {
+  name: string;
+  is_primary: boolean;
+  citizenship: string | null;
+}
+
+export interface HotelBookingListItem {
+  id: string;
+  user_id: string;
+  status: string;                           // pending | confirmed | in_progress | cancelled | completed
+  verification_status: string | null;       // importing | unverified | functional | complete
+  hotel_name: string | null;
+  hotel_chain: string | null;
+  city: string | null;
+  state: string | null;
+  country: string | null;
+  check_in_date: string | null;
+  check_out_date: string | null;
+  confirmation_code: string | null;         // Axel confirmation code (AXL-XXXXXXXX)
+  booking_provider: string | null;
+  supplier: string | null;                  // "etg"
+  supplier_confirmation_code: string | null; // Hotel-facing code guests use at check-in
+  internal_supplier_reference: string | null; // ETG Order ID (lookup key on RateHawk)
+  customer_price_amount: number | null;     // Minor units
+  customer_price_currency: string | null;
+  supplier_cost_amount: number | null;      // Minor units — what Axel paid to supplier
+  supplier_cost_currency: string | null;
+  margin_amount: number | null;             // Minor units
+  original_price_amount: number | null;     // Minor units — pre-repricing price if applicable
+  original_price_currency: string | null;
+  guests: HotelBookingGuestItem[];
+  room_type: string | null;
+  is_award_booking: boolean;
+  loyalty_program: string | null;
+  loyalty_number: string | null;
+  points_paid: number | null;
+  axel_can_cancel: boolean;
+  free_cancellation_until: string | null;
+  cancellation_policy: Record<string, unknown> | null;
+  replaced_by_booking_id: string | null;
+  total_savings_amount: number | null;
+  booked_at: string | null;
+  cancelled_at: string | null;
+  created_at: string;
+  updated_at: string;
+  conv_trip_id: string | null;
+}
+
+export interface HotelBookingListResponse {
+  bookings: HotelBookingListItem[];
+  total_count: number;
   limit: number;
   offset: number;
 }

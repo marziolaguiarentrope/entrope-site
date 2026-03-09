@@ -761,7 +761,7 @@ function CollapsibleDetails({ escalation }: { escalation: Escalation }) {
                 href="/hotel-repricing-tracking"
                 className="text-xs text-primary hover:underline"
               >
-                Hotel Repricing Tracker →
+                Hotel Repricings →
               </Link>
             )}
           </div>

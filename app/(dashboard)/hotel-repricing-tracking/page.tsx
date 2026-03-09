@@ -567,7 +567,7 @@ export default function HotelRepricingTrackingPage() {
       {/* Header */}
       <div className="flex items-start justify-between gap-4 mb-4">
         <div>
-          <h1 className="text-2xl font-semibold">Hotel Repricing Tracking</h1>
+          <h1 className="text-2xl font-semibold">Hotel Repricings</h1>
           <p className="text-sm text-muted-foreground mt-0.5">
             {totalActive} active repricing{totalActive !== 1 ? 's' : ''} across the pipeline
             {pendingPaymentCount > 0 && (
