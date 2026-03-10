@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { type ReactNode, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import {
   AlertCircle,
@@ -18,7 +18,13 @@ import {
   AgentFlightBookingTraveler,
   api,
   FlightBookingPatchRequest,
+  MemberContext,
+  PassengerSummary,
+  PaymentRecord,
   Task,
+  ThoughtView,
+  TravelerProfile,
+  WatchView,
 } from '@/lib/api';
 import { cn } from '@/lib/utils';
 
@@ -29,6 +35,27 @@ function formatDateTime(value: string | null | undefined): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return date.toLocaleString();
+}
+
+function formatDuration(start: string | null | undefined, end: string | null | undefined): string {
+  if (!start || !end) return '—';
+  const startDate = new Date(start);
+  const endDate = new Date(end);
+  if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) return '—';
+  const diffMs = endDate.getTime() - startDate.getTime();
+  if (diffMs < 0) return '—';
+
+  const totalMinutes = Math.round(diffMs / 60000);
+  const days = Math.floor(totalMinutes / 1440);
+  const hours = Math.floor((totalMinutes % 1440) / 60);
+  const minutes = totalMinutes % 60;
+  const parts = [
+    days > 0 ? `${days}d` : null,
+    hours > 0 ? `${hours}h` : null,
+    minutes > 0 ? `${minutes}m` : null,
+  ].filter(Boolean);
+
+  return parts.join(' ') || '0m';
 }
 
 function formatMoneyCents(cents: number | null | undefined, currency = 'USD'): string {
@@ -44,6 +71,11 @@ function formatMoneyCents(cents: number | null | undefined, currency = 'USD'): s
   }
 }
 
+function formatMoney(value: { amount: number; currency: string } | null | undefined): string {
+  if (!value) return '—';
+  return formatMoneyCents(value.amount, value.currency);
+}
+
 function routeLabel(origin: string | null | undefined, destination: string | null | undefined): string {
   if (origin && destination) return `${origin} → ${destination}`;
   if (origin) return origin;
@@ -51,11 +83,97 @@ function routeLabel(origin: string | null | undefined, destination: string | nul
   return 'Route unavailable';
 }
 
+function humanizeToken(value: string | null | undefined): string {
+  if (!value) return '—';
+  return value
+    .replace(/[_-]+/g, ' ')
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
 function travelerName(traveler: AgentFlightBookingTraveler): string {
   const first = typeof traveler.first_name === 'string' ? traveler.first_name : null;
   const last = typeof traveler.last_name === 'string' ? traveler.last_name : null;
   const full = [first, last].filter(Boolean).join(' ').trim();
   return full || 'Traveler';
+}
+
+function normalizeName(value: string | null | undefined): string {
+  return (value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, ' ');
+}
+
+function travelerProfileName(traveler: TravelerProfile): string {
+  const full = [traveler.first_name, traveler.middle_name, traveler.last_name]
+    .filter(Boolean)
+    .join(' ')
+    .trim();
+  return full || traveler.email || traveler.id;
+}
+
+function travelerAddress(traveler: TravelerProfile): string {
+  return [
+    traveler.address_line_1,
+    traveler.address_line_2,
+    traveler.city,
+    traveler.state,
+    traveler.postal_code,
+    traveler.address_country,
+  ]
+    .filter(Boolean)
+    .join(', ') || '—';
+}
+
+function travelerPassportSummary(traveler: TravelerProfile): string {
+  if (traveler.passports && traveler.passports.length > 0) {
+    return traveler.passports
+      .map((passport) => [passport.country, passport.number, passport.expiry].filter(Boolean).join(' · '))
+      .join(' | ');
+  }
+
+  return [traveler.passport_country, traveler.passport_number, traveler.passport_expiry]
+    .filter(Boolean)
+    .join(' · ') || '—';
+}
+
+function travelerLoyaltySummary(traveler: TravelerProfile): string {
+  if (traveler.loyalty_memberships && traveler.loyalty_memberships.length > 0) {
+    return traveler.loyalty_memberships
+      .map((membership) => `${membership.program_id}: ${membership.number}`)
+      .join(' | ');
+  }
+
+  return Object.entries(traveler.loyalty_programs || {})
+    .map(([program, number]) => `${program}: ${number}`)
+    .join(' | ') || '—';
+}
+
+function matchingPassengerSummary(
+  traveler: TravelerProfile | AgentFlightBookingTraveler,
+  passengers: PassengerSummary[] | null | undefined,
+): PassengerSummary | null {
+  if (!passengers || passengers.length === 0) return null;
+
+  const travelerId = 'id' in traveler && typeof traveler.id === 'string' ? traveler.id : null;
+  if (travelerId) {
+    const byId = passengers.find((passenger) => passenger.id === travelerId);
+    if (byId) return byId;
+  }
+
+  const primaryName = normalizeName(
+    'middle_name' in traveler
+      ? [traveler.first_name, traveler.middle_name, traveler.last_name].filter(Boolean).join(' ')
+      : [traveler.first_name, traveler.last_name].filter(Boolean).join(' '),
+  );
+  const fallbackName = normalizeName(
+    [traveler.first_name, traveler.last_name].filter(Boolean).join(' '),
+  );
+
+  return passengers.find((passenger) => {
+    const passengerName = normalizeName(passenger.name);
+    return passengerName === primaryName || passengerName === fallbackName;
+  }) || null;
 }
 
 function userDisplayName(user: AgentFlightBookingDetail['user']): string {
@@ -67,6 +185,14 @@ function userDisplayName(user: AgentFlightBookingDetail['user']): string {
   if (typeof user.name === 'string' && user.name.trim()) return user.name;
   if (typeof user.email === 'string' && user.email.trim()) return user.email;
   return user.id;
+}
+
+function userPhone(user: AgentFlightBookingDetail['user']): string | null {
+  if (!user) return null;
+  const phone = typeof user.phone_number === 'string' && user.phone_number.trim()
+    ? user.phone_number
+    : user.phone;
+  return typeof phone === 'string' && phone.trim() ? phone : null;
 }
 
 function normalizeConfirmationCode(value: string | null | undefined): string {
@@ -110,6 +236,29 @@ function segmentMarketingDisplay(segment: AgentFlightBookingSegment): string | n
   return marketing;
 }
 
+function stringifyJson(value: unknown): string {
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
+function mergeTravelerProfiles(
+  detailProfiles: TravelerProfile[] | null | undefined,
+  memberProfiles: TravelerProfile[] | null | undefined,
+): TravelerProfile[] {
+  const merged = new Map<string, TravelerProfile>();
+
+  for (const traveler of [...(memberProfiles || []), ...(detailProfiles || [])]) {
+    const key = traveler.id || traveler.email || travelerProfileName(traveler);
+    const existing = merged.get(key);
+    merged.set(key, { ...(existing || {}), ...traveler } as TravelerProfile);
+  }
+
+  return Array.from(merged.values());
+}
+
 function StatusBadge({ status }: { status: string }) {
   const colors: Record<string, string> = {
     pending: 'bg-yellow-500/15 text-yellow-400 border-yellow-500/20',
@@ -139,19 +288,147 @@ function OutcomeBadge({ outcome }: { outcome: string | null }) {
   );
 }
 
+function VerificationBadge({ status }: { status: string | null | undefined }) {
+  if (!status) return null;
+
+  const normalized = status.toLowerCase();
+  const colors: Record<string, string> = {
+    complete: 'bg-green-500/15 text-green-400 border-green-500/20',
+    functional: 'bg-blue-500/15 text-blue-400 border-blue-500/20',
+    unverified: 'bg-yellow-500/15 text-yellow-400 border-yellow-500/20',
+    importing: 'bg-zinc-500/15 text-zinc-300 border-zinc-500/20',
+  };
+
+  return (
+    <span className={cn('inline-flex items-center rounded border px-2 py-0.5 text-xs font-medium', colors[normalized] || 'bg-zinc-500/15 text-zinc-300 border-zinc-500/20')}>
+      {humanizeToken(status)}
+    </span>
+  );
+}
+
 function DetailField({
   label,
   value,
   monospace = false,
+  containerClassName,
+  valueClassName,
 }: {
   label: string;
   value: string | null | undefined;
   monospace?: boolean;
+  containerClassName?: string;
+  valueClassName?: string;
 }) {
   return (
-    <div className="rounded-lg border border-border bg-accent/20 p-3">
+    <div className={cn('rounded-lg border border-border bg-accent/20 p-3', containerClassName)}>
       <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}</div>
-      <div className={cn('mt-1 text-sm', monospace && 'font-mono')}>{value || '—'}</div>
+      <div className={cn('mt-1 text-sm', monospace && 'font-mono text-xs break-all', valueClassName)}>{value || '—'}</div>
+    </div>
+  );
+}
+
+function CollapsibleSection({
+  title,
+  count,
+  defaultOpen = false,
+  children,
+}: {
+  title: string;
+  count?: number;
+  defaultOpen?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <details open={defaultOpen} className="rounded-lg border border-border bg-accent/20">
+      <summary className="cursor-pointer px-4 py-3 text-sm font-medium">
+        {count === undefined ? title : `${title} (${count})`}
+      </summary>
+      <div className="border-t border-border px-4 py-3">{children}</div>
+    </details>
+  );
+}
+
+function JsonDisclosure({
+  title,
+  value,
+  defaultOpen = false,
+}: {
+  title: string;
+  value: unknown;
+  defaultOpen?: boolean;
+}) {
+  if (value === null || value === undefined) return null;
+  if (Array.isArray(value) && value.length === 0) return null;
+  if (typeof value === 'object' && !Array.isArray(value) && Object.keys(value as Record<string, unknown>).length === 0) {
+    return null;
+  }
+
+  return (
+    <details
+      open={defaultOpen}
+      className="rounded-lg border border-border bg-accent/20 p-4"
+    >
+      <summary className="cursor-pointer text-sm font-medium">{title}</summary>
+      <pre className="mt-3 overflow-x-auto whitespace-pre-wrap break-words rounded-lg bg-background/80 p-3 text-xs text-muted-foreground">
+        {stringifyJson(value)}
+      </pre>
+    </details>
+  );
+}
+
+function RelatedThoughts({ thoughts }: { thoughts: ThoughtView[] }) {
+  if (thoughts.length === 0) {
+    return (
+      <div className="rounded-lg border border-dashed border-border p-4 text-sm text-muted-foreground">
+        No visible thoughts attached to this booking yet.
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-2">
+      {thoughts.map((thought) => (
+        <div key={`${thought.text}-${thought.created_at}`} className="rounded-lg border border-border bg-accent/20 p-3">
+          <div className="text-sm">{thought.text}</div>
+          <div className="mt-1 text-xs text-muted-foreground">{formatDateTime(thought.created_at)}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function WatchSummary({ watch }: { watch: WatchView }) {
+  return (
+    <div className="rounded-lg border border-border bg-accent/20 p-3 text-sm">
+      <div className="font-medium">
+        {humanizeToken(watch.watch_type)} · {humanizeToken(watch.status)}
+      </div>
+      <div className="mt-1 text-xs text-muted-foreground">
+        {[
+          watch.goal,
+          watch.latest_observed_price ? formatMoney(watch.latest_observed_price) : null,
+          watch.latest_observed_at ? `Observed ${formatDateTime(watch.latest_observed_at)}` : null,
+        ].filter(Boolean).join(' · ') || 'No extra watch metadata'}
+      </div>
+    </div>
+  );
+}
+
+function PaymentSummary({ payment }: { payment: PaymentRecord }) {
+  return (
+    <div className="rounded-lg border border-border bg-accent/20 p-3 text-sm">
+      <div className="flex items-center justify-between gap-3">
+        <span className="font-medium">{humanizeToken(payment.type)}</span>
+        <span>{formatMoney({ amount: payment.amount, currency: payment.currency })}</span>
+      </div>
+      <div className="mt-1 text-xs text-muted-foreground">
+        {[
+          humanizeToken(payment.status),
+          payment.booking_id ? `Booking ${payment.booking_id}` : null,
+          formatDateTime(payment.completed_at || payment.created_at),
+        ].filter(Boolean).join(' · ')}
+      </div>
+      {payment.failure_reason && <div className="mt-1 text-xs text-red-300">{payment.failure_reason}</div>}
     </div>
   );
 }
@@ -174,6 +451,8 @@ export function AgentFlightBookingDetailPanel({
   const flightBooking = detail.flight_booking;
   const initialFailureReason = typeof task.response_data?.failure_reason === 'string' ? task.response_data.failure_reason : '';
   const initialNotes = typeof task.response_data?.notes === 'string' ? task.response_data.notes : '';
+  const taskFailureReason = typeof task.response_data?.failure_reason === 'string' ? task.response_data.failure_reason : null;
+  const taskNotes = typeof task.response_data?.notes === 'string' ? task.response_data.notes : null;
   const rawRecordLocator = flightBooking?.record_locator || summary.record_locator || '';
 
   const [confirmationCode, setConfirmationCode] = useState(normalizeConfirmationCode(rawRecordLocator));
@@ -189,6 +468,9 @@ export function AgentFlightBookingDetailPanel({
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [memberContext, setMemberContext] = useState<MemberContext | null>(null);
+  const [memberContextLoading, setMemberContextLoading] = useState(false);
+  const [memberContextError, setMemberContextError] = useState<string | null>(null);
 
   useEffect(() => {
     setConfirmationCode(normalizeConfirmationCode(flightBooking?.record_locator || summary.record_locator));
@@ -200,7 +482,91 @@ export function AgentFlightBookingDetailPanel({
     setCompletionNotes(initialNotes);
   }, [initialFailureReason, initialNotes, task.id]);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadMemberContext() {
+      setMemberContextLoading(true);
+      setMemberContextError(null);
+      setMemberContext(null);
+
+      try {
+        const context = await api.getMember(task.user_id);
+        if (!cancelled) {
+          setMemberContext(context);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setMemberContext(null);
+          setMemberContextError(err instanceof Error ? err.message : 'Failed to load member context');
+        }
+      } finally {
+        if (!cancelled) {
+          setMemberContextLoading(false);
+        }
+      }
+    }
+
+    void loadMemberContext();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [task.user_id]);
+
   const userName = useMemo(() => userDisplayName(detail.user), [detail.user]);
+  const bookingId = flightBooking?.id || summary.booking_id || task.booking_id || null;
+  const travelerProfiles = useMemo(
+    () => mergeTravelerProfiles(detail.traveler_profiles, memberContext?.travellers),
+    [detail.traveler_profiles, memberContext?.travellers],
+  );
+  const relatedTrips = useMemo(
+    () =>
+      bookingId
+        ? (memberContext?.trips || []).filter((trip) =>
+            trip.bookings.some((booking) => booking.id === bookingId),
+          )
+        : [],
+    [bookingId, memberContext?.trips],
+  );
+  const relatedWatches = useMemo(
+    () =>
+      (memberContext?.watches || []).filter(
+        (watch) =>
+          (bookingId && watch.booking_id === bookingId) ||
+          (watch.trip_id && relatedTrips.some((trip) => trip.id === watch.trip_id)),
+      ),
+    [bookingId, memberContext?.watches, relatedTrips],
+  );
+  const relatedPayments = useMemo(
+    () =>
+      bookingId
+        ? (memberContext?.payment_records || []).filter((payment) => payment.booking_id === bookingId)
+        : [],
+    [bookingId, memberContext?.payment_records],
+  );
+  const relatedThoughts = useMemo(() => {
+    const thoughts = new Map<string, ThoughtView>();
+
+    for (const trip of relatedTrips) {
+      for (const thought of trip.visible_thoughts || []) {
+        thoughts.set(`${thought.text}-${thought.created_at}`, thought);
+      }
+
+      const matchingBooking = trip.bookings.find((booking) => booking.id === bookingId);
+      for (const thought of matchingBooking?.visible_thoughts || []) {
+        thoughts.set(`${thought.text}-${thought.created_at}`, thought);
+      }
+    }
+
+    return Array.from(thoughts.values()).sort((a, b) => b.created_at.localeCompare(a.created_at));
+  }, [bookingId, relatedTrips]);
+  const verifiedEmails = detail.user?.verified_emails || [];
+  const memberPhone = userPhone(detail.user) || memberContext?.user_extras.phone || null;
+  const memberEmail = detail.user?.email || memberContext?.user_extras.email || null;
+  const memberThreshold = detail.user?.action_threshold_usd ?? memberContext?.user?.action_threshold_usd ?? null;
+  const memberForwardingEmail = memberContext?.user?.forwarding_email || null;
+  const memberForwardingSlug = detail.user?.forwarding_slug || null;
   const currentRecordLocator = normalizeConfirmationCode(rawRecordLocator);
   const currentBookingProvider = (flightBooking?.booking_provider || '').trim();
   const normalizedConfirmationCode = normalizeConfirmationCode(confirmationCode);
@@ -362,6 +728,7 @@ export function AgentFlightBookingDetailPanel({
                 <h2 className="text-lg font-semibold">Agent Flight Booking</h2>
                 <StatusBadge status={task.status} />
                 <OutcomeBadge outcome={task.outcome} />
+                <VerificationBadge status={flightBooking?.verification_status} />
               </div>
               <p className="mt-1 text-sm text-muted-foreground">
                 {routeLabel(summary.origin, summary.destination)} · {summary.carrier_name || summary.carrier_code || 'Carrier unavailable'}
@@ -485,32 +852,130 @@ export function AgentFlightBookingDetailPanel({
               <User className="h-4 w-4" />
               Member
             </div>
-            <div className="rounded-lg border border-border bg-accent/20 p-4 text-sm">
-              <div className="font-medium">{userName}</div>
-              <div className="mt-1 text-muted-foreground">{detail.user?.email || 'No email available'}</div>
-              {detail.user?.phone && <div className="text-muted-foreground">{detail.user.phone}</div>}
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+              <DetailField label="Member" value={userName} />
+              <DetailField label="Email" value={memberEmail} />
+              <DetailField label="Phone" value={memberPhone} />
+              <DetailField label="Member Since" value={formatDateTime(detail.user?.member_since)} />
+              <DetailField label="User Status" value={humanizeToken(detail.user?.status)} />
+              <DetailField label="Subscription" value={memberContext?.user?.subscription_status || '—'} />
+              <DetailField label="Membership Ends" value={formatDateTime(memberContext?.user_extras.membership_expires_at)} />
+              <DetailField label="Forwarding Slug" value={memberForwardingSlug} monospace />
+              <DetailField label="Forwarding Email" value={memberForwardingEmail} />
+              <DetailField
+                label="Auto Reprice"
+                value={[
+                  detail.user?.auto_reprice_flights ? 'Flights' : null,
+                  detail.user?.auto_reprice_hotels ? 'Hotels' : null,
+                ].filter(Boolean).join(' + ') || 'Off'}
+              />
+              <DetailField
+                label="Action Threshold"
+                value={memberThreshold !== null ? formatMoneyCents(memberThreshold * 100, 'USD') : '—'}
+              />
+              <DetailField
+                label="Contact Verification"
+                value={[
+                  detail.user?.email_verified ? 'Email verified' : null,
+                  detail.user?.phone_verified ? 'Phone verified' : null,
+                ].filter(Boolean).join(' · ') || '—'}
+              />
             </div>
+            {verifiedEmails.length > 0 && (
+              <div className="rounded-lg border border-border bg-accent/20 p-4">
+                <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Verified Emails</div>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {verifiedEmails.map((email) => (
+                    <span key={email} className="rounded-full border border-border bg-background/80 px-2 py-1 text-xs">
+                      {email}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+            {(memberContextLoading || memberContextError) && (
+              <div className={cn(
+                'rounded-lg border p-3 text-sm',
+                memberContextError ? 'border-red-500/30 bg-red-500/10 text-red-300' : 'border-border bg-accent/20 text-muted-foreground',
+              )}>
+                {memberContextError || 'Loading member context...'}
+              </div>
+            )}
           </section>
 
           <section className="space-y-3">
             <div className="text-sm font-semibold">Travelers</div>
-            {summary.travelers.length === 0 ? (
-              <div className="rounded-lg border border-dashed border-border p-4 text-sm text-muted-foreground">
-                Traveler details were not included on this task.
+            {travelerProfiles.length > 0 ? (
+              <div className="space-y-2">
+                {travelerProfiles.map((traveler) => {
+                  const passenger = matchingPassengerSummary(traveler, flightBooking?.passengers);
+
+                  return (
+                    <div key={traveler.id} className="rounded-lg border border-border bg-accent/20 p-4 text-sm">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <div className="font-medium">{travelerProfileName(traveler)}</div>
+                        {passenger?.is_primary && (
+                          <span className="rounded-full border border-blue-500/30 bg-blue-500/15 px-2 py-0.5 text-[11px] font-medium text-blue-300">
+                            Primary traveler
+                          </span>
+                        )}
+                        {traveler.is_account_holder && (
+                          <span className="rounded-full border border-border bg-background/80 px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
+                            Account holder
+                          </span>
+                        )}
+                      </div>
+                      <div className="mt-2 break-all font-mono text-[11px] text-muted-foreground">
+                        Profile ID: {traveler.id}
+                      </div>
+                      <div className="mt-1 text-xs text-muted-foreground">
+                        {[
+                          traveler.date_of_birth,
+                          traveler.gender,
+                          traveler.citizenship,
+                        ].filter(Boolean).join(' · ') || 'No profile metadata'}
+                      </div>
+                      <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                        <DetailField label="Email" value={traveler.email} />
+                        <DetailField label="Phone" value={traveler.phone} />
+                        <DetailField label="Known Traveler" value={traveler.known_traveler_number} monospace />
+                        <DetailField label="Redress" value={traveler.redress_number} monospace />
+                        <DetailField label="Address" value={travelerAddress(traveler)} />
+                        <DetailField label="Passports" value={travelerPassportSummary(traveler)} />
+                        <DetailField label="Loyalty" value={travelerLoyaltySummary(traveler)} />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : summary.travelers.length > 0 ? (
+              <div className="space-y-2">
+                {summary.travelers.map((traveler, index) => {
+                  const passenger = matchingPassengerSummary(traveler, flightBooking?.passengers);
+
+                  return (
+                    <div key={`${travelerName(traveler)}-${index}`} className="rounded-lg border border-border bg-accent/20 p-3 text-sm">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <div className="font-medium">{travelerName(traveler)}</div>
+                        {passenger?.is_primary && (
+                          <span className="rounded-full border border-blue-500/30 bg-blue-500/15 px-2 py-0.5 text-[11px] font-medium text-blue-300">
+                            Primary traveler
+                          </span>
+                        )}
+                      </div>
+                      <div className="mt-1 text-xs text-muted-foreground">
+                        {[
+                          typeof traveler.date_of_birth === 'string' ? traveler.date_of_birth : null,
+                          typeof traveler.gender === 'string' ? traveler.gender : null,
+                        ].filter(Boolean).join(' · ') || 'No extra traveler metadata'}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             ) : (
-              <div className="space-y-2">
-                {summary.travelers.map((traveler, index) => (
-                  <div key={`${travelerName(traveler)}-${index}`} className="rounded-lg border border-border bg-accent/20 p-3 text-sm">
-                    <div className="font-medium">{travelerName(traveler)}</div>
-                    <div className="mt-1 text-xs text-muted-foreground">
-                      {[
-                        typeof traveler.date_of_birth === 'string' ? traveler.date_of_birth : null,
-                        typeof traveler.gender === 'string' ? traveler.gender : null,
-                      ].filter(Boolean).join(' · ') || 'No extra traveler metadata'}
-                    </div>
-                  </div>
-                ))}
+              <div className="rounded-lg border border-dashed border-border p-4 text-sm text-muted-foreground">
+                Traveler details were not included on this task.
               </div>
             )}
           </section>
@@ -519,12 +984,21 @@ export function AgentFlightBookingDetailPanel({
             <div className="text-sm font-semibold">Booking State</div>
             <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
               <DetailField label="Travel Status" value={flightBooking?.status || summary.booking_status} />
+              <DetailField label="Verification" value={humanizeToken(flightBooking?.verification_status)} />
               <DetailField label="Record Locator" value={displayConfirmationCode(rawRecordLocator)} monospace />
               <DetailField label="Booking Provider" value={flightBooking?.booking_provider || summary.booking_provider} />
+              <DetailField label="Booking Source" value={humanizeToken(flightBooking?.source)} />
+              <DetailField label="Booked At" value={formatDateTime(flightBooking?.booked_at)} />
+              <DetailField label="Travel Begins" value={flightBooking?.travel_begins_date || '—'} />
+              <DetailField label="Supplier" value={flightBooking?.supplier} />
+              <DetailField label="Supplier Ref" value={flightBooking?.internal_supplier_reference} monospace />
+              <DetailField label="Award Booking" value={flightBooking?.is_award_booking === undefined ? '—' : flightBooking.is_award_booking ? 'Yes' : 'No'} />
               <DetailField
-                label="Current Cash Paid"
-                value={flightBooking?.cash_paid ? formatMoneyCents(flightBooking.cash_paid.amount, flightBooking.cash_paid.currency) : '—'}
+                label="Loyalty"
+                value={[flightBooking?.loyalty_program, flightBooking?.loyalty_number].filter(Boolean).join(' · ') || '—'}
               />
+              <DetailField label="Miles Paid" value={flightBooking?.miles_paid?.toLocaleString() || '—'} />
+              <DetailField label="Current Cash Paid" value={formatMoney(flightBooking?.cash_paid)} />
               <DetailField label="Claimed By" value={task.claimed_by} />
               <DetailField label="Created" value={formatDateTime(task.created_at)} />
             </div>
@@ -532,6 +1006,148 @@ export function AgentFlightBookingDetailPanel({
               <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-300">
                 <div className="font-medium">Blocked reason</div>
                 <div className="mt-1">{task.blocked_reason}</div>
+              </div>
+            )}
+          </section>
+
+          <section className="space-y-3">
+            <div className="text-sm font-semibold">Financials</div>
+            {flightBooking?.margin && flightBooking.margin.amount < 0 && (
+              <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200">
+                This booking is currently underwater for Axel. Margin is {formatMoney(flightBooking.margin)}.
+              </div>
+            )}
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+              <DetailField label="Customer Paid" value={formatMoney(flightBooking?.cash_paid)} />
+              <DetailField label="Supplier Cost" value={formatMoney(flightBooking?.supplier_cost)} />
+              <DetailField
+                label="Margin"
+                value={formatMoney(flightBooking?.margin)}
+                containerClassName={
+                  flightBooking?.margin && flightBooking.margin.amount < 0
+                    ? 'border-red-500/30 bg-red-500/10'
+                    : undefined
+                }
+                valueClassName={
+                  flightBooking?.margin && flightBooking.margin.amount < 0
+                    ? 'font-semibold text-red-300'
+                    : undefined
+                }
+              />
+              <DetailField label="Original Price" value={formatMoney(flightBooking?.original_price)} />
+              <DetailField label="Total Savings" value={formatMoney(flightBooking?.total_savings)} />
+            </div>
+          </section>
+
+          <section className="space-y-3">
+            <div className="text-sm font-semibold">Member Context</div>
+            {memberContextLoading ? (
+              <div className="rounded-lg border border-border bg-accent/20 p-4 text-sm text-muted-foreground">
+                Loading member context...
+              </div>
+            ) : memberContextError ? (
+              <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-300">
+                {memberContextError}
+              </div>
+            ) : memberContext ? (
+              <div className="space-y-4">
+                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                  <DetailField label="Trips" value={relatedTrips.length.toString()} />
+                  <DetailField label="Watches" value={relatedWatches.length.toString()} />
+                  <DetailField label="Payments" value={relatedPayments.length.toString()} />
+                  <DetailField label="Escalations" value={memberContext.escalations.length.toString()} />
+                </div>
+
+                <div className="grid gap-4 xl:grid-cols-2">
+                  <CollapsibleSection title="Visible Thoughts" count={relatedThoughts.length} defaultOpen={relatedThoughts.length > 0}>
+                    <RelatedThoughts thoughts={relatedThoughts.slice(0, 6)} />
+                  </CollapsibleSection>
+
+                  <CollapsibleSection title="Related Watches" count={relatedWatches.length} defaultOpen={relatedWatches.length > 0}>
+                    {relatedWatches.length === 0 ? (
+                      <div className="rounded-lg border border-dashed border-border p-4 text-sm text-muted-foreground">
+                        No related watches on this booking.
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        {relatedWatches.slice(0, 4).map((watch) => (
+                          <WatchSummary key={watch.id} watch={watch} />
+                        ))}
+                      </div>
+                    )}
+                  </CollapsibleSection>
+
+                  <CollapsibleSection title="Related Payments" count={relatedPayments.length}>
+                    {relatedPayments.length === 0 ? (
+                      <div className="rounded-lg border border-dashed border-border p-4 text-sm text-muted-foreground">
+                        No booking-linked payments found.
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        {relatedPayments.slice(0, 4).map((payment) => (
+                          <PaymentSummary key={payment.id} payment={payment} />
+                        ))}
+                      </div>
+                    )}
+                  </CollapsibleSection>
+
+                  <CollapsibleSection title="Escalations" count={memberContext.escalations.length}>
+                    {memberContext.escalations.length === 0 ? (
+                      <div className="rounded-lg border border-dashed border-border p-4 text-sm text-muted-foreground">
+                        No escalations for this member.
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        {memberContext.escalations.slice(0, 4).map((escalation) => (
+                          <div key={escalation.id} className="rounded-lg border border-border bg-accent/20 p-3 text-sm">
+                            <div className="font-medium">
+                              {humanizeToken(escalation.type)} · {humanizeToken(escalation.status)}
+                            </div>
+                            <div className="mt-1 text-xs text-muted-foreground">
+                              {[
+                                escalation.reason,
+                                formatDateTime(escalation.resolved_at || escalation.created_at),
+                              ].filter(Boolean).join(' · ')}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </CollapsibleSection>
+                </div>
+              </div>
+            ) : (
+              <div className="rounded-lg border border-dashed border-border p-4 text-sm text-muted-foreground">
+                Member context is not available for this booking.
+              </div>
+            )}
+          </section>
+
+          <section className="space-y-3">
+            <div className="text-sm font-semibold">Raw Data</div>
+            <div className="space-y-3">
+              <JsonDisclosure title="Task Request Data" value={task.request_data} defaultOpen />
+              <JsonDisclosure title="Task Response Data" value={task.response_data} />
+              <JsonDisclosure title="Traveler Profiles" value={detail.traveler_profiles} />
+              <JsonDisclosure title="Itinerary JSON" value={flightBooking?.itinerary} />
+              <JsonDisclosure title="Tickets JSON" value={flightBooking?.tickets} />
+              <JsonDisclosure title="Ancillaries JSON" value={flightBooking?.ancillaries} />
+              <JsonDisclosure title="Access Credentials" value={flightBooking?.access_credentials} />
+            </div>
+          </section>
+
+          <section className="space-y-3">
+            <div className="text-sm font-semibold">Task Resolution</div>
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+              <DetailField label="Claimed At" value={formatDateTime(task.claimed_at)} />
+              <DetailField label="Completed At" value={formatDateTime(task.completed_at)} />
+              <DetailField label="Fulfillment Time" value={formatDuration(task.claimed_at, task.completed_at)} />
+              <DetailField label="Failure Reason" value={taskFailureReason ? humanizeToken(taskFailureReason) : '—'} />
+            </div>
+            {taskNotes && (
+              <div className="rounded-lg border border-border bg-accent/20 p-4">
+                <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Operator Notes</div>
+                <div className="mt-2 whitespace-pre-wrap text-sm">{taskNotes}</div>
               </div>
             )}
           </section>

@@ -27,7 +27,9 @@ export interface FlightBookingDetail {
   id: string;
   user_id: string;
   status: string;
+  verification_status?: string | null;
   source: string;
+  conv_trip_id?: string | null;
   source_email_id?: string | null;
   booking_channel: string | null;
   booking_provider: string | null;
@@ -37,9 +39,25 @@ export interface FlightBookingDetail {
   destination_airport: string | null;
   departure_time: string | null;
   arrival_time: string | null;
+  travel_begins_date?: string | null;
   cabin_class: string | null;
   cash_paid: { amount: number; currency: string } | null;
+  supplier_cost?: { amount: number; currency: string } | null;
+  margin?: { amount: number; currency: string } | null;
+  original_price?: { amount: number; currency: string } | null;
+  total_savings?: { amount: number; currency: string } | null;
+  supplier?: string | null;
+  internal_supplier_reference?: string | null;
+  access_credentials?: Record<string, unknown> | null;
+  itinerary?: Record<string, unknown> | null;
+  tickets?: Record<string, unknown>[];
+  ancillaries?: Record<string, unknown>[];
+  is_award_booking?: boolean;
+  loyalty_program?: string | null;
+  loyalty_number?: string | null;
+  miles_paid?: number | null;
   record_locator: string | null;
+  booked_at: string | null;
   passengers: PassengerSummary[];
   created_at: string;
   updated_at: string;
@@ -255,9 +273,29 @@ export interface AgentFlightBookingUser {
   id: string;
   email?: string | null;
   phone?: string | null;
+  phone_number?: string | null;
   first_name?: string | null;
   last_name?: string | null;
   name?: string | null;
+  timezone?: string | null;
+  auto_reprice_flights?: boolean;
+  auto_reprice_hotels?: boolean;
+  action_threshold_usd?: number | null;
+  quiet_hours_start?: number | null;
+  quiet_hours_end?: number | null;
+  sms_opted_in?: boolean;
+  sms_opted_out?: boolean;
+  email_verified?: boolean;
+  email_bouncing?: boolean;
+  phone_verified?: boolean;
+  forwarding_slug?: string | null;
+  reply_slug?: string | null;
+  verified_emails?: string[];
+  status?: string | null;
+  member_since?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  date_of_birth?: string | null;
   [key: string]: unknown;
 }
 
@@ -266,6 +304,7 @@ export interface AgentFlightBookingDetail {
   summary: AgentFlightBookingSummary;
   flight_booking: FlightBookingDetail | null;
   user: AgentFlightBookingUser | null;
+  traveler_profiles?: TravelerProfile[] | null;
 }
 
 export interface FlightResultLegSnapshot {
@@ -1317,20 +1356,45 @@ export interface UserExtras {
   membership_expires_at: string | null;
 }
 
+export interface TravelerPassport {
+  country: string;
+  number: string;
+  expiry: string | null;
+}
+
+export interface TravelerLoyaltyMembership {
+  program_id: string;
+  number: string;
+}
+
 export interface TravelerProfile {
   id: string;
   first_name: string | null;
+  middle_name?: string | null;
   last_name: string | null;
   email: string | null;
   phone: string | null;
   date_of_birth: string | null;
   gender: string | null;
+  address_line_1?: string | null;
+  address_line_2?: string | null;
+  city?: string | null;
+  state?: string | null;
+  postal_code?: string | null;
+  address_country?: string | null;
+  citizenship?: string | null;
   known_traveler_number: string | null;
   redress_number: string | null;
   passport_number: string | null;
   passport_expiry: string | null;
   passport_country: string | null;
+  passports?: TravelerPassport[];
+  loyalty_memberships?: TravelerLoyaltyMembership[];
   loyalty_programs: Record<string, string>;
+  user_id?: string;
+  is_account_holder?: boolean;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export interface FlightSegmentView {
@@ -1417,6 +1481,12 @@ export interface BookingView {
   hotel: HotelBookingView | null;
   created_at: string;
   watch_id: string | null; // NEW - link to watch if monitoring
+  visible_thoughts?: ThoughtView[];
+}
+
+export interface ThoughtView {
+  text: string;
+  created_at: string;
 }
 
 export interface TripView {
@@ -1428,6 +1498,7 @@ export interface TripView {
   start_date: string | null;
   end_date: string | null;
   bookings: BookingView[];
+  visible_thoughts?: ThoughtView[];
 }
 
 export interface AirlineCreditView {
