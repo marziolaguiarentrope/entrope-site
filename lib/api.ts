@@ -790,6 +790,35 @@ class ApiClient {
     });
   }
 
+  /** Refund a member's most recent membership payment. Supports full or partial refund. */
+  async refundMembership(userId: string, data: RefundMembershipRequest): Promise<RefundMembershipResponse> {
+    return this.fetch<RefundMembershipResponse>(`/members/${userId}/refund`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  /** Skip the member's next annual renewal (pauses billing for 1 year). */
+  async skipRenewal(userId: string): Promise<SkipRenewalResponse> {
+    return this.fetch<SkipRenewalResponse>(`/members/${userId}/skip-renewal`, {
+      method: 'POST',
+    });
+  }
+
+  /** Suspend a member account (cuts access but preserves data). */
+  async suspendMember(userId: string): Promise<SuspendMemberResponse> {
+    return this.fetch<SuspendMemberResponse>(`/members/${userId}/suspend`, {
+      method: 'POST',
+    });
+  }
+
+  /** Unsuspend a previously suspended member account. */
+  async unsuspendMember(userId: string): Promise<UnsuspendMemberResponse> {
+    return this.fetch<UnsuspendMemberResponse>(`/members/${userId}/unsuspend`, {
+      method: 'POST',
+    });
+  }
+
   /** Lightweight user info (email, phone, name) extracted from full member context */
   async getUserBasicInfo(userId: string): Promise<UserBasicInfo> {
     const ctx = await this.getMember(userId);
@@ -2006,6 +2035,34 @@ export interface BusinessDashboardResponse {
     priority: number;
   }> | null;
   onboarding_funnel: OnboardingFunnel | null;
+}
+
+// Subscription management types
+export interface RefundMembershipRequest {
+  reason: string;
+  amount_cents?: number; // Optional for partial refund; omit for full refund
+}
+
+export interface RefundMembershipResponse {
+  user_id: string;
+  refund_id: string;
+  amount_cents: number;
+  subscription_id: string;
+}
+
+export interface SkipRenewalResponse {
+  user_id: string;
+  subscription_id: string;
+  paused_until: string; // ISO datetime
+  message: string;
+}
+
+export interface SuspendMemberResponse {
+  message: string;
+}
+
+export interface UnsuspendMemberResponse {
+  message: string;
 }
 
 export const api = new ApiClient(API_BASE);

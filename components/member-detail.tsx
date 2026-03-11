@@ -607,6 +607,362 @@ function CreditAdjustmentModal({
   );
 }
 
+// Subscription Management Card — refund, skip renewal, suspend/unsuspend
+function SubscriptionManagementCard({
+  userId,
+  member,
+  context,
+  onRefresh,
+}: {
+  userId: string;
+  member: MemberSummary;
+  context: MemberContext | null;
+  onRefresh?: () => void;
+}) {
+  const [action, setAction] = useState<'idle' | 'refund' | 'skip' | 'suspend' | 'unsuspend'>('idle');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+  const [refundReason, setRefundReason] = useState('');
+  const [refundAmountInput, setRefundAmountInput] = useState('');
+  const [confirmStep, setConfirmStep] = useState(false);
+
+  const subscriptionStatus = context?.user?.subscription_status || 'FREE';
+  const isPaying = subscriptionStatus === 'PAYING';
+  const memberStatus = member.status;
+  const isSuspended = memberStatus?.toLowerCase() === 'suspended';
+  const membershipExpiresAt = context?.user_extras?.membership_expires_at;
+  const stripeCustomerId = context?.user_extras?.stripe_customer_id;
+
+  function resetState() {
+    setAction('idle');
+    setError(null);
+    setSuccess(null);
+    setRefundReason('');
+    setRefundAmountInput('');
+    setConfirmStep(false);
+  }
+
+  async function handleRefund() {
+    if (!confirmStep) {
+      if (refundReason.trim().length < 10) {
+        setError('Reason must be at least 10 characters');
+        return;
+      }
+      setConfirmStep(true);
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      const data: { reason: string; amount_cents?: number } = { reason: refundReason.trim() };
+      if (refundAmountInput.trim()) {
+        const dollars = parseFloat(refundAmountInput.trim());
+        if (isNaN(dollars) || dollars <= 0) {
+          setError('Invalid refund amount');
+          setLoading(false);
+          return;
+        }
+        data.amount_cents = Math.round(dollars * 100);
+      }
+      const res = await api.refundMembership(userId, data);
+      setSuccess(`Refund of ${formatMoney(res.amount_cents, 'USD')} issued successfully (${res.refund_id.slice(0, 20)}...)`);
+      setConfirmStep(false);
+      onRefresh?.();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to process refund');
+      setConfirmStep(false);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleSkipRenewal() {
+    if (!confirmStep) {
+      setConfirmStep(true);
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await api.skipRenewal(userId);
+      setSuccess(`Renewal skipped. Billing paused until ${new Date(res.paused_until).toLocaleDateString()}`);
+      setConfirmStep(false);
+      onRefresh?.();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to skip renewal');
+      setConfirmStep(false);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleSuspend() {
+    if (!confirmStep) {
+      setConfirmStep(true);
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      await api.suspendMember(userId);
+      setSuccess('Member account suspended. All access has been revoked.');
+      setConfirmStep(false);
+      onRefresh?.();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to suspend member');
+      setConfirmStep(false);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleUnsuspend() {
+    if (!confirmStep) {
+      setConfirmStep(true);
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      await api.unsuspendMember(userId);
+      setSuccess('Member account unsuspended. Access has been restored.');
+      setConfirmStep(false);
+      onRefresh?.();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to unsuspend member');
+      setConfirmStep(false);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="space-y-3">
+      {/* Subscription Overview */}
+      <div className="grid grid-cols-2 gap-2 text-sm">
+        <div className="flex justify-between">
+          <span className="text-muted-foreground">Status</span>
+          <span className={cn(
+            isPaying ? 'text-green-400' : 'text-muted-foreground'
+          )}>{subscriptionStatus}</span>
+        </div>
+        <div className="flex justify-between">
+          <span className="text-muted-foreground">Account</span>
+          <span className={cn(
+            isSuspended ? 'text-red-400' : 'text-green-400'
+          )}>{isSuspended ? 'Suspended' : 'Active'}</span>
+        </div>
+        {member.membership_plan && (
+          <div className="flex justify-between">
+            <span className="text-muted-foreground">Plan</span>
+            <span>{member.membership_plan}</span>
+          </div>
+        )}
+        {membershipExpiresAt && (
+          <div className="flex justify-between col-span-2">
+            <span className="text-muted-foreground">Expires</span>
+            <span className={cn(
+              new Date(membershipExpiresAt) < new Date() ? 'text-red-400' : 'text-muted-foreground'
+            )}>{new Date(membershipExpiresAt).toLocaleDateString()}</span>
+          </div>
+        )}
+        {stripeCustomerId && (
+          <div className="flex justify-between col-span-2">
+            <span className="text-muted-foreground">Stripe</span>
+            <span className="font-mono text-xs">{stripeCustomerId.slice(0, 16)}...</span>
+          </div>
+        )}
+      </div>
+
+      {/* Success message */}
+      {success && (
+        <div className="bg-green-500/10 border border-green-500/30 rounded p-2 text-sm text-green-400 flex items-center justify-between">
+          <span>{success}</span>
+          <button onClick={resetState} className="text-xs underline ml-2 shrink-0">Dismiss</button>
+        </div>
+      )}
+
+      {/* Error message */}
+      {error && action !== 'idle' && (
+        <div className="bg-red-500/10 border border-red-500/30 rounded p-2 text-sm text-red-400">
+          {error}
+        </div>
+      )}
+
+      {/* Action Buttons — default state */}
+      {action === 'idle' && !success && (
+        <div className="flex flex-wrap gap-2">
+          {isPaying && (
+            <>
+              <button
+                onClick={() => { resetState(); setAction('refund'); }}
+                className="px-3 py-1.5 text-xs bg-yellow-600/80 text-white rounded hover:bg-yellow-600 transition-colors"
+              >
+                Refund Membership
+              </button>
+              <button
+                onClick={() => { resetState(); setAction('skip'); }}
+                className="px-3 py-1.5 text-xs bg-blue-600/80 text-white rounded hover:bg-blue-600 transition-colors"
+              >
+                Skip Renewal
+              </button>
+            </>
+          )}
+          {isSuspended ? (
+            <button
+              onClick={() => { resetState(); setAction('unsuspend'); }}
+              className="px-3 py-1.5 text-xs bg-green-600/80 text-white rounded hover:bg-green-600 transition-colors"
+            >
+              Unsuspend Account
+            </button>
+          ) : (
+            <button
+              onClick={() => { resetState(); setAction('suspend'); }}
+              className="px-3 py-1.5 text-xs bg-orange-600/80 text-white rounded hover:bg-orange-600 transition-colors"
+            >
+              Suspend Account
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Refund Form */}
+      {action === 'refund' && !success && (
+        <div className="bg-accent/30 rounded p-3 space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-sm font-medium">Refund Membership Payment</span>
+            <button onClick={resetState} className="text-xs text-muted-foreground hover:text-foreground">Cancel</button>
+          </div>
+          <div>
+            <label className="block text-xs text-muted-foreground mb-1">Reason (required)</label>
+            <input
+              type="text"
+              value={refundReason}
+              onChange={(e) => { setRefundReason(e.target.value); setConfirmStep(false); setError(null); }}
+              placeholder="e.g. Customer requested refund due to..."
+              className="w-full px-2 py-1.5 bg-background border border-border rounded focus:outline-none focus:ring-2 focus:ring-primary text-sm"
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-muted-foreground mb-1">Amount USD (leave blank for full refund)</label>
+            <input
+              type="text"
+              value={refundAmountInput}
+              onChange={(e) => { setRefundAmountInput(e.target.value); setConfirmStep(false); }}
+              placeholder="e.g. 35.00"
+              className="w-full px-2 py-1.5 bg-background border border-border rounded focus:outline-none focus:ring-2 focus:ring-primary text-sm font-mono"
+            />
+          </div>
+          {confirmStep && (
+            <div className="bg-yellow-500/10 border border-yellow-500/30 rounded p-2 text-sm text-yellow-400">
+              Confirm refund{refundAmountInput.trim() ? ` of $${refundAmountInput.trim()}` : ' (full amount)'} for reason: &quot;{refundReason.trim()}&quot;?
+              <br /><span className="text-xs">Click &quot;Process Refund&quot; again to confirm.</span>
+            </div>
+          )}
+          {error && (
+            <div className="text-xs text-red-400">{error}</div>
+          )}
+          <button
+            onClick={handleRefund}
+            disabled={loading}
+            className={cn(
+              'px-3 py-1.5 text-xs rounded transition-colors disabled:opacity-50',
+              confirmStep ? 'bg-yellow-600 text-white hover:bg-yellow-500 font-medium' : 'bg-primary text-primary-foreground hover:bg-primary/90'
+            )}
+          >
+            {loading ? 'Processing...' : confirmStep ? 'Confirm Refund' : 'Process Refund'}
+          </button>
+        </div>
+      )}
+
+      {/* Skip Renewal Confirmation */}
+      {action === 'skip' && !success && (
+        <div className="bg-accent/30 rounded p-3 space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-sm font-medium">Skip Next Renewal</span>
+            <button onClick={resetState} className="text-xs text-muted-foreground hover:text-foreground">Cancel</button>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            This will pause billing for 1 year from the next renewal date. The member keeps access until the current period ends.
+          </p>
+          {confirmStep && (
+            <div className="bg-blue-500/10 border border-blue-500/30 rounded p-2 text-sm text-blue-400">
+              Are you sure? Click again to confirm skipping the next renewal.
+            </div>
+          )}
+          <button
+            onClick={handleSkipRenewal}
+            disabled={loading}
+            className={cn(
+              'px-3 py-1.5 text-xs rounded transition-colors disabled:opacity-50',
+              confirmStep ? 'bg-blue-600 text-white hover:bg-blue-500 font-medium' : 'bg-primary text-primary-foreground hover:bg-primary/90'
+            )}
+          >
+            {loading ? 'Processing...' : confirmStep ? 'Confirm Skip Renewal' : 'Skip Renewal'}
+          </button>
+        </div>
+      )}
+
+      {/* Suspend Confirmation */}
+      {action === 'suspend' && !success && (
+        <div className="bg-accent/30 rounded p-3 space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-sm font-medium">Suspend Account</span>
+            <button onClick={resetState} className="text-xs text-muted-foreground hover:text-foreground">Cancel</button>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Suspending will revoke access but preserve all data. The member can be unsuspended later.
+          </p>
+          {confirmStep && (
+            <div className="bg-orange-500/10 border border-orange-500/30 rounded p-2 text-sm text-orange-400">
+              Confirm suspension for {member.name || member.email || 'this member'}? Click again to confirm.
+            </div>
+          )}
+          <button
+            onClick={handleSuspend}
+            disabled={loading}
+            className={cn(
+              'px-3 py-1.5 text-xs rounded transition-colors disabled:opacity-50',
+              confirmStep ? 'bg-orange-600 text-white hover:bg-orange-500 font-medium' : 'bg-primary text-primary-foreground hover:bg-primary/90'
+            )}
+          >
+            {loading ? 'Suspending...' : confirmStep ? 'Confirm Suspension' : 'Suspend Account'}
+          </button>
+        </div>
+      )}
+
+      {/* Unsuspend Confirmation */}
+      {action === 'unsuspend' && !success && (
+        <div className="bg-accent/30 rounded p-3 space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-sm font-medium">Unsuspend Account</span>
+            <button onClick={resetState} className="text-xs text-muted-foreground hover:text-foreground">Cancel</button>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            This will restore the member&apos;s access to their account and data.
+          </p>
+          {confirmStep && (
+            <div className="bg-green-500/10 border border-green-500/30 rounded p-2 text-sm text-green-400">
+              Confirm unsuspension? Click again to confirm.
+            </div>
+          )}
+          <button
+            onClick={handleUnsuspend}
+            disabled={loading}
+            className={cn(
+              'px-3 py-1.5 text-xs rounded transition-colors disabled:opacity-50',
+              confirmStep ? 'bg-green-600 text-white hover:bg-green-500 font-medium' : 'bg-primary text-primary-foreground hover:bg-primary/90'
+            )}
+          >
+            {loading ? 'Restoring...' : confirmStep ? 'Confirm Unsuspend' : 'Unsuspend Account'}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Delete Member Data Modal — triple confirmation (warning → type DELETE → final confirm)
 function DeleteMemberModal({
   userId,
@@ -2722,6 +3078,17 @@ export function MemberDetail({
                 <UserSettingsCard context={context} userId={member.id} onRefresh={onRefresh} />
               </div>
 
+              {/* Subscription Management Card */}
+              <div className="bg-card border border-border rounded-lg p-4">
+                <h3 className="text-sm font-medium mb-3">Subscription Management</h3>
+                <SubscriptionManagementCard
+                  userId={member.id}
+                  member={member}
+                  context={context}
+                  onRefresh={onRefresh}
+                />
+              </div>
+
               {/* Activity Card */}
               <div className="bg-card border border-border rounded-lg p-4">
                 <h3 className="text-sm font-medium mb-3">Activity</h3>
@@ -2903,6 +3270,7 @@ export function MemberDetail({
                 <h3 className="text-base font-semibold text-red-400 mb-1">Danger Zone</h3>
                 <p className="text-sm text-muted-foreground mb-3">
                   Permanently delete all data for this member across all services. This action is irreversible.
+                  Consider using <span className="text-foreground font-medium">Subscription Management</span> (refund, suspend, or skip renewal) instead.
                 </p>
                 <button
                   onClick={() => setShowDeleteModal(true)}
