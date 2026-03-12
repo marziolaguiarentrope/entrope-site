@@ -1963,6 +1963,73 @@ export interface CustomerIoActivity {
 }
 
 // Business dashboard types
+export interface BusinessPeriodPair {
+  last_period: number;
+  prev_period: number;
+}
+
+export interface MsrBreakdown {
+  flight_reprice: BusinessPeriodPair;
+  flight_upgrade: BusinessPeriodPair;
+  hotel_reprice: BusinessPeriodPair;
+  hotel_better: BusinessPeriodPair;
+  total: BusinessPeriodPair;
+}
+
+export interface OnboardingFunnelSummary {
+  signed_up: number;
+  has_booking: number;
+  has_watch: number;
+  has_opportunity: number;
+  has_opportunity_progressed: number;
+}
+
+export interface OnboardingFunnel {
+  since: string;
+  summary: OnboardingFunnelSummary;
+  users: OnboardingFunnelUser[];
+}
+
+export interface BusinessDashboardResponse {
+  gmv_usd_cents: BusinessPeriodPair;
+  revenue_usd_cents: BusinessPeriodPair;
+  msr: MsrBreakdown;
+  active_users: BusinessPeriodPair;
+  // Legacy fields — no longer returned by backend, kept for type compat with other pages
+  users?: {
+    total: MetricPoint;
+    paid: MetricPoint;
+    referred: MetricPoint;
+    free: MetricPoint;
+  } | null;
+  bookings?: {
+    total: MetricPoint;
+    flights: MetricPoint;
+    hotels: MetricPoint;
+    monitored: MetricPoint;
+  } | null;
+  opportunities?: {
+    total: MetricPoint;
+    flights: MetricPoint;
+    hotels: MetricPoint;
+    completed: PeriodOnly;
+  } | null;
+  value?: {
+    mrr_usd_cents: MetricPoint;
+    money_rescued_usd_cents: PeriodOnly;
+    hotel_revenue_usd_cents: PeriodOnly;
+  } | null;
+  pipeline_issues?: Array<{
+    type: string;
+    label: string;
+    count: number;
+    priority: number;
+  }> | null;
+  onboarding_funnel?: OnboardingFunnel | null;
+}
+
+// Legacy types — still imported by flight-repricing-funnel page.
+// The backend no longer returns these via /metrics/dashboard.
 export interface MetricPoint {
   current: number;
   last_7: number;
@@ -1988,53 +2055,6 @@ export interface OnboardingFunnelUser {
   hotel_opp_statuses: Record<string, number>;
   hours_to_first_booking: number | null;
   hours_to_first_opp: number | null;
-}
-
-export interface OnboardingFunnelSummary {
-  signed_up: number;
-  has_booking: number;
-  has_watch: number;
-  has_opportunity: number;
-  has_opportunity_progressed: number;
-}
-
-export interface OnboardingFunnel {
-  since: string;
-  summary: OnboardingFunnelSummary;
-  users: OnboardingFunnelUser[];
-}
-
-export interface BusinessDashboardResponse {
-  users: {
-    total: MetricPoint;
-    paid: MetricPoint;
-    referred: MetricPoint;
-    free: MetricPoint;
-  } | null;
-  bookings: {
-    total: MetricPoint;
-    flights: MetricPoint;
-    hotels: MetricPoint;
-    monitored: MetricPoint;
-  } | null;
-  opportunities: {
-    total: MetricPoint;
-    flights: MetricPoint;
-    hotels: MetricPoint;
-    completed: PeriodOnly;
-  } | null;
-  value: {
-    mrr_usd_cents: MetricPoint;
-    money_rescued_usd_cents: PeriodOnly;
-    hotel_revenue_usd_cents: PeriodOnly;
-  } | null;
-  pipeline_issues: Array<{
-    type: string;
-    label: string;
-    count: number;
-    priority: number;
-  }> | null;
-  onboarding_funnel: OnboardingFunnel | null;
 }
 
 // Subscription management types

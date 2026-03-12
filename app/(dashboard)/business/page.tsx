@@ -1,10 +1,23 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
+import {
+  ResponsiveContainer,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+} from 'recharts';
 import { api } from '@/lib/api';
-import type { BusinessDashboardResponse, MetricPoint, PeriodOnly, OnboardingFunnelUser } from '@/lib/api';
+import type { BusinessDashboardResponse, BusinessPeriodPair } from '@/lib/api';
 import { cn, exportCSV, exportJSON } from '@/lib/utils';
-import { RefreshCw, Download, ChevronDown, ChevronRight } from 'lucide-react';
+import { RefreshCw, Download } from 'lucide-react';
+
+const CHART_GREEN = '#00C805';
+const CHART_GRID = '#1a1f2e';
+const CHART_AXIS = '#6b7280';
 
 // ── Helpers ──────────────────────────────────────────────
 
@@ -17,13 +30,13 @@ function pctChange(current: number, previous: number): number | null {
   return ((current - previous) / previous) * 100;
 }
 
-function ChangeIndicator({ current, previous }: { current: number; previous: number }) {
+function ChangeIndicator({ current, previous, label }: { current: number; previous: number; label: string }) {
   const pct = pctChange(current, previous);
   if (pct === null) return <span className="text-xs text-zinc-600">&mdash;</span>;
   const positive = pct >= 0;
   return (
     <span className={cn('text-xs font-medium', positive ? 'text-emerald-400' : 'text-red-400')}>
-      {positive ? '+' : ''}{pct.toFixed(0)}% vs prev 7d
+      {positive ? '+' : ''}{pct.toFixed(0)}% vs prev {label}
     </span>
   );
 }
@@ -33,59 +46,104 @@ function ChangeIndicator({ current, previous }: { current: number; previous: num
 function StatCard({
   label,
   value,
-  subValue,
-  change,
+  pair,
+  periodLabel,
   highlight,
+  format,
 }: {
   label: string;
   value: string;
-  subValue?: string;
-  change?: { current: number; previous: number };
+  pair: BusinessPeriodPair;
+  periodLabel: string;
   highlight?: boolean;
+  format?: (n: number) => string;
 }) {
+  const fmt = format ?? ((n: number) => n.toLocaleString());
   return (
     <div className="bg-[#0d1117] border border-[#1a1f2e] rounded-lg p-4">
       <p className="text-xs text-zinc-500 mb-1">{label}</p>
       <p className={cn('text-2xl font-semibold', highlight ? 'text-emerald-400' : 'text-zinc-200')}>
         {value}
       </p>
-      {subValue && <p className="text-xs text-zinc-500 mt-0.5">{subValue}</p>}
-      {change && (
-        <div className="mt-1">
-          <ChangeIndicator current={change.current} previous={change.previous} />
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ── Metric Row ───────────────────────────────────────────
-
-function MetricRow({ label, point, format }: { label: string; point: MetricPoint; format?: (n: number) => string }) {
-  const fmt = format ?? ((n: number) => n.toLocaleString());
-  return (
-    <div className="flex items-center justify-between py-2 border-b border-[#1a1f2e] last:border-0">
-      <span className="text-sm text-zinc-400">{label}</span>
-      <div className="flex items-center gap-4">
-        <span className="text-sm font-medium text-zinc-200 w-20 text-right">{fmt(point.current)}</span>
-        <span className="text-xs text-zinc-500 w-16 text-right">+{fmt(point.last_7)} 7d</span>
-        <div className="w-24 text-right">
-          <ChangeIndicator current={point.last_7} previous={point.prev_7} />
-        </div>
+      <p className="text-xs text-zinc-500 mt-0.5">{fmt(pair.last_period)} last {periodLabel}</p>
+      <div className="mt-1">
+        <ChangeIndicator current={pair.last_period} previous={pair.prev_period} label={periodLabel} />
       </div>
     </div>
   );
 }
 
-function PeriodRow({ label, period, format }: { label: string; period: PeriodOnly; format?: (n: number) => string }) {
+// ── Trend Chart ─────────────────────────────────────────
+
+function TrendChart({
+  label,
+  pair,
+  periodLabel,
+  format,
+}: {
+  label: string;
+  pair: BusinessPeriodPair;
+  periodLabel: string;
+  format?: (n: number) => string;
+}) {
   const fmt = format ?? ((n: number) => n.toLocaleString());
+  const chartData = [
+    { name: `Prev ${periodLabel}`, value: pair.prev_period },
+    { name: `Last ${periodLabel}`, value: pair.last_period },
+  ];
+  const pct = pctChange(pair.last_period, pair.prev_period);
+  const positive = pct !== null && pct >= 0;
+
+  return (
+    <div className="bg-[#0d1117] border border-[#1a1f2e] rounded-lg p-4">
+      <div className="flex items-center justify-between mb-3">
+        <p className="text-xs text-zinc-500">{label}</p>
+        {pct !== null && (
+          <span className={cn('text-xs font-medium', positive ? 'text-emerald-400' : 'text-red-400')}>
+            {positive ? '+' : ''}{pct.toFixed(0)}%
+          </span>
+        )}
+      </div>
+      <div className="h-32">
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart data={chartData} barCategoryGap="30%">
+            <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID} vertical={false} />
+            <XAxis
+              dataKey="name"
+              tick={{ fill: CHART_AXIS, fontSize: 11 }}
+              axisLine={false}
+              tickLine={false}
+            />
+            <YAxis
+              tick={{ fill: CHART_AXIS, fontSize: 11 }}
+              axisLine={false}
+              tickLine={false}
+              tickFormatter={(v: number) => fmt(v)}
+              width={60}
+            />
+            <Tooltip
+              contentStyle={{ backgroundColor: '#0d1117', border: '1px solid #1a1f2e', borderRadius: 8 }}
+              labelStyle={{ color: '#a1a1aa', fontSize: 12 }}
+              formatter={(value: number) => [fmt(value), label]}
+            />
+            <Bar dataKey="value" fill={CHART_GREEN} radius={[4, 4, 0, 0]} />
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
+  );
+}
+
+// ── M$R Breakdown Row ───────────────────────────────────
+
+function MsrRow({ label, pair, periodLabel }: { label: string; pair: BusinessPeriodPair; periodLabel: string }) {
   return (
     <div className="flex items-center justify-between py-2 border-b border-[#1a1f2e] last:border-0">
       <span className="text-sm text-zinc-400">{label}</span>
       <div className="flex items-center gap-4">
-        <span className="text-sm font-medium text-zinc-200 w-20 text-right">{fmt(period.last_7)}</span>
-        <div className="w-24 text-right">
-          <ChangeIndicator current={period.last_7} previous={period.prev_7} />
+        <span className="text-sm font-medium text-zinc-200 w-24 text-right">{formatCents(pair.last_period)}</span>
+        <div className="w-28 text-right">
+          <ChangeIndicator current={pair.last_period} previous={pair.prev_period} label={periodLabel} />
         </div>
       </div>
     </div>
@@ -103,106 +161,50 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-// ── Funnel Bar ──────────────────────────────────────────
-
-function FunnelBar({ label, count, total }: { label: string; count: number; total: number }) {
-  const pct = total > 0 ? (count / total) * 100 : 0;
-  return (
-    <div className="flex items-center gap-3 py-1.5">
-      <span className="text-sm text-zinc-400 w-40 shrink-0">{label}</span>
-      <div className="flex-1 h-6 bg-[#1a1f2e] rounded overflow-hidden">
-        <div
-          className="h-full bg-emerald-500/70 rounded transition-all duration-300"
-          style={{ width: `${Math.max(pct, pct > 0 ? 2 : 0)}%` }}
-        />
-      </div>
-      <span className="text-sm font-medium text-zinc-200 w-12 text-right">{count}</span>
-      <span className="text-xs text-zinc-500 w-12 text-right">{pct.toFixed(0)}%</span>
-    </div>
-  );
-}
-
-function formatHours(h: number | null): string {
-  if (h === null) return '-';
-  if (h < 1) return `${Math.round(h * 60)}m`;
-  if (h < 24) return `${h.toFixed(1)}h`;
-  return `${(h / 24).toFixed(1)}d`;
-}
-
-function FunnelUserRow({ user }: { user: OnboardingFunnelUser }) {
-  const bookings = user.flight_bookings + user.hotel_bookings;
-  const watches = user.flight_watches + user.hotel_watches;
-  const opps = user.flight_opps + user.hotel_opps;
-  return (
-    <div className="flex items-center gap-2 py-2 border-b border-[#1a1f2e] last:border-0 text-xs">
-      <span className="text-zinc-300 w-48 truncate" title={user.email}>{user.email}</span>
-      <span className="text-zinc-500 w-20 text-right" title="Bookings">{bookings > 0 ? `${bookings} bk` : '-'}</span>
-      <span className="text-zinc-500 w-20 text-right" title="Watches">{watches > 0 ? `${watches} w` : '-'}</span>
-      <span className="text-zinc-500 w-20 text-right" title="Opportunities">{opps > 0 ? `${opps} opp` : '-'}</span>
-      <span className="text-zinc-500 w-20 text-right" title="Time to first booking">{formatHours(user.hours_to_first_booking)}</span>
-      <span className="text-zinc-500 w-20 text-right" title="Time to first opportunity">{formatHours(user.hours_to_first_opp)}</span>
-    </div>
-  );
-}
-
-// ── Main Page ────────────────────────────────────────────
+// ── Export helpers ───────────────────────────────────────
 
 function flattenBusinessData(data: BusinessDashboardResponse): Record<string, unknown>[] {
   const ts = new Date().toISOString();
   const fmtCents = (c: number) => (c / 100).toFixed(2);
-  const mp = (prefix: string, p: MetricPoint) => ({
-    [`${prefix}_current`]: p.current,
-    [`${prefix}_last_7d`]: p.last_7,
-    [`${prefix}_prev_7d`]: p.prev_7,
-  });
-  const pp = (prefix: string, p: PeriodOnly) => ({
-    [`${prefix}_last_7d`]: p.last_7,
-    [`${prefix}_prev_7d`]: p.prev_7,
+  const pp = (prefix: string, p: BusinessPeriodPair) => ({
+    [`${prefix}_last_period`]: p.last_period,
+    [`${prefix}_prev_period`]: p.prev_period,
   });
 
   return [{
     exported_at: ts,
-    ...(data.users ? {
-      ...mp('users_total', data.users.total),
-      ...mp('users_paid', data.users.paid),
-      ...mp('users_referred', data.users.referred),
-      ...mp('users_free', data.users.free),
-    } : {}),
-    ...(data.bookings ? {
-      ...mp('bookings_total', data.bookings.total),
-      ...mp('bookings_flights', data.bookings.flights),
-      ...mp('bookings_hotels', data.bookings.hotels),
-      ...mp('bookings_monitored', data.bookings.monitored),
-    } : {}),
-    ...(data.opportunities ? {
-      ...mp('opportunities_total', data.opportunities.total),
-      ...mp('opportunities_flights', data.opportunities.flights),
-      ...mp('opportunities_hotels', data.opportunities.hotels),
-      ...pp('opportunities_completed', data.opportunities.completed),
-    } : {}),
-    ...(data.value ? {
-      mrr_usd: fmtCents(data.value.mrr_usd_cents.current),
-      mrr_usd_last_7d: fmtCents(data.value.mrr_usd_cents.last_7),
-      mrr_usd_prev_7d: fmtCents(data.value.mrr_usd_cents.prev_7),
-      money_rescued_usd_last_7d: fmtCents(data.value.money_rescued_usd_cents.last_7),
-      money_rescued_usd_prev_7d: fmtCents(data.value.money_rescued_usd_cents.prev_7),
-      hotel_revenue_usd_last_7d: fmtCents(data.value.hotel_revenue_usd_cents.last_7),
-      hotel_revenue_usd_prev_7d: fmtCents(data.value.hotel_revenue_usd_cents.prev_7),
-    } : {}),
-    pipeline_issues_count: data.pipeline_issues?.length ?? 0,
+    gmv_usd_last: fmtCents(data.gmv_usd_cents.last_period),
+    gmv_usd_prev: fmtCents(data.gmv_usd_cents.prev_period),
+    revenue_usd_last: fmtCents(data.revenue_usd_cents.last_period),
+    revenue_usd_prev: fmtCents(data.revenue_usd_cents.prev_period),
+    ...pp('msr_total', data.msr.total),
+    ...pp('msr_flight_reprice', data.msr.flight_reprice),
+    ...pp('msr_flight_upgrade', data.msr.flight_upgrade),
+    ...pp('msr_hotel_reprice', data.msr.hotel_reprice),
+    ...pp('msr_hotel_better', data.msr.hotel_better),
+    active_users_last: data.active_users.last_period,
+    active_users_prev: data.active_users.prev_period,
   }];
 }
+
+// ── Period selector ─────────────────────────────────────
+
+const PERIOD_OPTIONS = [
+  { days: 7, label: '7d' },
+  { days: 14, label: '14d' },
+  { days: 30, label: '30d' },
+];
+
+// ── Main Page ────────────────────────────────────────────
 
 export default function BusinessPage() {
   const [data, setData] = useState<BusinessDashboardResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [days, setDays] = useState(7);
   const [showExportMenu, setShowExportMenu] = useState(false);
-  const [funnelExpanded, setFunnelExpanded] = useState(false);
-  const [funnelDays, setFunnelDays] = useState(7);
   const exportRef = useRef<HTMLDivElement>(null);
 
-  // Close export menu on outside click
   useEffect(() => {
     function handler(e: MouseEvent) {
       if (exportRef.current && !exportRef.current.contains(e.target as Node)) {
@@ -224,11 +226,11 @@ export default function BusinessPage() {
     }
   }
 
-  const fetchData = useCallback(async (days: number) => {
+  const fetchData = useCallback(async (d: number) => {
     setLoading(true);
     setError(null);
     try {
-      const result = await api.getBusinessDashboard(days);
+      const result = await api.getBusinessDashboard(d);
       setData(result);
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to load dashboard';
@@ -239,8 +241,10 @@ export default function BusinessPage() {
   }, []);
 
   useEffect(() => {
-    fetchData(funnelDays);
-  }, [fetchData, funnelDays]);
+    fetchData(days);
+  }, [fetchData, days]);
+
+  const periodLabel = `${days}d`;
 
   return (
     <div>
@@ -248,9 +252,27 @@ export default function BusinessPage() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-semibold">Business</h1>
-          <p className="text-sm text-muted-foreground mt-1">Snapshot of key metrics</p>
+          <p className="text-sm text-muted-foreground mt-1">GMV, Revenue, M$R, Active Users</p>
         </div>
         <div className="flex items-center gap-2">
+          {/* Period selector */}
+          <div className="flex items-center gap-1 bg-[#0d1117] border border-[#1a1f2e] rounded-lg px-1 py-0.5">
+            {PERIOD_OPTIONS.map((opt) => (
+              <button
+                key={opt.days}
+                onClick={() => setDays(opt.days)}
+                className={cn(
+                  'px-2.5 py-1 text-xs rounded transition-colors',
+                  days === opt.days
+                    ? 'bg-emerald-500/20 text-emerald-400 font-medium'
+                    : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800'
+                )}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+
           {data && !loading && (
             <div ref={exportRef} className="relative">
               <button
@@ -273,7 +295,7 @@ export default function BusinessPage() {
             </div>
           )}
           <button
-            onClick={() => fetchData(funnelDays)}
+            onClick={() => fetchData(days)}
             disabled={loading}
             className="px-3 py-2 text-sm font-medium bg-accent/50 rounded-lg hover:bg-accent disabled:opacity-30 transition-colors flex items-center gap-1.5"
           >
@@ -287,7 +309,7 @@ export default function BusinessPage() {
         <div className="text-center py-16">
           <p className="text-red-400 mb-2">{error}</p>
           <button
-            onClick={() => fetchData(funnelDays)}
+            onClick={() => fetchData(days)}
             className="mt-3 px-4 py-2 rounded-lg text-sm font-medium text-white bg-emerald-600 hover:bg-emerald-500 transition-colors"
           >
             Retry
@@ -301,171 +323,67 @@ export default function BusinessPage() {
       ) : data ? (
         <div className="space-y-6">
           {/* Top-level KPIs */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-            {data.users && (
-              <StatCard
-                label="Total Users"
-                value={data.users.total.current.toLocaleString()}
-                subValue={`+${data.users.total.last_7} last 7d`}
-                change={{ current: data.users.total.last_7, previous: data.users.total.prev_7 }}
-              />
-            )}
-            {data.users && (
-              <StatCard
-                label="Paid Users"
-                value={data.users.paid.current.toLocaleString()}
-                subValue={`+${data.users.paid.last_7} last 7d`}
-                change={{ current: data.users.paid.last_7, previous: data.users.paid.prev_7 }}
-                highlight
-              />
-            )}
-            {data.value && (
-              <StatCard
-                label="MRR"
-                value={formatCents(data.value.mrr_usd_cents.current)}
-                subValue={`+${formatCents(data.value.mrr_usd_cents.last_7)} last 7d`}
-                change={{ current: data.value.mrr_usd_cents.last_7, previous: data.value.mrr_usd_cents.prev_7 }}
-                highlight
-              />
-            )}
-            {data.bookings && (
-              <StatCard
-                label="Total Bookings"
-                value={data.bookings.total.current.toLocaleString()}
-                subValue={`+${data.bookings.total.last_7} last 7d`}
-                change={{ current: data.bookings.total.last_7, previous: data.bookings.total.prev_7 }}
-              />
-            )}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <StatCard
+              label="GMV"
+              value={formatCents(data.gmv_usd_cents.last_period)}
+              pair={data.gmv_usd_cents}
+              periodLabel={periodLabel}
+              format={formatCents}
+            />
+            <StatCard
+              label="Revenue"
+              value={formatCents(data.revenue_usd_cents.last_period)}
+              pair={data.revenue_usd_cents}
+              periodLabel={periodLabel}
+              highlight
+              format={formatCents}
+            />
+            <StatCard
+              label="M$R"
+              value={formatCents(data.msr.total.last_period)}
+              pair={data.msr.total}
+              periodLabel={periodLabel}
+              highlight
+              format={formatCents}
+            />
+            <StatCard
+              label="Active Users"
+              value={data.active_users.last_period.toLocaleString()}
+              pair={data.active_users}
+              periodLabel={periodLabel}
+            />
           </div>
 
-          {/* Detail sections */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Users */}
-            {data.users && (
-              <Section title="Users">
-                <MetricRow label="Total" point={data.users.total} />
-                <MetricRow label="Paid" point={data.users.paid} />
-                <MetricRow label="Referred" point={data.users.referred} />
-                <MetricRow label="Free" point={data.users.free} />
-              </Section>
-            )}
-
-            {/* Bookings */}
-            {data.bookings && (
-              <Section title="Bookings">
-                <MetricRow label="Total" point={data.bookings.total} />
-                <MetricRow label="Flights" point={data.bookings.flights} />
-                <MetricRow label="Hotels" point={data.bookings.hotels} />
-                <MetricRow label="Monitored" point={data.bookings.monitored} />
-              </Section>
-            )}
-
-            {/* Opportunities */}
-            {data.opportunities && (
-              <Section title="Opportunities">
-                <MetricRow label="Total" point={data.opportunities.total} />
-                <MetricRow label="Flights" point={data.opportunities.flights} />
-                <MetricRow label="Hotels" point={data.opportunities.hotels} />
-                <PeriodRow label="Completed (7d)" period={data.opportunities.completed} />
-              </Section>
-            )}
-
-            {/* Value */}
-            {data.value && (
-              <Section title="Value">
-                <MetricRow label="MRR" point={data.value.mrr_usd_cents} format={formatCents} />
-                <PeriodRow label="Money Rescued (7d)" period={data.value.money_rescued_usd_cents} format={formatCents} />
-                <PeriodRow label="Hotel Revenue (7d)" period={data.value.hotel_revenue_usd_cents} format={formatCents} />
-              </Section>
-            )}
+          {/* Trend Charts */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <TrendChart label="GMV" pair={data.gmv_usd_cents} periodLabel={periodLabel} format={formatCents} />
+            <TrendChart label="Revenue" pair={data.revenue_usd_cents} periodLabel={periodLabel} format={formatCents} />
+            <TrendChart label="M$R" pair={data.msr.total} periodLabel={periodLabel} format={formatCents} />
+            <TrendChart label="Active Users" pair={data.active_users} periodLabel={periodLabel} />
           </div>
 
-          {/* Pipeline Issues */}
-          {data.pipeline_issues && data.pipeline_issues.length > 0 && (
-            <Section title="Pipeline Issues">
-              <div className="space-y-0">
-                {data.pipeline_issues.map((issue) => (
-                  <div key={issue.type} className="flex items-center justify-between py-2 border-b border-[#1a1f2e] last:border-0">
-                    <div className="flex items-center gap-2">
-                      <span className={cn(
-                        'w-2 h-2 rounded-full',
-                        issue.priority <= 3 ? 'bg-red-400' :
-                        issue.priority <= 6 ? 'bg-amber-400' :
-                        'bg-zinc-500'
-                      )} />
-                      <span className="text-sm text-zinc-400">{issue.label}</span>
-                    </div>
-                    <span className={cn(
-                      'text-sm font-medium',
-                      issue.count > 0 ? 'text-zinc-200' : 'text-zinc-600'
-                    )}>
-                      {issue.count}
-                    </span>
-                  </div>
-                ))}
+          {/* M$R Breakdown */}
+          <Section title="M$R Breakdown">
+            <MsrRow label="Flight Reprice" pair={data.msr.flight_reprice} periodLabel={periodLabel} />
+            <MsrRow label="Better Flight" pair={data.msr.flight_upgrade} periodLabel={periodLabel} />
+            <MsrRow label="Hotel Reprice" pair={data.msr.hotel_reprice} periodLabel={periodLabel} />
+            <MsrRow label="Better Hotel" pair={data.msr.hotel_better} periodLabel={periodLabel} />
+          </Section>
+
+          {/* Ratio */}
+          {data.revenue_usd_cents.last_period > 0 && (
+            <Section title="Health">
+              <div className="flex items-center justify-between py-2">
+                <span className="text-sm text-zinc-400">M$R / Revenue Ratio</span>
+                <span className="text-sm font-medium text-emerald-400">
+                  {(data.msr.total.last_period / data.revenue_usd_cents.last_period).toFixed(1)}x
+                </span>
               </div>
+              <p className="text-xs text-zinc-500 mt-1">
+                Higher ratio = users getting outsized value relative to what Axel earns
+              </p>
             </Section>
-          )}
-
-          {/* Onboarding Funnel */}
-          {data.onboarding_funnel && (
-            <div className="bg-[#0d1117] border border-[#1a1f2e] rounded-lg p-5">
-              <div className="flex items-center justify-between mb-1">
-                <h2 className="text-sm font-semibold text-zinc-300">Onboarding Funnel</h2>
-                <div className="flex items-center gap-1">
-                  {[1, 7, 30].map((d) => (
-                    <button
-                      key={d}
-                      onClick={() => setFunnelDays(d)}
-                      className={cn(
-                        'px-2 py-0.5 text-xs rounded transition-colors',
-                        funnelDays === d
-                          ? 'bg-emerald-500/20 text-emerald-400 font-medium'
-                          : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800'
-                      )}
-                    >
-                      {d}d
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <p className="text-xs text-zinc-500 mb-4">Last {funnelDays} day{funnelDays !== 1 ? 's' : ''} &mdash; signups through opportunity progression</p>
-
-              <div className="space-y-0">
-                <FunnelBar label="Signed up" count={data.onboarding_funnel.summary.signed_up} total={data.onboarding_funnel.summary.signed_up} />
-                <FunnelBar label="Has booking" count={data.onboarding_funnel.summary.has_booking} total={data.onboarding_funnel.summary.signed_up} />
-                <FunnelBar label="Has watch" count={data.onboarding_funnel.summary.has_watch} total={data.onboarding_funnel.summary.signed_up} />
-                <FunnelBar label="Has opportunity" count={data.onboarding_funnel.summary.has_opportunity} total={data.onboarding_funnel.summary.signed_up} />
-                <FunnelBar label="Opp progressed" count={data.onboarding_funnel.summary.has_opportunity_progressed} total={data.onboarding_funnel.summary.signed_up} />
-              </div>
-
-              {data.onboarding_funnel.users.length > 0 && (
-                <div className="mt-4 pt-4 border-t border-[#1a1f2e]">
-                  <button
-                    onClick={() => setFunnelExpanded(v => !v)}
-                    className="flex items-center gap-1 text-xs text-zinc-400 hover:text-zinc-300 transition-colors"
-                  >
-                    {funnelExpanded ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
-                    {funnelExpanded ? 'Hide' : 'Show'} per-user breakdown ({data.onboarding_funnel.users.length})
-                  </button>
-                  {funnelExpanded && (
-                    <div className="mt-3">
-                      <div className="flex items-center gap-2 pb-2 border-b border-[#1a1f2e] text-xs text-zinc-500">
-                        <span className="w-48">Email</span>
-                        <span className="w-20 text-right">Bookings</span>
-                        <span className="w-20 text-right">Watches</span>
-                        <span className="w-20 text-right">Opps</span>
-                        <span className="w-20 text-right">To 1st bk</span>
-                        <span className="w-20 text-right">To 1st opp</span>
-                      </div>
-                      {data.onboarding_funnel.users.map((user) => (
-                        <FunnelUserRow key={user.user_id} user={user} />
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
           )}
         </div>
       ) : null}
