@@ -130,8 +130,10 @@ function TrendChart({
               width={60}
             />
             <Tooltip
-              contentStyle={{ backgroundColor: '#0d1117', border: '1px solid #1a1f2e', borderRadius: 8 }}
+              contentStyle={{ backgroundColor: '#0d1117', border: '1px solid #1a1f2e', borderRadius: 8, color: '#e4e4e7' }}
               labelStyle={{ color: '#a1a1aa', fontSize: 12 }}
+              itemStyle={{ color: '#e4e4e7' }}
+              cursor={{ fill: 'rgba(255,255,255,0.05)' }}
               formatter={(value: number) => [fmt(value), label]}
             />
             <Bar dataKey="value" radius={[4, 4, 0, 0]}>
