@@ -22,7 +22,9 @@ const CHART_AXIS = '#6b7280';
 // ── Helpers ──────────────────────────────────────────────
 
 function formatCents(cents: number): string {
-  return `$${(cents / 100).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+  const abs = Math.abs(cents / 100);
+  const formatted = abs.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+  return cents < 0 ? `-$${formatted}` : `$${formatted}`;
 }
 
 function pctChange(current: number, previous: number): number | null {
@@ -46,6 +48,7 @@ function ChangeIndicator({ current, previous, label }: { current: number; previo
 function StatCard({
   label,
   value,
+  rawValue,
   pair,
   periodLabel,
   highlight,
@@ -53,16 +56,19 @@ function StatCard({
 }: {
   label: string;
   value: string;
+  rawValue?: number;
   pair: BusinessPeriodPair;
   periodLabel: string;
   highlight?: boolean;
   format?: (n: number) => string;
 }) {
   const fmt = format ?? ((n: number) => n.toLocaleString());
+  const isNegative = rawValue !== undefined && rawValue < 0;
+  const valueColor = isNegative ? 'text-red-400' : highlight ? 'text-emerald-400' : 'text-zinc-200';
   return (
     <div className="bg-[#0d1117] border border-[#1a1f2e] rounded-lg p-4">
       <p className="text-xs text-zinc-500 mb-1">{label}</p>
-      <p className={cn('text-2xl font-semibold', highlight ? 'text-emerald-400' : 'text-zinc-200')}>
+      <p className={cn('text-2xl font-semibold', valueColor)}>
         {value}
       </p>
       <p className="text-xs text-zinc-500 mt-0.5">{fmt(pair.last_period)} last {periodLabel}</p>
@@ -334,6 +340,7 @@ export default function BusinessPage() {
             <StatCard
               label="Revenue"
               value={formatCents(data.revenue_usd_cents.last_period)}
+              rawValue={data.revenue_usd_cents.last_period}
               pair={data.revenue_usd_cents}
               periodLabel={periodLabel}
               highlight
@@ -342,6 +349,7 @@ export default function BusinessPage() {
             <StatCard
               label="M$R"
               value={formatCents(data.msr.total.last_period)}
+              rawValue={data.msr.total.last_period}
               pair={data.msr.total}
               periodLabel={periodLabel}
               highlight
