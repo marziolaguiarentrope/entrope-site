@@ -904,8 +904,71 @@ export function AgentFlightBookingDetailPanel({
           </section>
 
           <section className="space-y-3">
-            <div className="text-sm font-semibold">Travelers</div>
-            {travelerProfiles.length > 0 ? (
+            <div className="text-sm font-semibold">
+              Travelers{flightBooking?.passengers && flightBooking.passengers.length > 0
+                ? ` (${flightBooking.passengers.length})`
+                : summary.traveler_count ? ` (${summary.traveler_count})` : ''}
+            </div>
+            {flightBooking?.passengers && flightBooking.passengers.length > 0 ? (
+              <div className="space-y-2">
+                {flightBooking.passengers.map((passenger) => {
+                  const profile = passenger.id
+                    ? travelerProfiles.find((p) => p.id === passenger.id)
+                    : travelerProfiles.find((p) => normalizeName(travelerProfileName(p)) === normalizeName(passenger.name));
+                  const ticket = flightBooking.tickets?.find((t) => {
+                    const traveler = t as Record<string, unknown>;
+                    const inner = traveler.traveler as Record<string, unknown> | undefined;
+                    return inner?.traveller_profile_id === passenger.id;
+                  }) as Record<string, unknown> | undefined;
+
+                  return (
+                    <div key={passenger.id || passenger.name} className="rounded-lg border border-border bg-accent/20 p-4 text-sm">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <div className="font-medium">{passenger.name}</div>
+                        {passenger.is_primary && (
+                          <span className="rounded-full border border-blue-500/30 bg-blue-500/15 px-2 py-0.5 text-[11px] font-medium text-blue-300">
+                            Primary traveler
+                          </span>
+                        )}
+                        {profile?.is_account_holder && (
+                          <span className="rounded-full border border-border bg-background/80 px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
+                            Account holder
+                          </span>
+                        )}
+                      </div>
+                      {passenger.id && (
+                        <div className="mt-2 break-all font-mono text-[11px] text-muted-foreground">
+                          Profile ID: {passenger.id}
+                        </div>
+                      )}
+                      <div className="mt-1 text-xs text-muted-foreground">
+                        {[
+                          passenger.date_of_birth,
+                          profile?.gender,
+                          passenger.citizenship,
+                        ].filter(Boolean).join(' · ') || 'No profile metadata'}
+                      </div>
+                      <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                        <DetailField label="Email" value={profile?.email} />
+                        <DetailField label="Phone" value={profile?.phone} />
+                        <DetailField label="Known Traveler" value={profile?.known_traveler_number || (ticket?.known_traveler_number as string | undefined)} monospace />
+                        <DetailField label="Redress" value={profile?.redress_number || (ticket?.redress_number as string | undefined)} monospace />
+                        <DetailField label="Address" value={profile ? travelerAddress(profile) : undefined} />
+                        <DetailField label="Passports" value={profile ? travelerPassportSummary(profile) : undefined} />
+                        <DetailField
+                          label="Loyalty"
+                          value={
+                            profile ? travelerLoyaltySummary(profile)
+                            : ticket?.loyalty_program ? `${ticket.loyalty_program}: ${ticket.loyalty_number || '—'}`
+                            : undefined
+                          }
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : travelerProfiles.length > 0 ? (
               <div className="space-y-2">
                 {travelerProfiles.map((traveler) => {
                   const passenger = matchingPassengerSummary(traveler, flightBooking?.passengers);
