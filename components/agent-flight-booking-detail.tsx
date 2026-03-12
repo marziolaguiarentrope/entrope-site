@@ -914,11 +914,23 @@ export function AgentFlightBookingDetailPanel({
                 {flightBooking.passengers.map((passenger) => {
                   const profile = passenger.id
                     ? travelerProfiles.find((p) => p.id === passenger.id)
-                    : travelerProfiles.find((p) => normalizeName(travelerProfileName(p)) === normalizeName(passenger.name));
+                    : travelerProfiles.find((p) => {
+                        const profileName = normalizeName([p.first_name, p.last_name].filter(Boolean).join(' '));
+                        const profileFullName = normalizeName(travelerProfileName(p));
+                        const passengerName = normalizeName(passenger.name);
+                        return passengerName === profileName || passengerName === profileFullName;
+                      });
                   const ticket = flightBooking.tickets?.find((t) => {
                     const traveler = t as Record<string, unknown>;
                     const inner = traveler.traveler as Record<string, unknown> | undefined;
-                    return inner?.traveller_profile_id === passenger.id;
+                    if (passenger.id && inner?.traveller_profile_id === passenger.id) return true;
+                    if (!passenger.id && inner) {
+                      const ticketName = normalizeName(
+                        [inner.first_name as string, inner.last_name as string].filter(Boolean).join(' '),
+                      );
+                      return ticketName === normalizeName(passenger.name);
+                    }
+                    return false;
                   }) as Record<string, unknown> | undefined;
 
                   return (
@@ -957,11 +969,12 @@ export function AgentFlightBookingDetailPanel({
                         <DetailField label="Passports" value={profile ? travelerPassportSummary(profile) : undefined} />
                         <DetailField
                           label="Loyalty"
-                          value={
-                            profile ? travelerLoyaltySummary(profile)
-                            : ticket?.loyalty_program ? `${ticket.loyalty_program}: ${ticket.loyalty_number || '—'}`
-                            : undefined
-                          }
+                          value={(() => {
+                            const profileLoyalty = profile ? travelerLoyaltySummary(profile) : '—';
+                            if (profileLoyalty !== '—') return profileLoyalty;
+                            if (ticket?.loyalty_program) return `${ticket.loyalty_program}: ${ticket.loyalty_number || '—'}`;
+                            return undefined;
+                          })()}
                         />
                       </div>
                     </div>
