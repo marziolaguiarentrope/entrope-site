@@ -5,6 +5,7 @@ import {
   ResponsiveContainer,
   BarChart,
   Bar,
+  Cell,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -16,6 +17,7 @@ import { cn, exportCSV, exportJSON } from '@/lib/utils';
 import { RefreshCw, Download } from 'lucide-react';
 
 const CHART_GREEN = '#00C805';
+const CHART_RED = '#f87171';
 const CHART_GRID = '#1a1f2e';
 const CHART_AXIS = '#6b7280';
 
@@ -132,7 +134,11 @@ function TrendChart({
               labelStyle={{ color: '#a1a1aa', fontSize: 12 }}
               formatter={(value: number) => [fmt(value), label]}
             />
-            <Bar dataKey="value" fill={CHART_GREEN} radius={[4, 4, 0, 0]} />
+            <Bar dataKey="value" radius={[4, 4, 0, 0]}>
+              {chartData.map((entry, idx) => (
+                <Cell key={idx} fill={entry.value < 0 ? CHART_RED : CHART_GREEN} />
+              ))}
+            </Bar>
           </BarChart>
         </ResponsiveContainer>
       </div>
