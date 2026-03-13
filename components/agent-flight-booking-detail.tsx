@@ -797,7 +797,10 @@ export function AgentFlightBookingDetailPanel({
     }
   }
 
-  const carrierDisplay = formatAirlineWithCode(summary.carrier_code, summary.carrier_name);
+  const carrierDisplay = formatAirlineWithCode(
+    summary.carrier_code || flightBooking?.airline_code,
+    summary.carrier_name || flightBooking?.airline,
+  );
   const paxCount = flightBooking?.passengers?.length || summary.traveler_count || 0;
   const tripDates = summary.outbound_departure
     ? `${formatDateTimeShort(summary.outbound_departure)}${summary.return_departure ? ` – ${formatDateTimeShort(summary.return_departure)}` : ' (one-way)'}`
@@ -922,6 +925,107 @@ export function AgentFlightBookingDetailPanel({
               </div>
             )}
           </section>
+
+          {/* ─── Travelers (collapsed) ─── */}
+          <CollapsibleSection title="Travelers" count={paxCount}>
+            {flightBooking?.passengers && flightBooking.passengers.length > 0 ? (
+              <div className="space-y-2">
+                {flightBooking.passengers.map((passenger) => {
+                  const profile = passenger.id
+                    ? travelerProfiles.find((p) => p.id === passenger.id)
+                    : travelerProfiles.find((p) => {
+                        const profileName = normalizeName([p.first_name, p.last_name].filter(Boolean).join(' '));
+                        const profileFullName = normalizeName(travelerProfileName(p));
+                        const passengerName = normalizeName(passenger.name);
+                        return passengerName === profileName || passengerName === profileFullName;
+                      });
+                  const ticket = flightBooking.tickets?.find((t) => {
+                    const traveler = t as Record<string, unknown>;
+                    const inner = traveler.traveler as Record<string, unknown> | undefined;
+                    if (passenger.id && inner?.traveller_profile_id === passenger.id) return true;
+                    if (!passenger.id && inner) {
+                      const ticketName = normalizeName(
+                        [inner.first_name as string, inner.last_name as string].filter(Boolean).join(' '),
+                      );
+                      return ticketName === normalizeName(passenger.name);
+                    }
+                    return false;
+                  }) as Record<string, unknown> | undefined;
+
+                  return (
+                    <div key={passenger.id || passenger.name} className="rounded-lg border border-border bg-background/50 p-3 text-sm">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <div className="font-medium">{passenger.name}</div>
+                        {passenger.is_primary && (
+                          <span className="rounded-full border border-blue-500/30 bg-blue-500/15 px-2 py-0.5 text-[11px] font-medium text-blue-300">Primary</span>
+                        )}
+                      </div>
+                      <div className="mt-1 text-xs text-muted-foreground">
+                        {[passenger.date_of_birth, profile?.gender, passenger.citizenship].filter(Boolean).join(' · ') || 'No metadata'}
+                      </div>
+                      {(profile?.email || profile?.phone || profile?.known_traveler_number || (profile && travelerLoyaltySummary(profile) !== '—')) && (
+                        <div className="mt-2 grid gap-2 md:grid-cols-2">
+                          {profile?.email && <DetailField label="Email" value={profile.email} />}
+                          {profile?.phone && <DetailField label="Phone" value={profile.phone} />}
+                          {(profile?.known_traveler_number || (ticket?.known_traveler_number as string | undefined)) && (
+                            <DetailField label="Known Traveler" value={profile?.known_traveler_number || (ticket?.known_traveler_number as string | undefined)} monospace />
+                          )}
+                          {profile && travelerLoyaltySummary(profile) !== '—' && (
+                            <DetailField label="Frequent Flyer" value={travelerLoyaltySummary(profile)} monospace />
+                          )}
+                          {profile && travelerPassportSummary(profile) !== '—' && (
+                            <DetailField label="Passports" value={travelerPassportSummary(profile)} />
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            ) : travelerProfiles.length > 0 ? (
+              <div className="space-y-2">
+                {travelerProfiles.map((traveler) => (
+                  <div key={traveler.id} className="rounded-lg border border-border bg-background/50 p-3 text-sm">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <div className="font-medium">{travelerProfileName(traveler)}</div>
+                      {traveler.is_account_holder && (
+                        <span className="rounded-full border border-border bg-background/80 px-2 py-0.5 text-[11px] font-medium text-muted-foreground">Account holder</span>
+                      )}
+                    </div>
+                    <div className="mt-1 text-xs text-muted-foreground">
+                      {[traveler.date_of_birth, traveler.gender, traveler.citizenship].filter(Boolean).join(' · ') || 'No metadata'}
+                    </div>
+                    {travelerLoyaltySummary(traveler) !== '—' && (
+                      <div className="mt-2 grid gap-2 md:grid-cols-2">
+                        <DetailField label="Frequent Flyer" value={travelerLoyaltySummary(traveler)} monospace />
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ) : summary.travelers.length > 0 ? (
+              <div className="space-y-2">
+                {summary.travelers.map((traveler, index) => (
+                  <div key={`${travelerName(traveler)}-${index}`} className="rounded-lg border border-border bg-background/50 p-3 text-sm">
+                    <div className="font-medium">{travelerName(traveler)}</div>
+                    <div className="mt-1 text-xs text-muted-foreground">
+                      {[
+                        typeof traveler.date_of_birth === 'string' ? traveler.date_of_birth : null,
+                        typeof traveler.gender === 'string' ? traveler.gender : null,
+                      ].filter(Boolean).join(' · ') || 'No metadata'}
+                    </div>
+                    {typeof (traveler as Record<string, unknown>).frequent_flyer_number === 'string' && (traveler as Record<string, unknown>).frequent_flyer_number && (
+                      <div className="mt-2 grid gap-2 md:grid-cols-2">
+                        <DetailField label="Frequent Flyer" value={(traveler as Record<string, unknown>).frequent_flyer_number as string} monospace />
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-sm text-muted-foreground">No traveler details available.</div>
+            )}
+          </CollapsibleSection>
 
           {/* ─── Operator Actions (always open) ─── */}
           <section className="space-y-3">
@@ -1095,93 +1199,6 @@ export function AgentFlightBookingDetailPanel({
           </section>
 
           {/* ─── Collapsed Sections ─── */}
-
-          <CollapsibleSection title="Travelers" count={paxCount}>
-            {flightBooking?.passengers && flightBooking.passengers.length > 0 ? (
-              <div className="space-y-2">
-                {flightBooking.passengers.map((passenger) => {
-                  const profile = passenger.id
-                    ? travelerProfiles.find((p) => p.id === passenger.id)
-                    : travelerProfiles.find((p) => {
-                        const profileName = normalizeName([p.first_name, p.last_name].filter(Boolean).join(' '));
-                        const profileFullName = normalizeName(travelerProfileName(p));
-                        const passengerName = normalizeName(passenger.name);
-                        return passengerName === profileName || passengerName === profileFullName;
-                      });
-                  const ticket = flightBooking.tickets?.find((t) => {
-                    const traveler = t as Record<string, unknown>;
-                    const inner = traveler.traveler as Record<string, unknown> | undefined;
-                    if (passenger.id && inner?.traveller_profile_id === passenger.id) return true;
-                    if (!passenger.id && inner) {
-                      const ticketName = normalizeName(
-                        [inner.first_name as string, inner.last_name as string].filter(Boolean).join(' '),
-                      );
-                      return ticketName === normalizeName(passenger.name);
-                    }
-                    return false;
-                  }) as Record<string, unknown> | undefined;
-
-                  return (
-                    <div key={passenger.id || passenger.name} className="rounded-lg border border-border bg-background/50 p-3 text-sm">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <div className="font-medium">{passenger.name}</div>
-                        {passenger.is_primary && (
-                          <span className="rounded-full border border-blue-500/30 bg-blue-500/15 px-2 py-0.5 text-[11px] font-medium text-blue-300">Primary</span>
-                        )}
-                      </div>
-                      <div className="mt-1 text-xs text-muted-foreground">
-                        {[passenger.date_of_birth, profile?.gender, passenger.citizenship].filter(Boolean).join(' · ') || 'No metadata'}
-                      </div>
-                      {(profile?.email || profile?.phone || profile?.known_traveler_number) && (
-                        <div className="mt-2 grid gap-2 md:grid-cols-2">
-                          {profile?.email && <DetailField label="Email" value={profile.email} />}
-                          {profile?.phone && <DetailField label="Phone" value={profile.phone} />}
-                          {(profile?.known_traveler_number || (ticket?.known_traveler_number as string | undefined)) && (
-                            <DetailField label="Known Traveler" value={profile?.known_traveler_number || (ticket?.known_traveler_number as string | undefined)} monospace />
-                          )}
-                          {profile && travelerPassportSummary(profile) !== '—' && (
-                            <DetailField label="Passports" value={travelerPassportSummary(profile)} />
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            ) : travelerProfiles.length > 0 ? (
-              <div className="space-y-2">
-                {travelerProfiles.map((traveler) => (
-                  <div key={traveler.id} className="rounded-lg border border-border bg-background/50 p-3 text-sm">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <div className="font-medium">{travelerProfileName(traveler)}</div>
-                      {traveler.is_account_holder && (
-                        <span className="rounded-full border border-border bg-background/80 px-2 py-0.5 text-[11px] font-medium text-muted-foreground">Account holder</span>
-                      )}
-                    </div>
-                    <div className="mt-1 text-xs text-muted-foreground">
-                      {[traveler.date_of_birth, traveler.gender, traveler.citizenship].filter(Boolean).join(' · ') || 'No metadata'}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : summary.travelers.length > 0 ? (
-              <div className="space-y-2">
-                {summary.travelers.map((traveler, index) => (
-                  <div key={`${travelerName(traveler)}-${index}`} className="rounded-lg border border-border bg-background/50 p-3 text-sm">
-                    <div className="font-medium">{travelerName(traveler)}</div>
-                    <div className="mt-1 text-xs text-muted-foreground">
-                      {[
-                        typeof traveler.date_of_birth === 'string' ? traveler.date_of_birth : null,
-                        typeof traveler.gender === 'string' ? traveler.gender : null,
-                      ].filter(Boolean).join(' · ') || 'No metadata'}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="text-sm text-muted-foreground">No traveler details available.</div>
-            )}
-          </CollapsibleSection>
 
           <CollapsibleSection title="Booking State">
             <div className="grid gap-2 md:grid-cols-2">
