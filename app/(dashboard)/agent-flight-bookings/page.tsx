@@ -79,8 +79,26 @@ function tripLabel(item: AgentFlightBookingListItem): string {
   return [dates, trip_type?.replace(/_/g, ' '), cabin].filter(Boolean).join(' · ');
 }
 
+const AIRLINE_NAMES: Record<string, string> = {
+  AA: 'American Airlines', DL: 'Delta', UA: 'United', WN: 'Southwest',
+  F9: 'Frontier', NK: 'Spirit', B6: 'JetBlue', AS: 'Alaska', MX: 'Breeze',
+  G4: 'Allegiant', SY: 'Sun Country', HA: 'Hawaiian', BA: 'British Airways',
+  EK: 'Emirates', QR: 'Qatar Airways', TK: 'Turkish Airlines', LH: 'Lufthansa',
+  AF: 'Air France', KL: 'KLM', AC: 'Air Canada', VS: 'Virgin Atlantic',
+  AM: 'Aeromexico', IB: 'Iberia', SQ: 'Singapore Airlines', CX: 'Cathay Pacific',
+  QF: 'Qantas', JL: 'Japan Airlines', NH: 'ANA', KE: 'Korean Air',
+  LA: 'LATAM', AV: 'Avianca', CM: 'Copa', WS: 'WestJet', FI: 'Icelandair',
+};
+
+function resolveAirlineName(code: string | null | undefined, name: string | null | undefined): string {
+  if (name && name.trim()) return name;
+  if (!code) return 'Carrier unavailable';
+  const upper = code.trim().toUpperCase();
+  return AIRLINE_NAMES[upper] || code;
+}
+
 function carrierLabel(item: AgentFlightBookingListItem): string {
-  return item.summary.carrier_name || item.summary.carrier_code || item.summary.flight_numbers.join(', ') || 'Carrier unavailable';
+  return resolveAirlineName(item.summary.carrier_code, item.summary.carrier_name) || item.summary.flight_numbers.join(', ') || 'Carrier unavailable';
 }
 
 function bookingLabel(item: AgentFlightBookingListItem): string {
@@ -557,7 +575,7 @@ export default function AgentFlightBookingsPage() {
 
       {selectedTaskId && detailLoading && !selectedDetail && (
         <div className="fixed inset-0 z-50 flex justify-end bg-black/50">
-          <div className="h-full w-full max-w-4xl overflow-y-auto border-l border-border bg-card">
+          <div className="h-full w-full max-w-2xl overflow-y-auto border-l border-border bg-card">
             <div className="sticky top-0 z-10 flex items-center justify-between border-b border-border bg-card p-4">
               <h2 className="text-lg font-semibold">Agent Flight Booking</h2>
               <button onClick={closeDetail} className="rounded-md p-2 transition-colors hover:bg-accent">
