@@ -741,7 +741,7 @@ export function AgentFlightBookingDetailPanel({
   }
 
   async function handleComplete() {
-    if (hasPendingBookingChanges) {
+    if (hasPendingBookingChanges && completionOutcome !== 'failure') {
       setError('Save booking updates before completing the task');
       return;
     }
@@ -1113,12 +1113,12 @@ export function AgentFlightBookingDetailPanel({
                 />
               </label>
 
-              {(hasPendingBookingChanges || completionNeedsConfirmation || completionNeedsFailureReason) && (
+              {((hasPendingBookingChanges && completionOutcome !== 'failure') || completionNeedsConfirmation || completionNeedsFailureReason) && (
                 <div className="rounded-md border border-yellow-500/30 bg-yellow-500/10 p-2.5 text-xs text-yellow-200">
                   <div className="flex items-start gap-2">
                     <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
                     <div>
-                      {hasPendingBookingChanges && <div>Save booking edits first.</div>}
+                      {hasPendingBookingChanges && completionOutcome !== 'failure' && <div>Save booking edits first.</div>}
                       {completionNeedsConfirmation && <div>Confirmation code required for success.</div>}
                       {completionNeedsFailureReason && <div>Select a failure reason.</div>}
                     </div>
@@ -1129,7 +1129,7 @@ export function AgentFlightBookingDetailPanel({
               <div className="flex flex-wrap gap-2">
                 <button
                   onClick={() => void handleComplete()}
-                  disabled={actionLoading !== null || !canComplete || hasPendingBookingChanges || completionNeedsConfirmation || completionNeedsFailureReason}
+                  disabled={actionLoading !== null || !canComplete || (hasPendingBookingChanges && completionOutcome !== 'failure') || completionNeedsConfirmation || completionNeedsFailureReason}
                   className="inline-flex items-center gap-1.5 rounded-md bg-green-500/15 px-3 py-1.5 text-xs font-medium text-green-400 transition-colors hover:bg-green-500/25 disabled:opacity-50"
                 >
                   {actionLoading === 'complete' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
