@@ -97,8 +97,17 @@ function resolveAirlineName(code: string | null | undefined, name: string | null
   return AIRLINE_NAMES[upper] || code;
 }
 
+function formatAirlineWithCode(code: string | null | undefined, name: string | null | undefined): string {
+  const resolved = resolveAirlineName(code, name);
+  const upper = code?.trim().toUpperCase() || '';
+  if (upper && resolved !== upper && !resolved.includes(`(${upper})`)) {
+    return `${resolved} (${upper})`;
+  }
+  return resolved;
+}
+
 function carrierLabel(item: AgentFlightBookingListItem): string {
-  return resolveAirlineName(item.summary.carrier_code, item.summary.carrier_name) || item.summary.flight_numbers.join(', ') || 'Carrier unavailable';
+  return formatAirlineWithCode(item.summary.carrier_code, item.summary.carrier_name) || item.summary.flight_numbers.join(', ') || 'Carrier unavailable';
 }
 
 function bookingLabel(item: AgentFlightBookingListItem): string {
