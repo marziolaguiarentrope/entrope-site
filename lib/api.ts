@@ -187,6 +187,64 @@ export interface PendingEmailDetail {
   member_url: string | null;
 }
 
+export type PendingSmsApprovalStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
+
+export interface PendingSms {
+  id: string;
+  user_id: string;
+  to_phone: string | null;
+  to_name: string | null;
+  body: string | null;
+  status: string;
+  approval_status: PendingSmsApprovalStatus;
+  decided_by: string | null;
+  decided_at: string | null;
+  rejection_reason: string | null;
+  loop_record_id: string | null;
+  idempotency_key: string | null;
+  created_at: string;
+  sent_at: string | null;
+  provider_message_id?: string | null;
+  error_message?: string | null;
+}
+
+export interface PendingSmsListResponse {
+  items: PendingSms[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface PendingSmsBrainReasoning {
+  headline: string | null;
+  intent_summary: string | null;
+  triggered_at: string | null;
+}
+
+export interface PendingSmsDetail {
+  message: PendingSms;
+  brain_reasoning: PendingSmsBrainReasoning | null;
+  recent_communications: CommunicationView[];
+  member_url: string | null;
+}
+
+export interface InboundSms {
+  id: string;
+  user_id: string;
+  from_phone: string | null;
+  from_name: string | null;
+  body: string | null;
+  provider_message_id: string | null;
+  created_at: string;
+}
+
+export interface InboundSmsListResponse {
+  items: InboundSms[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
 export type FlightConversionTaskStatus = 'pending' | 'claimed' | 'blocked' | 'completed' | 'failed';
 
 export interface FlightConversionSummary {
@@ -581,6 +639,48 @@ class ApiClient {
       method: 'POST',
       body: JSON.stringify({ reason }),
     });
+  }
+
+  // Pending SMS approvals
+  async listPendingSms(params?: {
+    status?: PendingSmsApprovalStatus;
+    limit?: number;
+    offset?: number;
+  }): Promise<PendingSmsListResponse> {
+    const searchParams = new URLSearchParams();
+    if (params?.status) searchParams.set('status', params.status);
+    if (params?.limit !== undefined) searchParams.set('limit', params.limit.toString());
+    if (params?.offset !== undefined) searchParams.set('offset', params.offset.toString());
+
+    const query = searchParams.toString();
+    return this.fetch<PendingSmsListResponse>(`/pending-sms${query ? `?${query}` : ''}`);
+  }
+
+  async getPendingSmsDetail(id: string): Promise<PendingSmsDetail> {
+    return this.fetch<PendingSmsDetail>(`/pending-sms/${id}`);
+  }
+
+  async approvePendingSms(id: string): Promise<PendingSms> {
+    return this.fetch<PendingSms>(`/pending-sms/${id}/approve`, { method: 'POST' });
+  }
+
+  async rejectPendingSms(id: string, reason: string): Promise<PendingSms> {
+    return this.fetch<PendingSms>(`/pending-sms/${id}/reject`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    });
+  }
+
+  async listInboundSms(params?: {
+    limit?: number;
+    offset?: number;
+  }): Promise<InboundSmsListResponse> {
+    const searchParams = new URLSearchParams();
+    if (params?.limit !== undefined) searchParams.set('limit', params.limit.toString());
+    if (params?.offset !== undefined) searchParams.set('offset', params.offset.toString());
+
+    const query = searchParams.toString();
+    return this.fetch<InboundSmsListResponse>(`/pending-sms/inbound${query ? `?${query}` : ''}`);
   }
 
   // Flight watch conversions (operator fulfillment)

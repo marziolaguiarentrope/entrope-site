@@ -25,6 +25,7 @@ const navItems = [
   { href: '/metrics', icon: BarChart3, label: 'Metrics' },
   { href: '/booking-issues', icon: Wrench, label: 'Booking Issues' },
   { href: '/pending-emails', icon: Mail, label: 'Pending Emails' },
+  { href: '/text-messages', icon: MessageSquare, label: 'Text Messages' },
   { href: '/escalations', icon: AlertTriangle, label: 'Escalations' },
 ];
 
@@ -32,6 +33,7 @@ export function Sidebar() {
   const pathname = usePathname();
   const { user, logout } = useAuth();
   const [pendingCount, setPendingCount] = useState<number | null>(null);
+  const [pendingSmsCount, setPendingSmsCount] = useState<number | null>(null);
   const [pendingAgentFlightBookingCount, setPendingAgentFlightBookingCount] = useState<number | null>(null);
   const [pendingFlightConversionCount, setPendingFlightConversionCount] = useState<number | null>(null);
   const refreshTimer = useRef<NodeJS.Timeout | null>(null);
@@ -41,8 +43,13 @@ export function Sidebar() {
 
     const fetchPendingCount = async () => {
       try {
-        const [pendingEmails, pendingAgentFlightBookings, pendingFlightConversions] = await Promise.all([
+        const [pendingEmails, pendingSms, pendingAgentFlightBookings, pendingFlightConversions] = await Promise.all([
           api.listPendingEmails({
+            status: 'PENDING',
+            limit: 1,
+            offset: 0,
+          }),
+          api.listPendingSms({
             status: 'PENDING',
             limit: 1,
             offset: 0,
@@ -61,12 +68,14 @@ export function Sidebar() {
         ]);
         if (!cancelled) {
           setPendingCount(pendingEmails.total);
+          setPendingSmsCount(pendingSms.total);
           setPendingAgentFlightBookingCount(pendingAgentFlightBookings.total);
           setPendingFlightConversionCount(pendingFlightConversions.total);
         }
       } catch {
         if (!cancelled) {
           setPendingCount(null);
+          setPendingSmsCount(null);
           setPendingAgentFlightBookingCount(null);
           setPendingFlightConversionCount(null);
         }
@@ -113,6 +122,11 @@ export function Sidebar() {
               {item.href === '/pending-emails' && pendingCount !== null && pendingCount > 0 && (
                 <span className="ml-auto px-1.5 py-0.5 text-[10px] font-semibold rounded bg-yellow-500/20 text-yellow-400">
                   {pendingCount}
+                </span>
+              )}
+              {item.href === '/text-messages' && pendingSmsCount !== null && pendingSmsCount > 0 && (
+                <span className="ml-auto px-1.5 py-0.5 text-[10px] font-semibold rounded bg-orange-500/20 text-orange-400">
+                  {pendingSmsCount}
                 </span>
               )}
               {item.href === '/agent-flight-bookings' && pendingAgentFlightBookingCount !== null && pendingAgentFlightBookingCount > 0 && (
