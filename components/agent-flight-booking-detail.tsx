@@ -638,7 +638,7 @@ export function AgentFlightBookingDetailPanel({
 
   const canUnclaim = task.status === 'claimed';
   const canBlock = task.status === 'pending' || task.status === 'claimed' || task.status === 'failed';
-  const canComplete = task.status === 'pending' || task.status === 'claimed' || task.status === 'failed';
+  const canComplete = task.status === 'pending' || task.status === 'claimed' || task.status === 'failed' || task.status === 'blocked';
   const completionNeedsConfirmation = completionOutcome === 'success' && !effectiveConfirmationCode;
   const completionNeedsFailureReason =
     completionOutcome === 'failure' &&
@@ -647,7 +647,7 @@ export function AgentFlightBookingDetailPanel({
 
   async function autoClaimIfNeeded(): Promise<boolean> {
     if (task.status === 'claimed') return true;
-    if (task.status !== 'pending' && task.status !== 'failed') return false;
+    if (task.status !== 'pending' && task.status !== 'failed' && task.status !== 'blocked') return false;
     try {
       const updated = await api.claimAgentFlightBookingTask(task.id);
       onTaskUpdate(updated);
