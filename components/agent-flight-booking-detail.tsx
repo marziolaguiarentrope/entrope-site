@@ -86,7 +86,14 @@ const AIRLINE_NAMES: Record<string, string> = {
 /* ─── Helpers ─── */
 
 function resolveAirlineName(code: string | null | undefined, name: string | null | undefined): string {
-  if (name && name.trim()) return name;
+  // If name is provided and isn't just an IATA code, use it
+  if (name && name.trim()) {
+    const trimmed = name.trim();
+    const upperName = trimmed.toUpperCase();
+    // If the "name" is actually just an IATA code (2-3 uppercase letters), resolve it
+    if (trimmed.length <= 3 && AIRLINE_NAMES[upperName]) return AIRLINE_NAMES[upperName];
+    if (trimmed.length > 3) return trimmed;
+  }
   if (!code) return 'Carrier unavailable';
   const upper = code.trim().toUpperCase();
   return AIRLINE_NAMES[upper] || code;
