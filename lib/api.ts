@@ -1,6 +1,6 @@
 // Use local proxy to avoid CORS issues
 const API_BASE = '/api/proxy';
-const FETCH_TIMEOUT = 120000; // 120 seconds — wake calls run LLM + flight searches
+const FETCH_TIMEOUT = 180000; // 180 seconds — wake calls run LLM + flight searches on large trips
 
 export class ApiError extends Error {
   public status: number;
@@ -520,7 +520,7 @@ class ApiClient {
     } catch (error) {
       if (error instanceof ApiError) throw error;
       if (error instanceof DOMException && error.name === 'AbortError') {
-        throw new ApiError(0, 'Request timed out after 60 seconds — the backend may be waking up, please retry');
+        throw new ApiError(0, `Request timed out after ${FETCH_TIMEOUT / 1000} seconds — the backend may be waking up, please retry`);
       }
       throw error;
     } finally {

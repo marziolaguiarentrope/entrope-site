@@ -3,11 +3,10 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 
 const API_BASE = process.env.ADMIN_GATEWAY_URL || 'https://prod-admin-gateway.onrender.com';
-const FETCH_TIMEOUT = 120000; // 120 seconds — wake calls run LLM + flight searches
+const FETCH_TIMEOUT = 180000; // 180 seconds — wake calls run LLM + flight searches on large trips
 
-// Tell Vercel to allow this serverless function to run up to 120s
-// (default is ~30s which kills the function before our fetch timeout fires)
-export const maxDuration = 120;
+// Tell Vercel to allow this serverless function to run up to 180s
+export const maxDuration = 180;
 
 async function getIdToken(): Promise<string | null> {
   const session = await getServerSession(authOptions);
