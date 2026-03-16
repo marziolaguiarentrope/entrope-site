@@ -708,7 +708,7 @@ export default function TextMessagesPage() {
           <div>
             <h2 className="text-sm font-semibold">Select User</h2>
             <p className="text-xs text-muted-foreground">
-              Search by email, phone, or user ID. The selected member is used for both SMS workflows below.
+              Search by email, phone, or user ID. The selected member is used for both SMS workflows.
             </p>
           </div>
 
@@ -788,7 +788,7 @@ export default function TextMessagesPage() {
           <div>
             <h2 className="text-sm font-semibold">Wake Axel to Text</h2>
             <p className="text-xs text-muted-foreground">
-              Choose a conversational trip, optionally add guidance, and create a new outbound SMS draft for approval.
+              Wake the Axel conversational brain for a trip. Axel will review the full trip context and draft its own SMS message. You can optionally provide guidance to influence what Axel writes. The draft will appear in the Pending queue for your approval before being sent.
             </p>
           </div>
 
@@ -929,8 +929,7 @@ export default function TextMessagesPage() {
           <div>
             <h2 className="text-sm font-semibold">Send as Axel</h2>
             <p className="text-xs text-muted-foreground">
-              Compose an immediate SMS as Axel for the selected conversational trip. The confirmation step stays on-page so the operator can
-              review before sending.
+              Write a message on behalf of Axel and send it directly — you write the words, not Axel. Unlike &quot;Wake Axel to Text&quot; where Axel drafts its own message, here you are the author. You&apos;ll review the full message before confirming. The message is sent immediately (no approval queue) and becomes part of Axel&apos;s conversation history, so the brain will treat it as something Axel said in future interactions.
             </p>
           </div>
 
