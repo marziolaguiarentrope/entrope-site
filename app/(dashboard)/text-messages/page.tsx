@@ -1,13 +1,17 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
+import { Loader2, Phone, Send, User } from 'lucide-react';
 import {
   api,
+  ConversationalTrip,
   InboundSms,
+  MemberSummary,
   PendingSms,
   PendingSmsApprovalStatus,
   PendingSmsDetail as PendingSmsDetailData,
+  UserBasicInfo,
 } from '@/lib/api';
 import { PendingSmsDetail } from '@/components/pending-sms-detail';
 import { cn } from '@/lib/utils';
@@ -17,8 +21,17 @@ type QueueTab = 'pending' | 'approved' | 'rejected' | 'all';
 type SortKey = 'created' | 'member' | 'message' | 'delivery';
 type SortDir = 'asc' | 'desc';
 
+type LookupMember = {
+  id: string;
+  email: string | null;
+  phone_number: string | null;
+  name: string | null;
+  created_at: string | null;
+};
+
 const STATUS_PAGE_LIMIT = 500;
 const INBOUND_PAGE_LIMIT = 500;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const EMPTY_STATUS_TOTALS: Record<PendingSmsApprovalStatus, number> = {
   PENDING: 0,
   APPROVED: 0,
@@ -40,8 +53,95 @@ function timeAgo(dateString: string): string {
   return date.toLocaleDateString();
 }
 
+function formatDateTime(dateString: string | null | undefined): string {
+  if (!dateString) return '—';
+  const date = new Date(dateString);
+  if (Number.isNaN(date.getTime())) return dateString;
+  return date.toLocaleString();
+}
+
+function formatDate(dateString: string | null | undefined): string | null {
+  if (!dateString) return null;
+  const date = new Date(dateString);
+  if (Number.isNaN(date.getTime())) return dateString;
+  return date.toLocaleDateString();
+}
+
+function formatStatusLabel(status: string | null | undefined): string {
+  if (!status) return 'unknown';
+  return status.replace(/_/g, ' ').toLowerCase();
+}
+
+function formatTripDateRange(startDate: string | null | undefined, endDate: string | null | undefined): string | null {
+  const start = formatDate(startDate);
+  const end = formatDate(endDate);
+  if (start && end) return `${start} - ${end}`;
+  return start || end;
+}
+
 function previewText(text: string | null): string {
   return (text || '').replace(/\s+/g, ' ').trim();
+}
+
+function createIdempotencyKey(): string | undefined {
+  return typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID()
+    : undefined;
+}
+
+function toLookupMember(member: MemberSummary): LookupMember {
+  return {
+    id: member.id,
+    email: member.email,
+    phone_number: member.phone_number,
+    name: member.name,
+    created_at: member.created_at,
+  };
+}
+
+function toLookupMemberFromBasicInfo(user: UserBasicInfo): LookupMember {
+  return {
+    id: user.id,
+    email: user.email,
+    phone_number: user.phone,
+    name: user.name,
+    created_at: null,
+  };
+}
+
+function getTripTitle(trip: ConversationalTrip): string {
+  const name = typeof trip.name === 'string' ? trip.name.trim() : '';
+  if (name) return name;
+  const destination = typeof trip.destination === 'string' ? trip.destination.trim() : '';
+  if (destination) return destination;
+  return `Trip ${trip.id.slice(0, 8)}`;
+}
+
+function getTripBookingCount(trip: ConversationalTrip): number | null {
+  if (typeof trip.bookings_count === 'number') return trip.bookings_count;
+  if (Array.isArray(trip.bookings)) return trip.bookings.length;
+  return null;
+}
+
+function getTripMeta(trip: ConversationalTrip): string {
+  const parts: string[] = [];
+  const destination = typeof trip.destination === 'string' ? trip.destination.trim() : '';
+  const title = getTripTitle(trip);
+  const dateRange = formatTripDateRange(trip.start_date, trip.end_date);
+  const bookingCount = getTripBookingCount(trip);
+
+  if (destination && destination !== title) parts.push(destination);
+  if (dateRange) parts.push(dateRange);
+  if (trip.archived) parts.push('archived');
+  if (typeof trip.status === 'string' && trip.status.trim()) parts.push(formatStatusLabel(trip.status));
+  if (bookingCount !== null) parts.push(`${bookingCount} booking${bookingCount === 1 ? '' : 's'}`);
+
+  return parts.join(' · ');
+}
+
+function getTripOptionLabel(trip: ConversationalTrip): string {
+  const meta = getTripMeta(trip);
+  return meta ? `${getTripTitle(trip)} - ${meta}` : getTripTitle(trip);
 }
 
 function matchesOutboundSearch(message: PendingSms, query: string): boolean {
@@ -242,6 +342,33 @@ export default function TextMessagesPage() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
 
+  const [memberQuery, setMemberQuery] = useState('');
+  const [memberLookupLoading, setMemberLookupLoading] = useState(false);
+  const [memberLookupError, setMemberLookupError] = useState<string | null>(null);
+  const [selectedMember, setSelectedMember] = useState<LookupMember | null>(null);
+
+  const [convTrips, setConvTrips] = useState<ConversationalTrip[]>([]);
+  const [selectedTripId, setSelectedTripId] = useState('');
+  const [tripLoading, setTripLoading] = useState(false);
+  const [tripError, setTripError] = useState<string | null>(null);
+
+  const [guidance, setGuidance] = useState('');
+  const [wakeLoading, setWakeLoading] = useState(false);
+  const [wakeError, setWakeError] = useState<string | null>(null);
+  const [wakeSuccess, setWakeSuccess] = useState<string | null>(null);
+  const [wakeMessageId, setWakeMessageId] = useState<string | null>(null);
+
+  const [sendBody, setSendBody] = useState('');
+  const [sendStep, setSendStep] = useState<'edit' | 'confirm'>('edit');
+  const [sendLoading, setSendLoading] = useState(false);
+  const [sendError, setSendError] = useState<string | null>(null);
+  const [sendSuccess, setSendSuccess] = useState<string | null>(null);
+  const [sendMessageId, setSendMessageId] = useState<string | null>(null);
+
+  const selectedMemberId = selectedMember?.id ?? null;
+  const selectedMemberPhone = selectedMember?.phone_number?.trim() || null;
+  const hasSelectedMemberPhone = !!selectedMemberPhone;
+
   const fetchData = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -279,6 +406,31 @@ export default function TextMessagesPage() {
     }
   }, []);
 
+  const openDetail = useCallback(async (id: string) => {
+    setSelectedSmsId(id);
+    setSelectedDetail(null);
+    setDetailError(null);
+    setDetailLoading(true);
+
+    try {
+      const detail = await api.getPendingSmsDetail(id);
+      setSelectedDetail(detail);
+    } catch (err) {
+      setDetailError(err instanceof Error ? err.message : 'Failed to load SMS detail');
+      const fallback = messages.find((item) => item.id === id);
+      if (fallback) {
+        setSelectedDetail({
+          message: fallback,
+          brain_reasoning: null,
+          recent_communications: [],
+          member_url: `/users-list/${fallback.user_id}`,
+        });
+      }
+    } finally {
+      setDetailLoading(false);
+    }
+  }, [messages]);
+
   useEffect(() => {
     fetchData();
   }, [fetchData]);
@@ -302,6 +454,52 @@ export default function TextMessagesPage() {
       return { ...prev, message: { ...prev.message, ...latest } };
     });
   }, [messages, selectedSmsId]);
+
+  const refreshConvTrips = useCallback(async () => {
+    if (!selectedMemberId) {
+      setConvTrips([]);
+      setSelectedTripId('');
+      setTripError(null);
+      setTripLoading(false);
+      return;
+    }
+
+    setTripLoading(true);
+    setTripError(null);
+
+    try {
+      const trips = await api.listMemberConvTrips(selectedMemberId);
+      setConvTrips(trips);
+      setSelectedTripId((prev) => (trips.some((trip) => trip.id === prev) ? prev : (trips[0]?.id ?? '')));
+    } catch (err) {
+      setConvTrips([]);
+      setSelectedTripId('');
+      setTripError(err instanceof Error ? err.message : 'Failed to load conversational trips');
+    } finally {
+      setTripLoading(false);
+    }
+  }, [selectedMemberId]);
+
+  useEffect(() => {
+    setGuidance('');
+    setWakeError(null);
+    setWakeSuccess(null);
+    setWakeMessageId(null);
+    setSendError(null);
+    setSendSuccess(null);
+    setSendMessageId(null);
+    setSendStep('edit');
+
+    if (!selectedMemberId) {
+      setConvTrips([]);
+      setSelectedTripId('');
+      setTripLoading(false);
+      setTripError(null);
+      return;
+    }
+
+    refreshConvTrips();
+  }, [refreshConvTrips, selectedMemberId]);
 
   const loadedPendingCount = messages.filter((message) => message.approval_status === 'PENDING').length;
   const loadedApprovedCount = messages.filter((message) => message.approval_status === 'APPROVED').length;
@@ -340,6 +538,16 @@ export default function TextMessagesPage() {
     [inboundMessages, search],
   );
 
+  const selectedTrip = useMemo(
+    () => convTrips.find((trip) => trip.id === selectedTripId) ?? null,
+    [convTrips, selectedTripId],
+  );
+
+  const canWake = !!selectedMemberId && !!selectedTripId && hasSelectedMemberPhone && !tripLoading && !wakeLoading;
+  const canReviewSend =
+    !!selectedMemberId && !!selectedTripId && hasSelectedMemberPhone && !!sendBody.trim() && !sendLoading;
+  const canSendNow = sendStep === 'confirm' && canReviewSend;
+
   function handleSort(key: SortKey) {
     if (key === sortKey) {
       setSortDir((prev) => (prev === 'asc' ? 'desc' : 'asc'));
@@ -348,31 +556,6 @@ export default function TextMessagesPage() {
 
     setSortKey(key);
     setSortDir(key === 'created' ? 'desc' : 'asc');
-  }
-
-  async function openDetail(id: string) {
-    setSelectedSmsId(id);
-    setSelectedDetail(null);
-    setDetailError(null);
-    setDetailLoading(true);
-
-    try {
-      const detail = await api.getPendingSmsDetail(id);
-      setSelectedDetail(detail);
-    } catch (err) {
-      setDetailError(err instanceof Error ? err.message : 'Failed to load SMS detail');
-      const fallback = messages.find((item) => item.id === id);
-      if (fallback) {
-        setSelectedDetail({
-          message: fallback,
-          brain_reasoning: null,
-          recent_communications: [],
-          member_url: `/users-list/${fallback.user_id}`,
-        });
-      }
-    } finally {
-      setDetailLoading(false);
-    }
   }
 
   function closeDetail() {
@@ -396,16 +579,483 @@ export default function TextMessagesPage() {
     });
   }
 
+  async function handleMemberLookup(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const query = memberQuery.trim();
+    if (!query || memberLookupLoading) return;
+
+    setMemberLookupLoading(true);
+    setMemberLookupError(null);
+    setSelectedMember(null);
+
+    try {
+      let lookupMember: LookupMember | null = null;
+
+      if (UUID_RE.test(query)) {
+        lookupMember = toLookupMemberFromBasicInfo(await api.getUserBasicInfo(query));
+      } else {
+        const member = await api.searchMember(query);
+        lookupMember = member ? toLookupMember(member) : null;
+      }
+
+      if (!lookupMember) {
+        setMemberLookupError(`No user found for "${query}"`);
+        return;
+      }
+
+      setSelectedMember(lookupMember);
+      setMemberQuery('');
+    } catch (err) {
+      setMemberLookupError(err instanceof Error ? err.message : 'Lookup failed');
+    } finally {
+      setMemberLookupLoading(false);
+    }
+  }
+
+  async function handleWakeSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedMemberId || !selectedTripId || !hasSelectedMemberPhone || wakeLoading) return;
+
+    setWakeLoading(true);
+    setWakeError(null);
+    setWakeSuccess(null);
+    setWakeMessageId(null);
+
+    try {
+      const response = await api.draftMemberAxelSms(selectedMemberId, selectedTripId, {
+        guidance: guidance.trim() || undefined,
+        idempotency_key: createIdempotencyKey(),
+      });
+
+      if (response.status !== 'created' || !response.message_id) {
+        setWakeError(response.error || response.response || `Draft request returned status ${response.status}`);
+        return;
+      }
+
+      setWakeMessageId(response.message_id);
+      setWakeSuccess('Draft created and added to the outbound approval queue.');
+
+      setSection('outbound');
+      setTab('pending');
+      setSearch('');
+
+      await fetchData();
+
+      await openDetail(response.message_id);
+    } catch (err) {
+      setWakeError(err instanceof Error ? err.message : 'Failed to create Axel SMS draft');
+    } finally {
+      setWakeLoading(false);
+    }
+  }
+
+  function handleReviewSend(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!canReviewSend) return;
+
+    setSendError(null);
+    setSendSuccess(null);
+    setSendMessageId(null);
+    setSendStep('confirm');
+  }
+
+  async function handleSendSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedMemberId || !selectedTripId || !hasSelectedMemberPhone || !sendBody.trim() || sendLoading) return;
+
+    setSendLoading(true);
+    setSendError(null);
+    setSendSuccess(null);
+    setSendMessageId(null);
+
+    try {
+      const response = await api.sendMemberAxelSms(selectedMemberId, selectedTripId, {
+        body: sendBody.trim(),
+        idempotency_key: createIdempotencyKey(),
+      });
+
+      if (response.error || response.status.toUpperCase() === 'FAILED') {
+        setSendError(response.error || `SMS request returned status ${response.status}`);
+        return;
+      }
+
+      setSendMessageId(response.message_id ?? null);
+      setSendSuccess(
+        response.status === 'SENT'
+          ? 'SMS sent immediately as Axel and stored against the selected trip.'
+          : `SMS request completed with status ${response.status}.`,
+      );
+      setSendBody('');
+      setSendStep('edit');
+    } catch (err) {
+      setSendError(err instanceof Error ? err.message : 'Failed to send Axel SMS');
+    } finally {
+      setSendLoading(false);
+    }
+  }
+
   return (
-    <div>
-      <div className="mb-6">
+    <div className="space-y-6">
+      <div>
         <h1 className="text-2xl font-semibold">Text Messages</h1>
         <p className="text-sm text-muted-foreground mt-1">
-          Review outbound SMS drafts and monitor inbound member replies
+          Review outbound SMS drafts, monitor inbound member replies, wake Axel on a conversational trip, or send an immediate SMS as Axel.
         </p>
       </div>
 
-      <div className="flex flex-wrap items-center gap-4 text-xs text-muted-foreground mb-4">
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,360px)_minmax(0,1fr)_minmax(0,1fr)]">
+        <section className="rounded-lg border border-border bg-card p-4 space-y-3">
+          <div>
+            <h2 className="text-sm font-semibold">Select User</h2>
+            <p className="text-xs text-muted-foreground">
+              Search by email, phone, or user ID. The selected member is used for both SMS workflows below.
+            </p>
+          </div>
+
+          <form onSubmit={handleMemberLookup} className="space-y-2">
+            <input
+              type="text"
+              value={memberQuery}
+              onChange={(e) => setMemberQuery(e.target.value)}
+              placeholder="user@example.com, +15555555555, or user ID"
+              className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+            />
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="submit"
+                disabled={!memberQuery.trim() || memberLookupLoading}
+                className="inline-flex items-center justify-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+              >
+                {memberLookupLoading ? <Loader2 className="size-4 animate-spin" /> : null}
+                {memberLookupLoading ? 'Looking up...' : 'Find User'}
+              </button>
+              {selectedMember && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedMember(null);
+                    setMemberLookupError(null);
+                    setMemberQuery('');
+                  }}
+                  className="rounded-md border border-border bg-background px-4 py-2 text-sm font-medium text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+          </form>
+
+          {memberLookupError && (
+            <div className="rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
+              {memberLookupError}
+            </div>
+          )}
+
+          {selectedMember ? (
+            <div className="rounded-md border border-border bg-background/40 p-3 space-y-2">
+              <div className="flex items-center justify-between gap-3 flex-wrap">
+                <div className="flex items-center gap-2 text-sm font-medium">
+                  <User className="size-4 text-muted-foreground" />
+                  <span>{selectedMember.name || 'Unnamed user'}</span>
+                </div>
+                <Link href={`/users-list/${selectedMember.id}`} className="text-xs text-primary hover:underline">
+                  Open user profile
+                </Link>
+              </div>
+              <div className="grid grid-cols-1 gap-2 text-xs text-muted-foreground">
+                <div className="flex items-center gap-2">
+                  <Phone className="size-3.5" />
+                  <span>{selectedMemberPhone || 'No phone on file'}</span>
+                </div>
+                <div className="break-all">Email: {selectedMember.email || 'No email on file'}</div>
+                <div>User ID: <span className="font-mono break-all">{selectedMember.id}</span></div>
+                {selectedMember.created_at && <div>Joined: {formatDateTime(selectedMember.created_at)}</div>}
+              </div>
+              {!hasSelectedMemberPhone && (
+                <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
+                  This user has no phone number on file, so Axel SMS actions are disabled.
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="rounded-md border border-border bg-background/40 px-3 py-2 text-sm text-muted-foreground">
+              Select a user to draft or send an Axel text message.
+            </div>
+          )}
+        </section>
+
+        <section className="rounded-lg border border-border bg-card p-4 space-y-3">
+          <div>
+            <h2 className="text-sm font-semibold">Wake Axel to Text</h2>
+            <p className="text-xs text-muted-foreground">
+              Choose a conversational trip, optionally add guidance, and create a new outbound SMS draft for approval.
+            </p>
+          </div>
+
+          {!selectedMember ? (
+            <div className="rounded-md border border-border bg-background/40 px-3 py-2 text-sm text-muted-foreground">
+              Select a user first to load conversational trips.
+            </div>
+          ) : (
+            <form onSubmit={handleWakeSubmit} className="space-y-3">
+              <div className="flex items-center justify-between gap-3 flex-wrap">
+                <div className="text-xs text-muted-foreground">
+                  {tripLoading
+                    ? 'Loading conversational trips...'
+                    : `${convTrips.length} conversational trip${convTrips.length === 1 ? '' : 's'} loaded`}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => refreshConvTrips()}
+                  disabled={!selectedMemberId || tripLoading || wakeLoading}
+                  className="rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-foreground transition-colors disabled:opacity-50"
+                >
+                  {tripLoading ? 'Refreshing...' : 'Refresh trips'}
+                </button>
+              </div>
+
+              {tripError && (
+                <div className="rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
+                  {tripError}
+                </div>
+              )}
+
+              {!tripError && tripLoading && convTrips.length === 0 && (
+                <div className="rounded-md border border-border bg-background/40 px-3 py-2 text-sm text-muted-foreground">
+                  Loading conversational trips for the selected user...
+                </div>
+              )}
+
+              {!tripLoading && !tripError && convTrips.length === 0 && (
+                <div className="rounded-md border border-border bg-background/40 px-3 py-2 text-sm text-muted-foreground">
+                  No conversational trips are available for this user.
+                </div>
+              )}
+
+              {convTrips.length > 0 && (
+                <>
+                  <div className="space-y-1">
+                    <label className="block text-xs font-medium text-muted-foreground">Conversational trip</label>
+                    <select
+                      value={selectedTripId}
+                      onChange={(e) => {
+                        setSelectedTripId(e.target.value);
+                        setWakeError(null);
+                        setWakeSuccess(null);
+                        setWakeMessageId(null);
+                      }}
+                      className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                      disabled={tripLoading || wakeLoading}
+                    >
+                      {convTrips.map((trip) => (
+                        <option key={trip.id} value={trip.id}>
+                          {getTripOptionLabel(trip)}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {selectedTrip && (
+                    <div className="rounded-md border border-border bg-background/40 p-3">
+                      <div className="text-sm font-medium">{getTripTitle(selectedTrip)}</div>
+                      <div className="mt-1 text-xs text-muted-foreground">
+                        {getTripMeta(selectedTrip) || `Trip ID ${selectedTrip.id}`}
+                      </div>
+                      <div className="mt-2 text-[11px] font-mono text-muted-foreground break-all">
+                        Trip ID: {selectedTrip.id}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="space-y-1">
+                    <label className="block text-xs font-medium text-muted-foreground">Guidance (optional)</label>
+                    <textarea
+                      value={guidance}
+                      onChange={(e) => {
+                        setGuidance(e.target.value);
+                        setWakeError(null);
+                        setWakeSuccess(null);
+                        setWakeMessageId(null);
+                      }}
+                      rows={4}
+                      placeholder="Optional steer for Axel, such as what changed or what to focus on..."
+                      className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                      disabled={wakeLoading}
+                    />
+                  </div>
+                </>
+              )}
+
+              {!hasSelectedMemberPhone && (
+                <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
+                  The selected member needs a phone number on file before Axel can draft an SMS.
+                </div>
+              )}
+
+              {wakeError && (
+                <div className="rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
+                  {wakeError}
+                </div>
+              )}
+              {wakeSuccess && (
+                <div className="rounded-md border border-green-500/30 bg-green-500/10 px-3 py-2 text-sm text-green-400">
+                  {wakeSuccess}
+                </div>
+              )}
+              {wakeMessageId && (
+                <div className="rounded-md border border-border bg-background/40 px-3 py-2 text-xs text-muted-foreground">
+                  Draft message ID: <span className="font-mono break-all">{wakeMessageId}</span>
+                </div>
+              )}
+
+              <div className="flex items-center justify-between gap-3 flex-wrap">
+                <div className="text-xs text-muted-foreground">
+                  {selectedMemberPhone ? `Draft will target ${selectedMemberPhone}` : 'Selected user has no phone number on file'}
+                </div>
+                <button
+                  type="submit"
+                  disabled={!canWake}
+                  className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {wakeLoading ? <Loader2 className="size-4 animate-spin" /> : null}
+                  {wakeLoading ? 'Axel is drafting a text...' : 'Wake Axel to Text'}
+                </button>
+              </div>
+            </form>
+          )}
+        </section>
+
+        <section className="rounded-lg border border-border bg-card p-4 space-y-3">
+          <div>
+            <h2 className="text-sm font-semibold">Send as Axel</h2>
+            <p className="text-xs text-muted-foreground">
+              Compose an immediate SMS as Axel for the selected conversational trip. The confirmation step stays on-page so the operator can
+              review before sending.
+            </p>
+          </div>
+
+          {!selectedMember ? (
+            <div className="rounded-md border border-border bg-background/40 px-3 py-2 text-sm text-muted-foreground">
+              Select a user first to compose an Axel SMS.
+            </div>
+          ) : (
+            <form onSubmit={sendStep === 'confirm' ? handleSendSubmit : handleReviewSend} className="space-y-3">
+              {!selectedTrip && (
+                <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
+                  Select a conversational trip above before sending an SMS as Axel.
+                </div>
+              )}
+
+              {selectedTrip && (
+                <div className="rounded-md border border-border bg-background/40 p-3 space-y-1">
+                  <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Trip Context</div>
+                  <div className="text-sm font-medium text-foreground">{getTripTitle(selectedTrip)}</div>
+                  <div className="text-xs text-muted-foreground">
+                    {getTripMeta(selectedTrip) || `Trip ID ${selectedTrip.id}`}
+                  </div>
+                </div>
+              )}
+
+              {sendStep === 'confirm' ? (
+                <div className="rounded-md border border-border bg-background/40 p-3 space-y-2">
+                  <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Confirmation</div>
+                  <div className="text-sm text-foreground">
+                    Are you sure you want to send this text immediately as Axel?
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    Sending to {selectedMember.name || selectedMemberPhone || 'selected user'}
+                    {selectedMemberPhone ? ` · ${selectedMemberPhone}` : ''}
+                  </div>
+                  {selectedTrip && (
+                    <div className="text-xs text-muted-foreground">
+                      Trip: {getTripTitle(selectedTrip)}
+                    </div>
+                  )}
+                  <div className="rounded-md border border-border bg-background p-3 text-sm whitespace-pre-wrap break-words">
+                    {sendBody.trim()}
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-1">
+                  <label className="block text-xs font-medium text-muted-foreground">SMS body</label>
+                  <textarea
+                    value={sendBody}
+                    onChange={(e) => {
+                      setSendBody(e.target.value);
+                      setSendError(null);
+                      setSendSuccess(null);
+                      setSendMessageId(null);
+                    }}
+                    rows={8}
+                    placeholder="Write the text message the user should receive from Axel..."
+                    className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                    disabled={sendLoading}
+                  />
+                  <div className="text-xs text-muted-foreground">
+                    {sendBody.trim().length} characters
+                  </div>
+                </div>
+              )}
+
+              {!hasSelectedMemberPhone && (
+                <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
+                  The selected member needs a phone number on file before Axel can send an SMS.
+                </div>
+              )}
+
+              {sendError && (
+                <div className="rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
+                  {sendError}
+                </div>
+              )}
+              {sendSuccess && (
+                <div className="rounded-md border border-green-500/30 bg-green-500/10 px-3 py-2 text-sm text-green-400">
+                  {sendSuccess}
+                </div>
+              )}
+              {sendMessageId && (
+                <div className="rounded-md border border-border bg-background/40 px-3 py-2 text-xs text-muted-foreground">
+                  Message ID: <span className="font-mono break-all">{sendMessageId}</span>
+                </div>
+              )}
+
+              <div className="flex items-center justify-between gap-3 flex-wrap">
+                <div className="text-xs text-muted-foreground">
+                  {sendStep === 'confirm'
+                    ? 'This sends immediately as Axel and will appear in Trip SMS History.'
+                    : !selectedTrip
+                      ? 'Select a conversational trip before sending.'
+                      : selectedMemberPhone
+                      ? `Will send to ${selectedMemberPhone}`
+                      : 'Selected user has no phone number on file'}
+                </div>
+                <div className="flex items-center gap-2">
+                  {sendStep === 'confirm' && (
+                    <button
+                      type="button"
+                      onClick={() => setSendStep('edit')}
+                      disabled={sendLoading}
+                      className="rounded-md border border-border bg-background px-4 py-2 text-sm font-medium text-muted-foreground hover:bg-accent hover:text-foreground transition-colors disabled:opacity-50"
+                    >
+                      Back
+                    </button>
+                  )}
+                  <button
+                    type="submit"
+                    disabled={sendStep === 'confirm' ? !canSendNow : !canReviewSend}
+                    className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {sendLoading ? <Loader2 className="size-4 animate-spin" /> : sendStep === 'confirm' ? <Send className="size-4" /> : null}
+                    {sendLoading ? 'Sending...' : sendStep === 'confirm' ? 'Send as Axel' : 'Review SMS'}
+                  </button>
+                </div>
+              </div>
+            </form>
+          )}
+        </section>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-4 text-xs text-muted-foreground">
         <span>
           <span className="font-medium text-yellow-400">{pendingCount}</span> pending
           <span className="mx-1">·</span>
@@ -418,7 +1068,7 @@ export default function TextMessagesPage() {
         </span>
       </div>
 
-      <div className="flex flex-col lg:flex-row lg:items-center gap-3 mb-4">
+      <div className="flex flex-col lg:flex-row lg:items-center gap-3">
         <div className="flex gap-1 bg-accent/30 rounded-lg p-1">
           <button
             onClick={() => {
@@ -534,13 +1184,13 @@ export default function TextMessagesPage() {
       </div>
 
       {section === 'outbound' && hasTruncatedOutbound && (
-        <p className="text-xs text-muted-foreground mb-4">
+        <p className="text-xs text-muted-foreground">
           Loaded up to {STATUS_PAGE_LIMIT} outbound SMS drafts per status from the latest queue.
         </p>
       )}
 
       {section === 'inbound' && hasTruncatedInbound && (
-        <p className="text-xs text-muted-foreground mb-4">
+        <p className="text-xs text-muted-foreground">
           Loaded up to {INBOUND_PAGE_LIMIT} inbound SMS replies from the latest activity.
         </p>
       )}
@@ -624,7 +1274,7 @@ export default function TextMessagesPage() {
       </div>
 
       {!loading && section === 'outbound' && outboundSorted.length > 0 && (
-        <div className="flex items-center justify-between mt-3 text-xs text-muted-foreground">
+        <div className="flex items-center justify-between text-xs text-muted-foreground">
           <span>
             Showing {outboundSorted.length}
             {search ? ` of ${tabFiltered.length}` : ''} outbound messages
@@ -633,7 +1283,7 @@ export default function TextMessagesPage() {
       )}
 
       {!loading && section === 'inbound' && inboundFiltered.length > 0 && (
-        <div className="flex items-center justify-between mt-3 text-xs text-muted-foreground">
+        <div className="flex items-center justify-between text-xs text-muted-foreground">
           <span>
             Showing {inboundFiltered.length}
             {search ? ` of ${inboundMessages.length}` : ''} inbound messages
