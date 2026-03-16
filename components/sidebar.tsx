@@ -25,6 +25,7 @@ const navItems = [
   { href: '/metrics', icon: BarChart3, label: 'Metrics' },
   { href: '/booking-issues', icon: Wrench, label: 'Booking Issues' },
   { href: '/pending-emails', icon: Mail, label: 'Pending Emails' },
+  { href: '/send-email-convo', icon: Mail, label: 'Send Email Convo' },
   { href: '/text-messages', icon: MessageSquare, label: 'Text Messages' },
   { href: '/wake', icon: Bell, label: 'Wake Center' },
   { href: '/escalations', icon: AlertTriangle, label: 'Escalations' },

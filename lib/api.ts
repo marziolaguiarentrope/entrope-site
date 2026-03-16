@@ -1442,6 +1442,21 @@ export interface WakePendingSmsDraft {
   status?: string | null;
 }
 
+export interface WakeSendEmailResult {
+  drafted?: boolean;
+  message_id?: string | null;
+  status?: string | null;
+  reason?: string | null;
+  error?: string | null;
+}
+
+export interface WakePendingEmailDraft {
+  message_id?: string | null;
+  trip_id?: string | null;
+  status?: string | null;
+  subject?: string | null;
+}
+
 export interface WakeResponse {
   mode?: string;
   response: string;
@@ -1450,6 +1465,9 @@ export interface WakeResponse {
   send_text_called?: boolean;
   send_text_result?: WakeSendTextResult | null;
   pending_sms_draft?: WakePendingSmsDraft | null;
+  send_email_called?: boolean;
+  send_email_result?: WakeSendEmailResult | null;
+  pending_email_draft?: WakePendingEmailDraft | null;
   dry_run?: boolean;
   intercepted_tools?: WakeInterceptedTool[];
 }
