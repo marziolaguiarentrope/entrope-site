@@ -1365,6 +1365,11 @@ class ApiClient {
     return this.fetch<HotelBookingListResponse>(`/hotel-bookings${query ? `?${query}` : ''}`);
   }
 
+  // Conv trips
+  async listConvTrips(userId: string): Promise<ConvTripSummary[]> {
+    return this.fetch<ConvTripSummary[]>(`/conv/trips/${userId}`);
+  }
+
   // Wake cycle
   async wakeUser(userId: string, opts?: { feedback?: string; dryRun?: boolean }): Promise<WakeResponse> {
     const body: Record<string, unknown> = {};
@@ -1385,6 +1390,18 @@ class ApiClient {
       body: JSON.stringify(body),
     });
   }
+}
+
+export interface ConvTripSummary {
+  id: string;
+  name: string | null;
+  headline: string | null;
+  notify: boolean;
+  archived: boolean;
+  understanding?: string | null;
+  needs_input?: boolean | null;
+  booking_activity?: Array<{ event: string; summary?: string; type?: string; at?: string }> | null;
+  conversation?: Array<{ from: string; text: string; at: string }> | null;
 }
 
 export interface WakeTripSummary {

@@ -1,14 +1,46 @@
 'use client';
 
 import { useState } from 'react';
-import { api, WakeResponse, WakeTripSummary, WakeInterceptedTool } from '@/lib/api';
+import { api, ConvTripSummary, WakeResponse, WakeInterceptedTool } from '@/lib/api';
 import { cn } from '@/lib/utils';
 
+function timeAgo(dateString: string): string {
+  const now = new Date();
+  const date = new Date(dateString);
+  const seconds = Math.floor((now.getTime() - date.getTime()) / 1000);
+  if (seconds < 60) return 'just now';
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days}d ago`;
+  return date.toLocaleDateString();
+}
+
+function lastUserMessage(trip: ConvTripSummary): string | null {
+  const convo = trip.conversation;
+  if (!convo?.length) return null;
+  for (let i = convo.length - 1; i >= 0; i--) {
+    if (convo[i].from === 'user') return convo[i].at;
+  }
+  return null;
+}
+
+function funnelDepth(trip: ConvTripSummary): string {
+  const activity = trip.booking_activity;
+  if (!activity?.length) return 'browsing';
+  const events = activity.map((a) => a.event);
+  if (events.includes('booking_completed')) return 'booked';
+  if (events.includes('booking_ready')) return 'at payment';
+  if (events.includes('booking_started')) return 'started booking';
+  return 'browsing';
+}
+
 interface WakeResult {
-  tripId: string | null;
+  tripId: string;
   tripName: string | null;
   response: string;
-  trips: WakeTripSummary[];
   interceptedTools: WakeInterceptedTool[];
   dryRun: boolean;
   timestamp: string;
@@ -20,76 +52,64 @@ export default function WakePage() {
   const [userId, setUserId] = useState('');
   const [feedback, setFeedback] = useState('');
   const [dryRun, setDryRun] = useState(true);
-  const [loading, setLoading] = useState<string | null>(null);
+  const [loadingTrips, setLoadingTrips] = useState(false);
+  const [waking, setWaking] = useState<string | null>(null);
+  const [trips, setTrips] = useState<ConvTripSummary[]>([]);
   const [results, setResults] = useState<WakeResult[]>([]);
-  const [trips, setTrips] = useState<WakeTripSummary[]>([]);
   const [error, setError] = useState<string | null>(null);
 
-  function makeResult(
-    res: WakeResponse,
-    tripId: string | null,
-    tripName: string | null,
-    elapsed: number,
-  ): WakeResult {
-    return {
-      tripId,
-      tripName,
-      response: res.response,
-      trips: res.trips ?? [],
-      interceptedTools: res.intercepted_tools ?? [],
-      dryRun: res.dry_run ?? false,
-      timestamp: new Date().toISOString(),
-      durationMs: elapsed,
-    };
-  }
-
-  async function handleWakeAll(e: React.FormEvent) {
+  async function handleLoadTrips(e: React.FormEvent) {
     e.preventDefault();
     const uid = userId.trim();
     if (!uid) return;
 
-    setLoading('all');
+    setLoadingTrips(true);
     setError(null);
-    const t0 = Date.now();
+    setTrips([]);
+    setResults([]);
 
     try {
-      const res = await api.wakeUser(uid, {
-        feedback: feedback.trim() || undefined,
-        dryRun,
-      });
-      const elapsed = Date.now() - t0;
-
-      if (res.trips?.length) setTrips(res.trips);
-      setResults((prev) => [makeResult(res, null, null, elapsed), ...prev]);
+      const res = await api.listConvTrips(uid);
+      setTrips(res.filter((t) => !t.archived));
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Wake failed');
+      setError(err instanceof Error ? err.message : 'Failed to load trips');
     } finally {
-      setLoading(null);
+      setLoadingTrips(false);
     }
   }
 
-  async function handleWakeTrip(tripId: string, tripName: string | null) {
+  async function handleWakeTrip(trip: ConvTripSummary) {
     const uid = userId.trim();
     if (!uid) return;
 
-    setLoading(tripId);
+    setWaking(trip.id);
     setError(null);
     const t0 = Date.now();
 
     try {
-      const res = await api.wakeTrip(uid, tripId, {
+      const res = await api.wakeTrip(uid, trip.id, {
         feedback: feedback.trim() || undefined,
         dryRun,
       });
       const elapsed = Date.now() - t0;
-      setResults((prev) => [makeResult(res, tripId, tripName, elapsed), ...prev]);
+      setResults((prev) => [
+        {
+          tripId: trip.id,
+          tripName: trip.name,
+          response: res.response,
+          interceptedTools: res.intercepted_tools ?? [],
+          dryRun: res.dry_run ?? false,
+          timestamp: new Date().toISOString(),
+          durationMs: elapsed,
+        },
+        ...prev,
+      ]);
     } catch (err) {
       setResults((prev) => [
         {
-          tripId,
-          tripName,
+          tripId: trip.id,
+          tripName: trip.name,
           response: '',
-          trips: [],
           interceptedTools: [],
           dryRun,
           timestamp: new Date().toISOString(),
@@ -99,7 +119,7 @@ export default function WakePage() {
         ...prev,
       ]);
     } finally {
-      setLoading(null);
+      setWaking(null);
     }
   }
 
@@ -108,12 +128,12 @@ export default function WakePage() {
       <div className="mb-6">
         <h1 className="text-2xl font-semibold">Wake Center</h1>
         <p className="text-sm text-muted-foreground mt-1">
-          Wake Axel on a user&apos;s trips — brain reviews context, checks prices, decides what to do
+          Load a user&apos;s trips, pick one to wake, see what Axel would do
         </p>
       </div>
 
-      {/* Controls */}
-      <form onSubmit={handleWakeAll} className="mb-6 space-y-3">
+      {/* User ID */}
+      <form onSubmit={handleLoadTrips} className="mb-6 space-y-3">
         <div className="flex gap-2">
           <input
             type="text"
@@ -124,10 +144,10 @@ export default function WakePage() {
           />
           <button
             type="submit"
-            disabled={!userId.trim() || loading !== null}
+            disabled={!userId.trim() || loadingTrips}
             className="px-4 py-2 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-50 transition-colors"
           >
-            {loading === 'all' ? 'Waking...' : 'Wake All Trips'}
+            {loadingTrips ? 'Loading...' : 'Load Trips'}
           </button>
         </div>
         <div className="flex gap-3 items-center">
@@ -145,10 +165,7 @@ export default function WakePage() {
               onChange={(e) => setDryRun(e.target.checked)}
               className="rounded border-border"
             />
-            <span className={cn(
-              'font-medium',
-              dryRun ? 'text-yellow-400' : 'text-green-400'
-            )}>
+            <span className={cn('font-medium', dryRun ? 'text-yellow-400' : 'text-green-400')}>
               {dryRun ? 'Dry Run' : 'Live'}
             </span>
           </label>
@@ -166,49 +183,74 @@ export default function WakePage() {
         </div>
       )}
 
-      {/* Trips */}
+      {/* Trip List */}
       {trips.length > 0 && (
         <div className="mb-6">
           <h2 className="text-sm font-medium text-muted-foreground mb-2">
             Trips ({trips.length})
           </h2>
           <div className="bg-card border border-border rounded-lg divide-y divide-border">
-            {trips.map((trip) => (
-              <div key={trip.trip_id} className="flex items-center justify-between px-4 py-3">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium truncate">
-                      {trip.name || '(unnamed)'}
-                    </span>
-                    {trip.notify && (
-                      <span className="px-1.5 py-0.5 text-[10px] font-semibold rounded bg-yellow-500/20 text-yellow-400">
-                        notify
+            {trips.map((trip) => {
+              const lastMsg = lastUserMessage(trip);
+              const depth = funnelDepth(trip);
+              const msgCount = trip.conversation?.length ?? 0;
+
+              return (
+                <div key={trip.id} className="flex items-center justify-between px-4 py-3">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium truncate">
+                        {trip.name || '(unnamed)'}
                       </span>
+                      <span className={cn(
+                        'px-1.5 py-0.5 text-[10px] font-semibold rounded',
+                        depth === 'at payment' ? 'bg-orange-500/20 text-orange-400' :
+                        depth === 'started booking' ? 'bg-yellow-500/20 text-yellow-400' :
+                        depth === 'booked' ? 'bg-green-500/20 text-green-400' :
+                        'bg-zinc-500/20 text-zinc-400'
+                      )}>
+                        {depth}
+                      </span>
+                      {trip.notify && (
+                        <span className="px-1.5 py-0.5 text-[10px] font-semibold rounded bg-blue-500/20 text-blue-400">
+                          notify
+                        </span>
+                      )}
+                    </div>
+                    {trip.headline && (
+                      <p className="text-xs text-muted-foreground truncate mt-0.5">
+                        {trip.headline}
+                      </p>
                     )}
+                    <div className="flex gap-3 mt-0.5">
+                      <span className="text-[10px] text-muted-foreground/60">
+                        {msgCount} msgs
+                      </span>
+                      {lastMsg && (
+                        <span className="text-[10px] text-muted-foreground/60">
+                          last active {timeAgo(lastMsg)}
+                        </span>
+                      )}
+                      <span className="text-[10px] text-muted-foreground/40 font-mono">
+                        {trip.id}
+                      </span>
+                    </div>
                   </div>
-                  {trip.headline && (
-                    <p className="text-xs text-muted-foreground truncate mt-0.5">
-                      {trip.headline}
-                    </p>
-                  )}
-                  <p className="text-[10px] text-muted-foreground/60 font-mono mt-0.5">
-                    {trip.trip_id}
-                  </p>
+                  <button
+                    onClick={() => handleWakeTrip(trip)}
+                    disabled={waking !== null}
+                    className={cn(
+                      'ml-4 px-3 py-1.5 text-xs font-medium rounded-md transition-colors',
+                      waking === trip.id
+                        ? 'bg-yellow-500/20 text-yellow-400'
+                        : 'bg-accent text-accent-foreground hover:bg-accent/80 disabled:opacity-50'
+                    )}
+                  >
+                    {waking === trip.id ? 'Waking...' : 'Wake'}
+                  </button>
                 </div>
-                <button
-                  onClick={() => handleWakeTrip(trip.trip_id, trip.name)}
-                  disabled={loading !== null}
-                  className={cn(
-                    'ml-4 px-3 py-1.5 text-xs font-medium rounded-md transition-colors',
-                    loading === trip.trip_id
-                      ? 'bg-yellow-500/20 text-yellow-400'
-                      : 'bg-accent text-accent-foreground hover:bg-accent/80 disabled:opacity-50'
-                  )}
-                >
-                  {loading === trip.trip_id ? 'Waking...' : 'Wake'}
-                </button>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}
@@ -240,11 +282,10 @@ export default function WakePage() {
                     : 'border-border'
                 )}
               >
-                {/* Header */}
                 <div className="flex items-center justify-between mb-2">
                   <div className="flex items-center gap-2">
                     <span className="text-sm font-medium">
-                      {result.tripName || (result.tripId ? result.tripId.slice(0, 8) : 'All Trips')}
+                      {result.tripName || result.tripId.slice(0, 8)}
                     </span>
                     {result.dryRun && (
                       <span className="px-1.5 py-0.5 text-[10px] font-semibold rounded bg-yellow-500/20 text-yellow-400">
@@ -260,17 +301,14 @@ export default function WakePage() {
                   </span>
                 </div>
 
-                {/* Error */}
                 {result.error ? (
                   <div className="text-sm text-red-400">{result.error}</div>
                 ) : (
                   <>
-                    {/* Brain response */}
                     <pre className="text-sm text-foreground/90 whitespace-pre-wrap font-sans leading-relaxed mb-3">
                       {result.response}
                     </pre>
 
-                    {/* Intercepted tools */}
                     {result.interceptedTools.length > 0 && (
                       <div className="border-t border-border pt-3 mt-3">
                         <p className="text-xs font-medium text-muted-foreground mb-2">
