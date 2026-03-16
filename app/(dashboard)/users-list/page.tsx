@@ -93,6 +93,14 @@ const MEMBERSHIP_TABS: { value: MembershipFilter; label: string }[] = [
   { value: 'non-member', label: 'No Membership' },
 ];
 
+type SmsFilter = 'all' | 'opted-in' | 'not-opted-in';
+
+const SMS_TABS: { value: SmsFilter; label: string }[] = [
+  { value: 'all', label: 'All' },
+  { value: 'opted-in', label: 'SMS Opted In' },
+  { value: 'not-opted-in', label: 'SMS Not Opted In' },
+];
+
 const PAGE_SIZES = [25, 50, 100];
 
 function MembershipBadge({ status, plan }: { status: string | null; plan: string | null }) {
@@ -193,6 +201,7 @@ export default function UsersListPage() {
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
   const [membershipFilter, setMembershipFilter] = useState<MembershipFilter>('all');
+  const [smsFilter, setSmsFilter] = useState<SmsFilter>('all');
   const debounceTimer = useRef<NodeJS.Timeout | null>(null);
 
   // Progressive scan cache for client-side filtering
@@ -230,7 +239,7 @@ export default function UsersListPage() {
   }, [search]);
 
   // Apply membership/status filters to an array of users
-  function applyClientFilters(members: UserListItem[], status: string | null, membership: MembershipFilter): UserListItem[] {
+  function applyClientFilters(members: UserListItem[], status: string | null, membership: MembershipFilter, sms: SmsFilter = 'all'): UserListItem[] {
     let filtered = members;
     if (status) {
       filtered = filtered.filter(m => m.status === status);
@@ -246,6 +255,11 @@ export default function UsersListPage() {
         m.membership_plan.toLowerCase().includes('free')
       );
     }
+    if (sms === 'opted-in') {
+      filtered = filtered.filter(m => m.sms_opted_in === true);
+    } else if (sms === 'not-opted-in') {
+      filtered = filtered.filter(m => m.sms_opted_in !== true);
+    }
     return filtered;
   }
 
@@ -259,7 +273,7 @@ export default function UsersListPage() {
   // are active OR when a non-default sort is applied (need full dataset to
   // sort correctly across all pages). Cached per filter combo.
   const fetchUsers = useCallback(async () => {
-    const hasClientFilter = statusFilter != null || membershipFilter !== 'all';
+    const hasClientFilter = statusFilter != null || membershipFilter !== 'all' || smsFilter !== 'all';
     const isDefaultSort = sortKey === 'created_at' && sortDir === 'desc';
     const needsFullScan = !isDefaultSort;
 
@@ -291,7 +305,7 @@ export default function UsersListPage() {
     }
 
     // Need progressive scan — either for client filters, non-default sort, or both
-    const cacheKey = `${debouncedSearch}|${statusFilter}|${membershipFilter}`;
+    const cacheKey = `${debouncedSearch}|${statusFilter}|${membershipFilter}|${smsFilter}`;
     const targetEnd = (page + 1) * pageSize;
 
     // Check if cache can satisfy this request without fetching
@@ -340,7 +354,7 @@ export default function UsersListPage() {
         if (fetchVersionRef.current !== version) return;
         serverTotal = first.total_count;
         const matches = hasClientFilter
-          ? applyClientFilters(first.members, statusFilter, membershipFilter)
+          ? applyClientFilters(first.members, statusFilter, membershipFilter, smsFilter)
           : first.members;
         items.push(...matches);
         offset = batchSize;
@@ -362,7 +376,7 @@ export default function UsersListPage() {
 
         for (const r of results) {
           const matches = hasClientFilter
-            ? applyClientFilters(r.members, statusFilter, membershipFilter)
+            ? applyClientFilters(r.members, statusFilter, membershipFilter, smsFilter)
             : r.members;
           items.push(...matches);
         }
@@ -400,7 +414,7 @@ export default function UsersListPage() {
         setFetchProgress(null);
       }
     }
-  }, [page, pageSize, debouncedSearch, statusFilter, membershipFilter, sortKey, sortDir]);
+  }, [page, pageSize, debouncedSearch, statusFilter, membershipFilter, smsFilter, sortKey, sortDir]);
 
   useEffect(() => {
     fetchUsers();
@@ -417,6 +431,11 @@ export default function UsersListPage() {
     setPage(0);
   }
 
+  function handleSmsChange(filter: SmsFilter) {
+    setSmsFilter(filter);
+    setPage(0);
+  }
+
   function handlePageSizeChange(size: number) {
     setPageSize(size);
     setPage(0);
@@ -425,7 +444,7 @@ export default function UsersListPage() {
   // Collapse expanded row when context changes
   useEffect(() => {
     setExpandedUserId(null);
-  }, [page, pageSize, statusFilter, membershipFilter, debouncedSearch, sortKey, sortDir]);
+  }, [page, pageSize, statusFilter, membershipFilter, smsFilter, debouncedSearch, sortKey, sortDir]);
 
   // Export visible or cached data
   function handleExport(format: 'csv' | 'json') {
@@ -600,6 +619,23 @@ export default function UsersListPage() {
             ))}
           </div>
 
+          <div className="flex gap-1">
+            {SMS_TABS.map((tab) => (
+              <button
+                key={tab.value}
+                onClick={() => handleSmsChange(tab.value)}
+                className={cn(
+                  'px-3 py-2 text-xs font-medium rounded-lg transition-colors',
+                  smsFilter === tab.value
+                    ? 'bg-primary text-primary-foreground'
+                    : 'bg-accent/50 text-muted-foreground hover:bg-accent'
+                )}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+
           <select
             value={timezone}
             onChange={(e) => setTimezone(e.target.value as Timezone)}
@@ -653,7 +689,7 @@ export default function UsersListPage() {
           </div>
         ) : users.length === 0 ? (
           <div className="p-8 text-center text-muted-foreground">
-            {debouncedSearch || statusFilter || membershipFilter !== 'all'
+            {debouncedSearch || statusFilter || membershipFilter !== 'all' || smsFilter !== 'all'
               ? 'No users match the current filters'
               : 'No users found'}
           </div>
@@ -860,7 +896,7 @@ export default function UsersListPage() {
             <span className="text-sm text-muted-foreground">
               Page {page + 1}
               {totalCount > 0 ? ` of ${!scanComplete ? '~' : ''}${Math.ceil(totalCount / pageSize)}` : ''}
-              {totalCount > 0 ? ` · ${!scanComplete ? '~' : ''}${totalCount.toLocaleString()} ${(statusFilter || membershipFilter !== 'all') ? 'matching' : 'total'}` : ''}
+              {totalCount > 0 ? ` · ${!scanComplete ? '~' : ''}${totalCount.toLocaleString()} ${(statusFilter || membershipFilter !== 'all' || smsFilter !== 'all') ? 'matching' : 'total'}` : ''}
             </span>
             <button
               onClick={() => setPage((p) => Math.max(0, p - 1))}

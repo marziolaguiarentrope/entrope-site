@@ -3031,6 +3031,17 @@ export function MemberDetail({
                 <span>{member.phone_number || 'None'}</span>
               </div>
               <div className="flex justify-between">
+                <span className="text-muted-foreground">SMS Opt-In</span>
+                <span className={cn(
+                  'px-2 py-0.5 text-xs rounded font-medium',
+                  context?.user?.channels?.includes('SMS')
+                    ? 'bg-green-500/20 text-green-400'
+                    : 'bg-zinc-500/20 text-zinc-400'
+                )}>
+                  {context?.user?.channels?.includes('SMS') ? 'Opted In' : 'Not Opted In'}
+                </span>
+              </div>
+              <div className="flex justify-between">
                 <span className="text-muted-foreground">Status</span>
                 <span className={cn(member.status === 'active' ? 'text-green-400' : '')}>{member.status}</span>
               </div>

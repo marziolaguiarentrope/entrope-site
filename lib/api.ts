@@ -1596,6 +1596,7 @@ export interface UserListItem {
   hotel_count?: number;
   flight_count?: number;
   email_count?: number;
+  sms_opted_in?: boolean;
 }
 
 export interface UserListResponse {
