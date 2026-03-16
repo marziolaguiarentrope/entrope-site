@@ -1296,6 +1296,47 @@ class ApiClient {
     const query = searchParams.toString();
     return this.fetch<HotelBookingListResponse>(`/hotel-bookings${query ? `?${query}` : ''}`);
   }
+
+  // Wake cycle
+  async wakeUser(userId: string, opts?: { feedback?: string; dryRun?: boolean }): Promise<WakeResponse> {
+    const body: Record<string, unknown> = {};
+    if (opts?.feedback) body.feedback = opts.feedback;
+    if (opts?.dryRun) body.dry_run = true;
+    return this.fetch<WakeResponse>(`/conv/wake/${userId}`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  }
+
+  async wakeTrip(userId: string, tripId: string, opts?: { feedback?: string; dryRun?: boolean }): Promise<WakeResponse> {
+    const body: Record<string, unknown> = {};
+    if (opts?.feedback) body.feedback = opts.feedback;
+    if (opts?.dryRun) body.dry_run = true;
+    return this.fetch<WakeResponse>(`/conv/wake/${userId}/${tripId}`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  }
+}
+
+export interface WakeTripSummary {
+  trip_id: string;
+  name: string | null;
+  headline: string | null;
+  notify: boolean;
+}
+
+export interface WakeInterceptedTool {
+  dry_run: true;
+  would_call: string;
+  args: Record<string, unknown>;
+}
+
+export interface WakeResponse {
+  response: string;
+  trips?: WakeTripSummary[];
+  dry_run?: boolean;
+  intercepted_tools?: WakeInterceptedTool[];
 }
 
 export interface HotelOpportunity {
