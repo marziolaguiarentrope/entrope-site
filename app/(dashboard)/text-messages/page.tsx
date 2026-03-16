@@ -12,6 +12,7 @@ import {
   PendingSmsApprovalStatus,
   PendingSmsDetail as PendingSmsDetailData,
   UserBasicInfo,
+  WakeResponse,
 } from '@/lib/api';
 import { PendingSmsDetail } from '@/components/pending-sms-detail';
 import { cn } from '@/lib/utils';
@@ -70,6 +71,12 @@ function formatDate(dateString: string | null | undefined): string | null {
 function formatStatusLabel(status: string | null | undefined): string {
   if (!status) return 'unknown';
   return status.replace(/_/g, ' ').toLowerCase();
+}
+
+function formatWakeModeLabel(mode: string | null | undefined): string {
+  if (mode === 'wake_to_text') return 'Forced SMS draft';
+  if (mode === 'wake') return 'Normal wake';
+  return mode || 'Unknown';
 }
 
 function formatTripDateRange(startDate: string | null | undefined, endDate: string | null | undefined): string | null {
@@ -353,10 +360,12 @@ export default function TextMessagesPage() {
   const [tripError, setTripError] = useState<string | null>(null);
 
   const [guidance, setGuidance] = useState('');
+  const [forceWakeToText, setForceWakeToText] = useState(false);
   const [wakeLoading, setWakeLoading] = useState(false);
   const [wakeError, setWakeError] = useState<string | null>(null);
   const [wakeSuccess, setWakeSuccess] = useState<string | null>(null);
   const [wakeMessageId, setWakeMessageId] = useState<string | null>(null);
+  const [wakeResult, setWakeResult] = useState<WakeResponse | null>(null);
 
   const [sendBody, setSendBody] = useState('');
   const [sendStep, setSendStep] = useState<'edit' | 'confirm'>('edit');
@@ -482,9 +491,11 @@ export default function TextMessagesPage() {
 
   useEffect(() => {
     setGuidance('');
+    setForceWakeToText(false);
     setWakeError(null);
     setWakeSuccess(null);
     setWakeMessageId(null);
+    setWakeResult(null);
     setSendError(null);
     setSendSuccess(null);
     setSendMessageId(null);
@@ -543,7 +554,7 @@ export default function TextMessagesPage() {
     [convTrips, selectedTripId],
   );
 
-  const canWake = !!selectedMemberId && !!selectedTripId && hasSelectedMemberPhone && !tripLoading && !wakeLoading;
+  const canWake = !!selectedMemberId && !!selectedTripId && !tripLoading && !wakeLoading;
   const canReviewSend =
     !!selectedMemberId && !!selectedTripId && hasSelectedMemberPhone && !!sendBody.trim() && !sendLoading;
   const canSendNow = sendStep === 'confirm' && canReviewSend;
@@ -614,36 +625,44 @@ export default function TextMessagesPage() {
 
   async function handleWakeSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!selectedMemberId || !selectedTripId || !hasSelectedMemberPhone || wakeLoading) return;
+    if (!selectedMemberId || !selectedTripId || wakeLoading) return;
 
     setWakeLoading(true);
     setWakeError(null);
     setWakeSuccess(null);
     setWakeMessageId(null);
+    setWakeResult(null);
 
     try {
-      const response = await api.draftMemberAxelSms(selectedMemberId, selectedTripId, {
-        guidance: guidance.trim() || undefined,
-        idempotency_key: createIdempotencyKey(),
+      const response = await api.wakeTrip(selectedMemberId, selectedTripId, {
+        feedback: guidance.trim() || undefined,
+        forceText: forceWakeToText,
+        idempotencyKey: createIdempotencyKey(),
       });
+      const draftMessageId = response.pending_sms_draft?.message_id ?? response.send_text_result?.message_id ?? null;
 
-      if (response.status !== 'created' || !response.message_id) {
-        setWakeError(response.error || response.response || `Draft request returned status ${response.status}`);
-        return;
+      setWakeResult(response);
+      setWakeMessageId(draftMessageId);
+
+      if (draftMessageId) {
+        setWakeSuccess('Wake completed and created an SMS draft in the outbound approval queue.');
+
+        setSection('outbound');
+        setTab('pending');
+        setSearch('');
+
+        await fetchData();
+        await openDetail(draftMessageId);
+      } else {
+        const reason = response.send_text_result?.reason ? ` (${formatStatusLabel(response.send_text_result.reason)})` : '';
+        setWakeSuccess(
+          forceWakeToText
+            ? `Wake completed without creating an SMS draft${reason}.`
+            : 'Wake completed without creating an SMS draft.',
+        );
       }
-
-      setWakeMessageId(response.message_id);
-      setWakeSuccess('Draft created and added to the outbound approval queue.');
-
-      setSection('outbound');
-      setTab('pending');
-      setSearch('');
-
-      await fetchData();
-
-      await openDetail(response.message_id);
     } catch (err) {
-      setWakeError(err instanceof Error ? err.message : 'Failed to create Axel SMS draft');
+      setWakeError(err instanceof Error ? err.message : 'Failed to wake Axel');
     } finally {
       setWakeLoading(false);
     }
@@ -773,7 +792,7 @@ export default function TextMessagesPage() {
               </div>
               {!hasSelectedMemberPhone && (
                 <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
-                  This user has no phone number on file, so Axel SMS actions are disabled.
+                  This user has no phone number on file. Normal wake can still run, but Axel cannot create or send SMS messages until a phone number is added.
                 </div>
               )}
             </div>
@@ -786,9 +805,9 @@ export default function TextMessagesPage() {
 
         <section className="rounded-lg border border-border bg-card p-4 space-y-3">
           <div>
-            <h2 className="text-sm font-semibold">Wake Axel to Text</h2>
+            <h2 className="text-sm font-semibold">Wake Axel</h2>
             <p className="text-xs text-muted-foreground">
-              Wake the Axel conversational brain for a trip. Axel will review the full trip context and draft its own SMS message. You can optionally provide guidance to influence what Axel writes. The draft will appear in the Pending queue for your approval before being sent.
+              Wake Axel on a specific conversational trip. By default this runs the normal single-trip wake, so Axel can review the trip and decide whether an SMS is warranted. Turn on Force SMS Draft to route this run through the narrower <span className="font-mono">wake_to_text</span> path instead.
             </p>
           </div>
 
@@ -843,6 +862,7 @@ export default function TextMessagesPage() {
                         setWakeError(null);
                         setWakeSuccess(null);
                         setWakeMessageId(null);
+                        setWakeResult(null);
                       }}
                       className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
                       disabled={tripLoading || wakeLoading}
@@ -876,19 +896,42 @@ export default function TextMessagesPage() {
                         setWakeError(null);
                         setWakeSuccess(null);
                         setWakeMessageId(null);
+                        setWakeResult(null);
                       }}
                       rows={4}
-                      placeholder="Optional steer for Axel, such as what changed or what to focus on..."
+                      placeholder="Optional steer for Axel, such as what changed, what to focus on, or why you think a text may or may not be warranted..."
                       className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
                       disabled={wakeLoading}
                     />
                   </div>
+
+                  <label className="flex items-start gap-3 rounded-md border border-border bg-background/40 px-3 py-3 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={forceWakeToText}
+                      onChange={(e) => {
+                        setForceWakeToText(e.target.checked);
+                        setWakeError(null);
+                        setWakeSuccess(null);
+                        setWakeMessageId(null);
+                        setWakeResult(null);
+                      }}
+                      className="mt-0.5 rounded border-border"
+                      disabled={wakeLoading}
+                    />
+                    <div className="space-y-1">
+                      <div className="text-sm font-medium">Force SMS Draft</div>
+                      <div className="text-xs text-muted-foreground">
+                        When checked, this run uses <span className="font-mono">wake_to_text</span> and constrains Axel to the SMS-draft lane. When unchecked, Axel uses normal <span className="font-mono">wake</span> and can decide for itself whether to draft a text.
+                      </div>
+                    </div>
+                  </label>
                 </>
               )}
 
               {!hasSelectedMemberPhone && (
                 <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
-                  The selected member needs a phone number on file before Axel can draft an SMS.
+                  The selected member has no phone number on file. Wake can still run, but any SMS drafting attempt will fail until a phone number is added.
                 </div>
               )}
 
@@ -907,10 +950,63 @@ export default function TextMessagesPage() {
                   Draft message ID: <span className="font-mono break-all">{wakeMessageId}</span>
                 </div>
               )}
+              {wakeResult && (
+                <div className="rounded-md border border-border bg-background/40 p-3 space-y-3">
+                  <div className="flex items-center justify-between gap-3 flex-wrap">
+                    <div>
+                      <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Wake Result</div>
+                      <div className="text-sm font-medium">{formatWakeModeLabel(wakeResult.mode)}</div>
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      <span className="font-medium">send_text:</span>{' '}
+                      {wakeResult.send_text_called ? 'called' : 'not called'}
+                    </div>
+                  </div>
+
+                  <div className="rounded-md border border-border bg-background p-3 text-sm whitespace-pre-wrap break-words">
+                    {wakeResult.response || 'No wake response returned.'}
+                  </div>
+
+                  {(wakeResult.tools_used?.length || wakeResult.send_text_result || wakeResult.pending_sms_draft) && (
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <div className="space-y-1">
+                        <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Tools Used</div>
+                        <div className="text-sm">
+                          {wakeResult.tools_used?.length ? wakeResult.tools_used.join(', ') : 'None'}
+                        </div>
+                      </div>
+
+                      <div className="space-y-1">
+                        <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">SMS Outcome</div>
+                        <div className="text-sm">
+                          {wakeResult.pending_sms_draft?.message_id ? 'Draft created' : 'No draft created'}
+                        </div>
+                        {wakeResult.send_text_result?.status && (
+                          <div className="text-xs text-muted-foreground">
+                            Status: {formatStatusLabel(wakeResult.send_text_result.status)}
+                          </div>
+                        )}
+                        {wakeResult.send_text_result?.reason && (
+                          <div className="text-xs text-muted-foreground">
+                            Reason: {formatStatusLabel(wakeResult.send_text_result.reason)}
+                          </div>
+                        )}
+                        {wakeResult.send_text_result?.error && (
+                          <div className="text-xs text-red-400">
+                            Error: {wakeResult.send_text_result.error}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
 
               <div className="flex items-center justify-between gap-3 flex-wrap">
                 <div className="text-xs text-muted-foreground">
-                  {selectedMemberPhone ? `Draft will target ${selectedMemberPhone}` : 'Selected user has no phone number on file'}
+                  {selectedMemberPhone
+                    ? `${forceWakeToText ? 'Forced draft' : 'If Axel decides to text, the draft'} will target ${selectedMemberPhone}`
+                    : 'No phone number on file — wake can still run, but SMS drafting is unavailable'}
                 </div>
                 <button
                   type="submit"
@@ -918,7 +1014,13 @@ export default function TextMessagesPage() {
                   className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {wakeLoading ? <Loader2 className="size-4 animate-spin" /> : null}
-                  {wakeLoading ? 'Axel is drafting a text...' : 'Wake Axel to Text'}
+                  {wakeLoading
+                    ? forceWakeToText
+                      ? 'Axel is drafting a text...'
+                      : 'Axel is reviewing the trip...'
+                    : forceWakeToText
+                    ? 'Wake Axel to Draft a Text'
+                    : 'Wake Axel'}
                 </button>
               </div>
             </form>
@@ -929,7 +1031,7 @@ export default function TextMessagesPage() {
           <div>
             <h2 className="text-sm font-semibold">Send as Axel</h2>
             <p className="text-xs text-muted-foreground">
-              Write a message on behalf of Axel and send it directly — you write the words, not Axel. Unlike &quot;Wake Axel to Text&quot; where Axel drafts its own message, here you are the author. You&apos;ll review the full message before confirming. The message is sent immediately (no approval queue) and becomes part of Axel&apos;s conversation history, so the brain will treat it as something Axel said in future interactions.
+              Write a message on behalf of Axel and send it directly — you write the words, not Axel. Unlike the wake flow above, where Axel decides what to do and may draft an SMS for approval, here you are the author. You&apos;ll review the full message before confirming. The message is sent immediately (no approval queue) and becomes part of Axel&apos;s conversation history, so the brain will treat it as something Axel said in future interactions.
             </p>
           </div>
 

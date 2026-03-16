@@ -1371,20 +1371,31 @@ class ApiClient {
   }
 
   // Wake cycle
-  async wakeUser(userId: string, opts?: { feedback?: string; dryRun?: boolean }): Promise<WakeResponse> {
+  async wakeUser(
+    userId: string,
+    opts?: { feedback?: string; dryRun?: boolean; forceText?: boolean; idempotencyKey?: string },
+  ): Promise<WakeResponse> {
     const body: Record<string, unknown> = {};
     if (opts?.feedback) body.feedback = opts.feedback;
     if (opts?.dryRun) body.dry_run = true;
+    if (opts?.forceText) body.force_text = true;
+    if (opts?.idempotencyKey) body.idempotency_key = opts.idempotencyKey;
     return this.fetch<WakeResponse>(`/conv/wake/${userId}`, {
       method: 'POST',
       body: JSON.stringify(body),
     });
   }
 
-  async wakeTrip(userId: string, tripId: string, opts?: { feedback?: string; dryRun?: boolean }): Promise<WakeResponse> {
+  async wakeTrip(
+    userId: string,
+    tripId: string,
+    opts?: { feedback?: string; dryRun?: boolean; forceText?: boolean; idempotencyKey?: string },
+  ): Promise<WakeResponse> {
     const body: Record<string, unknown> = {};
     if (opts?.feedback) body.feedback = opts.feedback;
     if (opts?.dryRun) body.dry_run = true;
+    if (opts?.forceText) body.force_text = true;
+    if (opts?.idempotencyKey) body.idempotency_key = opts.idempotencyKey;
     return this.fetch<WakeResponse>(`/conv/wake/${userId}/${tripId}`, {
       method: 'POST',
       body: JSON.stringify(body),
@@ -1417,9 +1428,28 @@ export interface WakeInterceptedTool {
   args: Record<string, unknown>;
 }
 
+export interface WakeSendTextResult {
+  drafted?: boolean;
+  message_id?: string | null;
+  status?: string | null;
+  reason?: string | null;
+  error?: string | null;
+}
+
+export interface WakePendingSmsDraft {
+  message_id?: string | null;
+  trip_id?: string | null;
+  status?: string | null;
+}
+
 export interface WakeResponse {
+  mode?: string;
   response: string;
   trips?: WakeTripSummary[];
+  tools_used?: string[];
+  send_text_called?: boolean;
+  send_text_result?: WakeSendTextResult | null;
+  pending_sms_draft?: WakePendingSmsDraft | null;
   dry_run?: boolean;
   intercepted_tools?: WakeInterceptedTool[];
 }
