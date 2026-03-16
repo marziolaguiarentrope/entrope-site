@@ -1,6 +1,6 @@
 // Use local proxy to avoid CORS issues
 const API_BASE = '/api/proxy';
-const FETCH_TIMEOUT = 60000; // 60 seconds — Render cold starts can take 30-45s
+const FETCH_TIMEOUT = 120000; // 120 seconds — wake calls run LLM + flight searches
 
 export class ApiError extends Error {
   public status: number;
