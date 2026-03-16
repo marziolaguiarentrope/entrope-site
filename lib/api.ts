@@ -451,6 +451,35 @@ export interface OperatorAxelMessageSendResponse {
   error: string | null;
 }
 
+export interface OperatorAxelSmsSendResponse {
+  message_id: string | null;
+  status: string;
+  approval_status: string | null;
+  provider_message_id: string | null;
+  error: string | null;
+}
+
+export interface DraftMemberAxelSmsResponse {
+  status: string;
+  trip_id: string;
+  message_id: string | null;
+  response: string;
+  error: string | null;
+}
+
+export interface ConversationalTrip {
+  id: string;
+  name?: string | null;
+  destination?: string | null;
+  start_date?: string | null;
+  end_date?: string | null;
+  status?: string | null;
+  archived?: boolean;
+  bookings?: unknown[];
+  bookings_count?: number | null;
+  [key: string]: unknown;
+}
+
 class ApiClient {
   private baseUrl: string;
 
@@ -860,6 +889,45 @@ class ApiClient {
     },
   ): Promise<OperatorAxelMessageSendResponse> {
     return this.fetch<OperatorAxelMessageSendResponse>(`/members/${userId}/send-axel-message`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async listMemberConvTrips(userId: string): Promise<ConversationalTrip[]> {
+    const result = await this.fetch<
+      ConversationalTrip[] | { items?: ConversationalTrip[]; trips?: ConversationalTrip[] }
+    >(`/members/${userId}/conv-trips`);
+
+    if (Array.isArray(result)) return result;
+    if (Array.isArray(result.items)) return result.items;
+    if (Array.isArray(result.trips)) return result.trips;
+    return [];
+  }
+
+  async draftMemberAxelSms(
+    userId: string,
+    tripId: string,
+    data: {
+      guidance?: string;
+      idempotency_key?: string;
+    },
+  ): Promise<DraftMemberAxelSmsResponse> {
+    return this.fetch<DraftMemberAxelSmsResponse>(`/members/${userId}/conv-trips/${tripId}/draft-axel-sms`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async sendMemberAxelSms(
+    userId: string,
+    tripId: string,
+    data: {
+      body: string;
+      idempotency_key?: string;
+    },
+  ): Promise<OperatorAxelSmsSendResponse> {
+    return this.fetch<OperatorAxelSmsSendResponse>(`/members/${userId}/conv-trips/${tripId}/send-axel-sms`, {
       method: 'POST',
       body: JSON.stringify(data),
     });
