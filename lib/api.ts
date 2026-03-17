@@ -149,6 +149,7 @@ export type PendingEmailApprovalStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
 export interface PendingEmail {
   id: string;
   user_id: string;
+  template_id?: string | null;
   to_email: string | null;
   to_name: string | null;
   subject: string | null;
@@ -643,11 +644,13 @@ class ApiClient {
   // Pending email approvals
   async listPendingEmails(params?: {
     status?: PendingEmailApprovalStatus;
+    templateId?: string;
     limit?: number;
     offset?: number;
   }): Promise<PendingEmailListResponse> {
     const searchParams = new URLSearchParams();
     if (params?.status) searchParams.set('status', params.status);
+    if (params?.templateId) searchParams.set('template_id', params.templateId);
     if (params?.limit !== undefined) searchParams.set('limit', params.limit.toString());
     if (params?.offset !== undefined) searchParams.set('offset', params.offset.toString());
 
