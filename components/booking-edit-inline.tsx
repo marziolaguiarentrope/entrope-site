@@ -508,9 +508,16 @@ export function BookingEditInline({ booking, travellers, onClose, onSave }: Book
   const [rtAccessible, setRtAccessible] = useState(false);
 
   // ── Hotel guests ──────────────────────────────────────────────────────
-  const [guests, setGuests] = useState<BookingTravelerPatch[]>([]);
+  // Initialize synchronously from trip view data (string[] names or UUIDs resolved via traveller profiles)
+  const [guests, setGuests] = useState<BookingTravelerPatch[]>(() => {
+    if (!hotelData?.guests || hotelData.guests.length === 0) return [];
+    return hotelData.guests.map((g) => {
+      const resolved = resolveTravelerId(typeof g === 'string' ? g : '', travellers);
+      return { ...resolved, is_adult: true };
+    });
+  });
 
-  // ── Fetch hotel booking detail to hydrate all fields ──────────────────
+  // ── Fetch hotel booking detail to enrich fields with more data ────────
   useEffect(() => {
     if (!isHotel) return;
     let cancelled = false;
@@ -530,11 +537,10 @@ export function BookingEditInline({ booking, travellers, onClose, onSave }: Book
         if (detail.room_type && !roomType) setRoomType(detail.room_type);
         if (detail.check_in_date && !checkInDate) setCheckInDate(detail.check_in_date);
         if (detail.check_out_date && !checkOutDate) setCheckOutDate(detail.check_out_date);
-        // Hydrate confirmation / provider if not already set from trip view
         if (detail.confirmation_number && !confirmationCode) setConfirmationCode(detail.confirmation_number);
         if (detail.booking_provider && !bookingProvider) setBookingProvider(detail.booking_provider);
 
-        // Hydrate guests from detail (GuestSummary has name, is_primary, date_of_birth, citizenship)
+        // Upgrade guests with richer data from detail (date_of_birth, citizenship)
         if (detail.guests && detail.guests.length > 0) {
           setGuests(detail.guests.map((g) => {
             const nameParts = (g.name || '').trim().split(/\s+/);
@@ -549,33 +555,11 @@ export function BookingEditInline({ booking, travellers, onClose, onSave }: Book
               is_adult: true,
             };
           }));
-        } else if (hotelData?.guests && hotelData.guests.length > 0) {
-          // Fallback: trip view only has string[] names
-          setGuests(hotelData.guests.map((name) => {
-            const parts = (typeof name === 'string' ? name : '').trim().split(/\s+/);
-            return {
-              first_name: parts[0] || '',
-              last_name: parts.length > 1 ? parts.slice(1).join(' ') : '',
-              is_primary: false,
-              is_adult: true,
-            };
-          }));
         }
+        // If detail.guests is empty, keep the synchronously-initialized guests from trip view
       } catch (e) {
-        // If detail fetch fails, fall back to trip view data
-        if (cancelled) return;
-        if (hotelData?.guests && hotelData.guests.length > 0) {
-          setGuests(hotelData.guests.map((name) => {
-            const parts = (typeof name === 'string' ? name : '').trim().split(/\s+/);
-            return {
-              first_name: parts[0] || '',
-              last_name: parts.length > 1 ? parts.slice(1).join(' ') : '',
-              is_primary: false,
-              is_adult: true,
-            };
-          }));
-        }
-        console.warn('Failed to fetch hotel booking detail for edit form:', e);
+        // Detail fetch failed — keep the synchronously-initialized guests from trip view
+        if (!cancelled) console.warn('Failed to fetch hotel booking detail for edit form:', e);
       } finally {
         if (!cancelled) setLoadingDetail(false);
       }
