@@ -946,7 +946,11 @@ export function BookingEditInline({ booking, travellers, onClose, onSave }: Book
             <h4 className="text-sm font-semibold">
               Edit {isHotel ? 'Hotel' : 'Flight'} Booking
             </h4>
-            <span className="text-xs text-muted-foreground font-mono">{booking.id.slice(0, 12)}...</span>
+            <button
+              onClick={() => navigator.clipboard.writeText(booking.id)}
+              title="Click to copy"
+              className="text-xs text-muted-foreground font-mono hover:text-foreground transition-colors"
+            >{booking.id}</button>
           </div>
         </div>
         <div className="flex items-center gap-2">
