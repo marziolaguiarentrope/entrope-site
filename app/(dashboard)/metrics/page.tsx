@@ -7,12 +7,15 @@ import {
   Area,
   BarChart,
   Bar,
+  ComposedChart,
+  Line,
   XAxis,
   YAxis,
   CartesianGrid,
   Tooltip,
 } from 'recharts';
 import { api } from '@/lib/api';
+import type { OnboardingFunnelUser } from '@/lib/api';
 import { cn, exportCSV, exportJSON } from '@/lib/utils';
 
 // ── Types ────────────────────────────────────────────────
@@ -27,6 +30,28 @@ interface ChartDataPoint {
   dateRaw: string;    // bucket key for sorting
   count: number;      // new users in this bucket
   cumulative: number; // running total
+}
+
+type MetricsView = 'registrations' | 'funnel';
+
+interface FunnelChartPoint {
+  date: string;
+  dateRaw: string;
+  registered: number;
+  cwi: number;
+  monitored: number;
+  opportunity: number;
+  cwiRate: number;
+}
+
+interface FunnelTotals {
+  registered: number;
+  cwi: number;
+  monitored: number;
+  opportunity: number;
+  progressed: number;
+  avgHoursToBooking: number | null;
+  avgHoursToOpp: number | null;
 }
 
 // ── Constants ────────────────────────────────────────────
@@ -61,6 +86,9 @@ const CHART_GREEN_LIGHT = '#00E608';
 const CHART_GREEN_DIM = '#00C80540';
 const CHART_GRID = '#1a1f2e';
 const CHART_AXIS = '#6b7280';
+const CHART_CYAN = '#06b6d4';
+const CHART_AMBER = '#f59e0b';
+const CHART_ORANGE = '#f97316';
 
 // ── Auto-granularity map for preset ranges ──────────────
 const AUTO_GRANULARITY: Partial<Record<DateRange, Granularity>> = {
@@ -537,6 +565,17 @@ export default function MetricsPage() {
   const [showExportMenu, setShowExportMenu] = useState(false);
   const exportRef = useRef<HTMLDivElement>(null);
 
+  // Marketing Funnel state
+  const [metricsView, setMetricsView] = useState<MetricsView>('registrations');
+  const [funnelChartData, setFunnelChartData] = useState<FunnelChartPoint[]>([]);
+  const [funnelTotals, setFunnelTotals] = useState<FunnelTotals | null>(null);
+  const [adSpend, setAdSpend] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('axel-metrics-ad-spend') || '';
+    }
+    return '';
+  });
+
   // Close export menu on outside click
   useEffect(() => {
     function handler(e: MouseEvent) {
@@ -547,6 +586,13 @@ export default function MetricsPage() {
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
   }, []);
+
+  // Persist ad spend to localStorage
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('axel-metrics-ad-spend', adSpend);
+    }
+  }, [adSpend]);
 
   // Helper: format Date to YYYY-MM-DD (uses UTC to match effectiveDates computation)
   const toDateKey = useCallback((d: Date) => {
@@ -632,6 +678,12 @@ export default function MetricsPage() {
           .catch(() => null);
       });
 
+      // Fetch funnel data in parallel with bucket counts
+      const daysForFunnel = effectiveDates.start
+        ? Math.max(1, Math.ceil((effectiveDates.end.getTime() - effectiveDates.start.getTime()) / (1000 * 60 * 60 * 24)))
+        : undefined;
+      const funnelPromise = api.getBusinessDashboard(daysForFunnel).catch(() => null);
+
       // Process buckets in batches
       for (let i = 0; i < buckets.length; i += BATCH_SIZE) {
         const batch = buckets.slice(i, i + BATCH_SIZE);
@@ -674,6 +726,56 @@ export default function MetricsPage() {
       setLifetimeTotal(lifetime);
       setLifetimeFirstDate(firstDate);
       setFetchProgress(null);
+
+      // Process funnel data
+      const dashboardData = await funnelPromise;
+      if (dashboardData?.onboarding_funnel) {
+        const funnel = dashboardData.onboarding_funnel;
+        const users: OnboardingFunnelUser[] = funnel.users || [];
+
+        // Compute averages
+        const bookingHours = users.filter(u => u.hours_to_first_booking !== null).map(u => u.hours_to_first_booking!);
+        const oppHours = users.filter(u => u.hours_to_first_opp !== null).map(u => u.hours_to_first_opp!);
+
+        setFunnelTotals({
+          registered: funnel.summary.signed_up,
+          cwi: funnel.summary.has_booking,
+          monitored: funnel.summary.has_watch,
+          opportunity: funnel.summary.has_opportunity,
+          progressed: funnel.summary.has_opportunity_progressed,
+          avgHoursToBooking: bookingHours.length > 0 ? bookingHours.reduce((a, b) => a + b, 0) / bookingHours.length : null,
+          avgHoursToOpp: oppHours.length > 0 ? oppHours.reduce((a, b) => a + b, 0) / oppHours.length : null,
+        });
+
+        // Bucket users by signup date for trend chart
+        const userBuckets = new Map<string, { registered: number; cwi: number; monitored: number; opportunity: number }>();
+        for (const user of users) {
+          const signupDate = new Date(user.signed_up.endsWith('Z') ? user.signed_up : user.signed_up + 'Z');
+          if (effectiveDates.start && signupDate < effectiveDates.start) continue;
+          if (signupDate > effectiveDates.end) continue;
+          const key = getBucketKey(signupDate, granularity, timezone);
+          const existing = userBuckets.get(key) || { registered: 0, cwi: 0, monitored: 0, opportunity: 0 };
+          existing.registered++;
+          if (user.flight_bookings + user.hotel_bookings > 0) existing.cwi++;
+          if (user.flight_watches + user.hotel_watches > 0) existing.monitored++;
+          if (user.flight_opps + user.hotel_opps > 0) existing.opportunity++;
+          userBuckets.set(key, existing);
+        }
+
+        const funnelPoints: FunnelChartPoint[] = buckets.map(b => {
+          const data = userBuckets.get(b.key) || { registered: 0, cwi: 0, monitored: 0, opportunity: 0 };
+          return {
+            date: formatBucketLabel(b.key, granularity),
+            dateRaw: b.key,
+            ...data,
+            cwiRate: data.registered > 0 ? Math.round((data.cwi / data.registered) * 100) : 0,
+          };
+        });
+        setFunnelChartData(funnelPoints);
+      } else {
+        setFunnelTotals(null);
+        setFunnelChartData([]);
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to load metrics';
       setError(msg);
@@ -757,8 +859,18 @@ export default function MetricsPage() {
     };
   }, [totalInRange, chartData, granularity, effectiveDates, lifetimeTotal, lifetimeFirstDate]);
 
+  // CPR/CPI computations
+  const cprMetrics = useMemo(() => {
+    const spend = parseFloat(adSpend) || 0;
+    if (spend <= 0 || !funnelTotals) return null;
+    const cpr = funnelTotals.registered > 0 ? spend / funnelTotals.registered : 0;
+    const cpi = funnelTotals.cwi > 0 ? spend / funnelTotals.cwi : 0;
+    const cpOpp = funnelTotals.opportunity > 0 ? spend / funnelTotals.opportunity : 0;
+    return { cpr, cpi, cpOpp };
+  }, [adSpend, funnelTotals]);
+
   // Export handlers
-  function handleExport(type: 'chart_csv' | 'json') {
+  function handleExport(type: 'chart_csv' | 'json' | 'funnel_csv' | 'funnel_json') {
     setShowExportMenu(false);
     const date = new Date().toISOString().slice(0, 10);
     const rangeSuffix = dateRange === 'custom' ? `${customStart}_${customEnd}` : dateRange;
@@ -773,6 +885,30 @@ export default function MetricsPage() {
         timezone,
       }));
       exportCSV(rows, `user-growth-${rangeSuffix}-${date}.csv`);
+    } else if (type === 'funnel_csv') {
+      const rows = funnelChartData.map(d => ({
+        period: d.date,
+        period_key: d.dateRaw,
+        registered: d.registered,
+        cwi: d.cwi,
+        monitored: d.monitored,
+        opportunity: d.opportunity,
+        cwi_rate_pct: d.cwiRate,
+        granularity,
+        timezone,
+      }));
+      exportCSV(rows, `marketing-funnel-${rangeSuffix}-${date}.csv`);
+    } else if (type === 'funnel_json') {
+      exportJSON({
+        exported_at: new Date().toISOString(),
+        date_range: dateRange === 'custom' ? `${customStart} to ${customEnd}` : dateRange,
+        granularity,
+        timezone,
+        funnel_summary: funnelTotals,
+        cpr_metrics: cprMetrics,
+        ad_spend: parseFloat(adSpend) || 0,
+        funnel_chart_data: funnelChartData,
+      }, `marketing-funnel-full-${rangeSuffix}-${date}.json`);
     } else {
       exportJSON({
         exported_at: new Date().toISOString(),
@@ -810,6 +946,43 @@ export default function MetricsPage() {
     );
   };
 
+  // CWI rate tooltip
+  const CwiRateTooltip = ({ active, payload, label }: { active?: boolean; payload?: Array<{ value: number }>; label?: string | number }) => {
+    if (!active || !payload?.length) return null;
+    return (
+      <div className="bg-[#0d1117] border border-[#1a1f2e] rounded-lg px-3 py-2 shadow-xl">
+        <p className="text-xs text-zinc-400 mb-1">{label}</p>
+        <p className="text-sm font-semibold" style={{ color: CHART_CYAN }}>
+          {payload[0].value}% conversion
+        </p>
+      </div>
+    );
+  };
+
+  // Funnel tooltip
+  const FunnelTooltip = ({ active, payload, label }: { active?: boolean; payload?: Array<{ dataKey: string; value: number; color: string }>; label?: string }) => {
+    if (!active || !payload?.length) return null;
+    const registered = payload.find(p => p.dataKey === 'registered')?.value ?? 0;
+    const cwi = payload.find(p => p.dataKey === 'cwi')?.value ?? 0;
+    const labels: Record<string, string> = { registered: 'registered', cwi: 'with intent', monitored: 'monitored', opportunity: 'opportunities' };
+    return (
+      <div className="bg-[#0d1117] border border-[#1a1f2e] rounded-lg px-3 py-2 shadow-xl">
+        <p className="text-xs text-zinc-400 mb-1.5">{label}</p>
+        {payload.map((entry) => (
+          <p key={entry.dataKey} className="text-xs" style={{ color: entry.color }}>
+            <span className="font-semibold">{entry.value.toLocaleString()}</span>{' '}
+            {labels[entry.dataKey] ?? entry.dataKey}
+          </p>
+        ))}
+        {registered > 0 && (
+          <p className="text-xs text-zinc-500 mt-1 pt-1 border-t border-zinc-800">
+            {Math.round((cwi / registered) * 100)}% CWI rate
+          </p>
+        )}
+      </div>
+    );
+  };
+
   return (
     <div>
       {/* Header */}
@@ -817,11 +990,11 @@ export default function MetricsPage() {
         <div>
           <h1 className="text-2xl font-semibold">Metrics</h1>
           <p className="text-sm text-muted-foreground mt-1">
-            User growth and registration trends
+            {metricsView === 'registrations' ? 'User growth and registration trends' : 'Registration to intent conversion funnel'}
           </p>
         </div>
         <div className="flex items-center gap-2">
-          {!loading && chartData.length > 0 && (
+          {!loading && (chartData.length > 0 || funnelChartData.length > 0) && (
             <div ref={exportRef} className="relative">
               <button
                 onClick={() => setShowExportMenu(v => !v)}
@@ -832,12 +1005,21 @@ export default function MetricsPage() {
               </button>
               {showExportMenu && (
                 <div className="absolute right-0 top-full mt-1 z-50 bg-[#0d1117] border border-[#1a1f2e] rounded-lg shadow-xl overflow-hidden min-w-[200px]">
+                  {metricsView === 'registrations' ? (<>
                   <button onClick={() => handleExport('chart_csv')} className="w-full text-left px-4 py-2.5 text-sm text-zinc-300 hover:bg-accent/50 transition-colors">
                     Chart data (CSV)
                   </button>
                   <button onClick={() => handleExport('json')} className="w-full text-left px-4 py-2.5 text-sm text-zinc-300 hover:bg-accent/50 transition-colors border-t border-[#1a1f2e]">
                     Full export (JSON)
                   </button>
+                  </>) : (<>
+                  <button onClick={() => handleExport('funnel_csv')} className="w-full text-left px-4 py-2.5 text-sm text-zinc-300 hover:bg-accent/50 transition-colors">
+                    Funnel data (CSV)
+                  </button>
+                  <button onClick={() => handleExport('funnel_json')} className="w-full text-left px-4 py-2.5 text-sm text-zinc-300 hover:bg-accent/50 transition-colors border-t border-[#1a1f2e]">
+                    Full funnel export (JSON)
+                  </button>
+                  </>)}
                 </div>
               )}
             </div>
@@ -963,7 +1145,8 @@ export default function MetricsPage() {
           ))}
         </div>
 
-        {/* Chart Mode Toggle */}
+        {/* Chart Mode Toggle (registration view only) */}
+        {metricsView === 'registrations' && (
         <div className="flex rounded-lg border border-border overflow-hidden">
           <button
             onClick={() => setChartMode('cumulative')}
@@ -990,8 +1173,39 @@ export default function MetricsPage() {
             New Users
           </button>
         </div>
+        )}
+
+        {/* View Toggle */}
+        <div className="flex rounded-lg border border-border overflow-hidden ml-auto">
+          <button
+            onClick={() => setMetricsView('registrations')}
+            className={cn(
+              'px-4 py-2 text-sm font-medium transition-colors',
+              metricsView === 'registrations'
+                ? 'text-white'
+                : 'bg-background text-muted-foreground hover:bg-accent'
+            )}
+            style={metricsView === 'registrations' ? { backgroundColor: CHART_GREEN } : undefined}
+          >
+            Registration Growth
+          </button>
+          <button
+            onClick={() => setMetricsView('funnel')}
+            className={cn(
+              'px-4 py-2 text-sm font-medium transition-colors',
+              metricsView === 'funnel'
+                ? 'text-white'
+                : 'bg-background text-muted-foreground hover:bg-accent'
+            )}
+            style={metricsView === 'funnel' ? { backgroundColor: CHART_CYAN } : undefined}
+          >
+            Marketing Funnel
+          </button>
+        </div>
       </div>
 
+      {/* ── Registration Growth View ── */}
+      {metricsView === 'registrations' && (<>
       {/* Lifetime Stats (always visible when data loaded) */}
       {!loading && !error && lifetimeTotal > 0 && (
         <div className="flex items-center gap-4 mb-4">
@@ -1167,6 +1381,273 @@ export default function MetricsPage() {
           {lifetimeTotal > 0 && ` \u00b7 ${lifetimeTotal.toLocaleString()} lifetime users`}
         </p>
       )}
+      </>)}
+
+      {/* ── Marketing Funnel View ── */}
+      {metricsView === 'funnel' && (<>
+
+      {/* Funnel Overview Cards */}
+      {funnelTotals && !loading && (
+        <div className="mb-6">
+          <div className="flex items-center gap-2 overflow-x-auto pb-2">
+            {/* Registered */}
+            <div className="flex-1 min-w-[130px] bg-[#0d1117] border border-[#1a1f2e] rounded-lg p-4 text-center">
+              <p className="text-xs text-zinc-500 mb-1">Registered</p>
+              <p className="text-2xl font-semibold" style={{ color: CHART_GREEN }}>{funnelTotals.registered.toLocaleString()}</p>
+            </div>
+            {/* Arrow */}
+            <div className="flex flex-col items-center px-1 shrink-0">
+              <span className="text-xs font-medium" style={{ color: CHART_CYAN }}>
+                {funnelTotals.registered > 0 ? Math.round((funnelTotals.cwi / funnelTotals.registered) * 100) : 0}%
+              </span>
+              <svg width="20" height="12" viewBox="0 0 20 12" className="text-zinc-600"><path d="M0 6h16M12 1l5 5-5 5" fill="none" stroke="currentColor" strokeWidth="1.5" /></svg>
+            </div>
+            {/* CWI */}
+            <div className="flex-1 min-w-[130px] bg-[#0d1117] border border-[#1a1f2e] rounded-lg p-4 text-center">
+              <p className="text-xs text-zinc-500 mb-0.5">CWI</p>
+              <p className="text-[10px] text-zinc-600 mb-1">Customers with Intent</p>
+              <p className="text-2xl font-semibold" style={{ color: CHART_CYAN }}>{funnelTotals.cwi.toLocaleString()}</p>
+            </div>
+            {/* Arrow */}
+            <div className="flex flex-col items-center px-1 shrink-0">
+              <span className="text-xs font-medium" style={{ color: CHART_AMBER }}>
+                {funnelTotals.cwi > 0 ? Math.round((funnelTotals.monitored / funnelTotals.cwi) * 100) : 0}%
+              </span>
+              <svg width="20" height="12" viewBox="0 0 20 12" className="text-zinc-600"><path d="M0 6h16M12 1l5 5-5 5" fill="none" stroke="currentColor" strokeWidth="1.5" /></svg>
+            </div>
+            {/* Monitored */}
+            <div className="flex-1 min-w-[130px] bg-[#0d1117] border border-[#1a1f2e] rounded-lg p-4 text-center">
+              <p className="text-xs text-zinc-500 mb-1">Monitored</p>
+              <p className="text-2xl font-semibold" style={{ color: CHART_AMBER }}>{funnelTotals.monitored.toLocaleString()}</p>
+            </div>
+            {/* Arrow */}
+            <div className="flex flex-col items-center px-1 shrink-0">
+              <span className="text-xs font-medium" style={{ color: CHART_ORANGE }}>
+                {funnelTotals.monitored > 0 ? Math.round((funnelTotals.opportunity / funnelTotals.monitored) * 100) : 0}%
+              </span>
+              <svg width="20" height="12" viewBox="0 0 20 12" className="text-zinc-600"><path d="M0 6h16M12 1l5 5-5 5" fill="none" stroke="currentColor" strokeWidth="1.5" /></svg>
+            </div>
+            {/* Opportunity */}
+            <div className="flex-1 min-w-[130px] bg-[#0d1117] border border-[#1a1f2e] rounded-lg p-4 text-center">
+              <p className="text-xs text-zinc-500 mb-1">Opportunity</p>
+              <p className="text-2xl font-semibold" style={{ color: CHART_ORANGE }}>{funnelTotals.opportunity.toLocaleString()}</p>
+            </div>
+            {/* Arrow */}
+            <div className="flex flex-col items-center px-1 shrink-0">
+              <span className="text-xs font-medium text-zinc-400">
+                {funnelTotals.opportunity > 0 ? Math.round((funnelTotals.progressed / funnelTotals.opportunity) * 100) : 0}%
+              </span>
+              <svg width="20" height="12" viewBox="0 0 20 12" className="text-zinc-600"><path d="M0 6h16M12 1l5 5-5 5" fill="none" stroke="currentColor" strokeWidth="1.5" /></svg>
+            </div>
+            {/* Progressed */}
+            <div className="flex-1 min-w-[130px] bg-[#0d1117] border border-[#1a1f2e] rounded-lg p-4 text-center">
+              <p className="text-xs text-zinc-500 mb-1">Progressed</p>
+              <p className="text-2xl font-semibold text-zinc-200">{funnelTotals.progressed.toLocaleString()}</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Marketing KPI Cards */}
+      {funnelTotals && !loading && (
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-4 mb-6">
+          {/* CWI Rate */}
+          <div className="bg-[#0d1117] border border-[#1a1f2e] rounded-lg p-4">
+            <p className="text-xs text-zinc-500 mb-1">CWI Rate</p>
+            <p className="text-2xl font-semibold" style={{ color: CHART_CYAN }}>
+              {funnelTotals.registered > 0 ? Math.round((funnelTotals.cwi / funnelTotals.registered) * 100) : 0}%
+            </p>
+            <p className="text-xs text-zinc-500">registered → intent</p>
+          </div>
+          {/* Ad Spend Input */}
+          <div className="bg-[#0d1117] border border-[#1a1f2e] rounded-lg p-4">
+            <p className="text-xs text-zinc-500 mb-1">Ad Spend ($)</p>
+            <div className="flex items-center gap-1">
+              <span className="text-zinc-400 text-lg">$</span>
+              <input
+                type="number"
+                value={adSpend}
+                onChange={(e) => setAdSpend(e.target.value)}
+                placeholder="0"
+                className="bg-transparent border-b border-zinc-700 text-2xl font-semibold w-full focus:outline-none focus:border-[#06b6d4] text-zinc-200 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+              />
+            </div>
+            <p className="text-xs text-zinc-500">Facebook spend in range</p>
+          </div>
+          {/* CPR */}
+          <div className="bg-[#0d1117] border border-[#1a1f2e] rounded-lg p-4">
+            <p className="text-xs text-zinc-500 mb-1">CPR</p>
+            {cprMetrics ? (
+              <>
+                <p className="text-2xl font-semibold" style={{ color: cprMetrics.cpr <= 5 ? CHART_GREEN : cprMetrics.cpr <= 10 ? CHART_AMBER : '#f87171' }}>
+                  ${cprMetrics.cpr.toFixed(2)}
+                </p>
+                <div className="mt-1.5">
+                  <div className="flex justify-between text-[10px] text-zinc-600 mb-0.5">
+                    <span>$0</span>
+                    <span className="text-zinc-400">goal: $5</span>
+                  </div>
+                  <div className="h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+                    <div
+                      className="h-full rounded-full transition-all"
+                      style={{
+                        width: `${Math.min(100, (5 / Math.max(cprMetrics.cpr, 0.01)) * 100)}%`,
+                        backgroundColor: cprMetrics.cpr <= 5 ? CHART_GREEN : cprMetrics.cpr <= 10 ? CHART_AMBER : '#f87171',
+                      }}
+                    />
+                  </div>
+                </div>
+              </>
+            ) : (
+              <p className="text-2xl font-semibold text-zinc-600">&mdash;</p>
+            )}
+            <p className="text-xs text-zinc-500">cost per registration</p>
+          </div>
+          {/* CPI */}
+          <div className="bg-[#0d1117] border border-[#1a1f2e] rounded-lg p-4">
+            <p className="text-xs text-zinc-500 mb-1">CPI</p>
+            {cprMetrics ? (
+              <p className="text-2xl font-semibold text-zinc-200">${cprMetrics.cpi.toFixed(2)}</p>
+            ) : (
+              <p className="text-2xl font-semibold text-zinc-600">&mdash;</p>
+            )}
+            <p className="text-xs text-zinc-500">cost per intent</p>
+          </div>
+          {/* Avg Time to Intent */}
+          <div className="bg-[#0d1117] border border-[#1a1f2e] rounded-lg p-4">
+            <p className="text-xs text-zinc-500 mb-1">Avg Time to Intent</p>
+            {funnelTotals.avgHoursToBooking !== null ? (
+              <p className="text-2xl font-semibold text-zinc-200">
+                {funnelTotals.avgHoursToBooking < 24
+                  ? `${Math.round(funnelTotals.avgHoursToBooking)}h`
+                  : `${(funnelTotals.avgHoursToBooking / 24).toFixed(1)}d`}
+              </p>
+            ) : (
+              <p className="text-2xl font-semibold text-zinc-600">&mdash;</p>
+            )}
+            <p className="text-xs text-zinc-500">signup → first search</p>
+          </div>
+        </div>
+      )}
+
+      {/* Funnel Trend Chart: Registration vs CWI */}
+      <div className="bg-[#0d1117] border border-[#1a1f2e] rounded-lg p-6">
+        {error ? (
+          <div className="text-center py-16">
+            <p className="text-red-400 mb-2">{error}</p>
+            <button
+              onClick={fetchData}
+              className="mt-3 px-4 py-2 rounded-lg text-sm font-medium text-white transition-colors hover:opacity-90"
+              style={{ backgroundColor: CHART_CYAN }}
+            >
+              Retry
+            </button>
+          </div>
+        ) : loading ? (
+          <div className="text-center py-16">
+            <div className="inline-block animate-spin w-6 h-6 border-2 rounded-full mb-3" style={{ borderColor: CHART_CYAN, borderTopColor: 'transparent' }} />
+            <p className="text-zinc-400 text-sm">{fetchProgress || 'Loading funnel data...'}</p>
+          </div>
+        ) : funnelChartData.length === 0 ? (
+          <div className="text-center py-16 text-zinc-500">
+            <p>No funnel data available for this range</p>
+          </div>
+        ) : (
+          <>
+            <div className="flex items-center gap-4 mb-4">
+              <h3 className="text-sm font-medium text-zinc-300">Registration → Intent Conversion</h3>
+              <div className="flex items-center gap-3 text-xs text-zinc-400">
+                <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: CHART_GREEN, opacity: 0.5 }} /> Registered</span>
+                <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: CHART_CYAN }} /> CWI</span>
+                <span className="flex items-center gap-1.5"><span className="w-2.5 h-0.5" style={{ backgroundColor: CHART_AMBER }} /> Monitored</span>
+                <span className="flex items-center gap-1.5"><span className="w-2.5 h-0.5" style={{ backgroundColor: CHART_ORANGE, opacity: 0.7 }} /> Opportunity</span>
+              </div>
+            </div>
+            <div className="h-[400px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <ComposedChart data={funnelChartData} margin={{ top: 10, right: 10, left: 10, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID} />
+                  <XAxis
+                    dataKey="date"
+                    tick={{ fontSize: 11, fill: CHART_AXIS }}
+                    tickLine={false}
+                    axisLine={{ stroke: CHART_GRID }}
+                    interval="preserveStartEnd"
+                  />
+                  <YAxis
+                    tick={{ fontSize: 11, fill: CHART_AXIS }}
+                    tickLine={false}
+                    axisLine={{ stroke: CHART_GRID }}
+                    allowDecimals={false}
+                    tickFormatter={(v: number) => v >= 1000 ? `${(v / 1000).toFixed(v >= 10000 ? 0 : 1)}k` : v.toLocaleString()}
+                  />
+                  <Tooltip content={<FunnelTooltip />} cursor={{ fill: CHART_GREEN_DIM }} />
+                  <Bar dataKey="registered" fill={CHART_GREEN} radius={[4, 4, 0, 0]} opacity={0.35} />
+                  <Line type="monotone" dataKey="cwi" stroke={CHART_CYAN} strokeWidth={2.5} dot={funnelChartData.length <= 60 ? { fill: CHART_CYAN, r: 3, strokeWidth: 0 } : false} />
+                  <Line type="monotone" dataKey="monitored" stroke={CHART_AMBER} strokeWidth={2} dot={false} strokeDasharray="5 3" />
+                  <Line type="monotone" dataKey="opportunity" stroke={CHART_ORANGE} strokeWidth={2} dot={false} strokeDasharray="3 3" />
+                </ComposedChart>
+              </ResponsiveContainer>
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* CWI Conversion Rate Over Time */}
+      {funnelChartData.length > 0 && !loading && (
+        <div className="bg-[#0d1117] border border-[#1a1f2e] rounded-lg p-6 mt-4">
+          <h3 className="text-sm font-medium text-zinc-300 mb-4">CWI Conversion Rate Over Time</h3>
+          <div className="h-[200px]">
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={funnelChartData} margin={{ top: 10, right: 10, left: 10, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="colorCwiRate" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor={CHART_CYAN} stopOpacity={0.25} />
+                    <stop offset="95%" stopColor={CHART_CYAN} stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID} />
+                <XAxis
+                  dataKey="date"
+                  tick={{ fontSize: 11, fill: CHART_AXIS }}
+                  tickLine={false}
+                  axisLine={{ stroke: CHART_GRID }}
+                  interval="preserveStartEnd"
+                />
+                <YAxis
+                  tick={{ fontSize: 11, fill: CHART_AXIS }}
+                  tickLine={false}
+                  axisLine={{ stroke: CHART_GRID }}
+                  domain={[0, 100]}
+                  tickFormatter={(v: number) => `${v}%`}
+                />
+                <Tooltip
+                  content={<CwiRateTooltip />}
+                  cursor={{ stroke: CHART_CYAN + '40' }}
+                />
+                <Area
+                  type="monotone"
+                  dataKey="cwiRate"
+                  stroke={CHART_CYAN}
+                  strokeWidth={2}
+                  fill="url(#colorCwiRate)"
+                  dot={funnelChartData.length <= 60 ? { fill: CHART_CYAN, r: 2, strokeWidth: 0 } : false}
+                />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      )}
+
+      {/* Funnel Footer */}
+      {!loading && funnelTotals && (
+        <p className="text-xs text-muted-foreground mt-3">
+          Funnel: {funnelTotals.registered.toLocaleString()} registered → {funnelTotals.cwi.toLocaleString()} CWI ({funnelTotals.registered > 0 ? Math.round((funnelTotals.cwi / funnelTotals.registered) * 100) : 0}%)
+          {` \u00b7 ${dateRangeLabel}`}
+          {` \u00b7 ${TIMEZONE_OPTIONS.find(o => o.value === timezone)?.label ?? timezone} time`}
+        </p>
+      )}
+      </>)}
     </div>
   );
 }
