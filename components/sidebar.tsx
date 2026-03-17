@@ -24,8 +24,7 @@ const navItems = [
   { href: '/business', icon: TrendingUp, label: 'Business' },
   { href: '/metrics', icon: BarChart3, label: 'Metrics' },
   { href: '/booking-issues', icon: Wrench, label: 'Booking Issues' },
-  { href: '/pending-emails', icon: Mail, label: 'Pending Emails' },
-  { href: '/send-email-convo', icon: Mail, label: 'Send Email Convo' },
+  { href: '/send-email-convo', icon: Mail, label: 'Axel Emails' },
   { href: '/text-messages', icon: MessageSquare, label: 'Text Messages' },
   { href: '/wake', icon: Bell, label: 'Wake Center' },
   { href: '/escalations', icon: AlertTriangle, label: 'Escalations' },
@@ -121,7 +120,7 @@ export function Sidebar() {
             >
               <Icon className="size-4" />
               <span>{item.label}</span>
-              {item.href === '/pending-emails' && pendingCount !== null && pendingCount > 0 && (
+              {item.href === '/send-email-convo' && pendingCount !== null && pendingCount > 0 && (
                 <span className="ml-auto px-1.5 py-0.5 text-[10px] font-semibold rounded bg-yellow-500/20 text-yellow-400">
                   {pendingCount}
                 </span>

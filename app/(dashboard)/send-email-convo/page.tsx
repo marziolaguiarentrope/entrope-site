@@ -17,6 +17,7 @@ import { PendingEmailDetail } from '@/components/pending-email-detail';
 import { cn } from '@/lib/utils';
 
 type QueueTab = 'pending' | 'approved' | 'rejected' | 'all';
+type EmailTemplateFilter = 'all' | '42' | '38';
 type SortKey = 'created' | 'subject' | 'member' | 'delivery';
 type SortDir = 'asc' | 'desc';
 
@@ -89,6 +90,11 @@ function stripHtml(html: string): string {
 
 function previewText(text: string | null | undefined): string {
   return stripHtml(text || '');
+}
+
+function formatTemplateLabel(templateId: string | null | undefined): string {
+  if (!templateId) return 'No template';
+  return `Template ${templateId}`;
 }
 
 function createIdempotencyKey(): string | undefined {
@@ -280,6 +286,7 @@ function PendingEmailRow({
       <td className="px-3 py-3 text-sm">
         <div className="font-medium truncate max-w-[360px]">{email.subject || '(No subject)'}</div>
         <div className="text-xs text-muted-foreground truncate max-w-[420px]">{preview || '—'}</div>
+        <div className="mt-1 text-[11px] text-muted-foreground">{formatTemplateLabel(email.template_id)}</div>
       </td>
       <td className="px-3 py-3 text-xs text-muted-foreground whitespace-nowrap">{timeAgo(email.created_at)}</td>
       <td className="px-3 py-3 text-xs text-muted-foreground whitespace-nowrap">{email.decided_by || '—'}</td>
@@ -298,6 +305,7 @@ function PendingEmailRow({
 
 export default function SendEmailConvoPage() {
   const [tab, setTab] = useState<QueueTab>('pending');
+  const [templateFilter, setTemplateFilter] = useState<EmailTemplateFilter>('all');
   const [search, setSearch] = useState('');
   const [sortKey, setSortKey] = useState<SortKey>('created');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
@@ -341,6 +349,7 @@ export default function SendEmailConvoPage() {
   const selectedMemberId = selectedMember?.id ?? null;
   const selectedMemberEmail = selectedMember?.email?.trim() || null;
   const hasSelectedMemberEmail = !!selectedMemberEmail;
+  const selectedTemplateId = templateFilter === 'all' ? undefined : templateFilter;
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -348,9 +357,9 @@ export default function SendEmailConvoPage() {
 
     try {
       const [pending, approved, rejected] = await Promise.all([
-        api.listPendingEmails({ status: 'PENDING', limit: STATUS_PAGE_LIMIT, offset: 0 }),
-        api.listPendingEmails({ status: 'APPROVED', limit: STATUS_PAGE_LIMIT, offset: 0 }),
-        api.listPendingEmails({ status: 'REJECTED', limit: STATUS_PAGE_LIMIT, offset: 0 }),
+        api.listPendingEmails({ status: 'PENDING', templateId: selectedTemplateId, limit: STATUS_PAGE_LIMIT, offset: 0 }),
+        api.listPendingEmails({ status: 'APPROVED', templateId: selectedTemplateId, limit: STATUS_PAGE_LIMIT, offset: 0 }),
+        api.listPendingEmails({ status: 'REJECTED', templateId: selectedTemplateId, limit: STATUS_PAGE_LIMIT, offset: 0 }),
       ]);
 
       setStatusTotals({
@@ -372,7 +381,7 @@ export default function SendEmailConvoPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [selectedTemplateId]);
 
   const openDetail = useCallback(async (id: string) => {
     setSelectedEmailId(id);
@@ -422,6 +431,13 @@ export default function SendEmailConvoPage() {
       return { ...prev, message: { ...prev.message, ...latest } };
     });
   }, [emails, selectedEmailId]);
+
+  useEffect(() => {
+    setSelectedEmailId(null);
+    setSelectedDetail(null);
+    setDetailLoading(false);
+    setDetailError(null);
+  }, [templateFilter]);
 
   const refreshConvTrips = useCallback(async () => {
     if (!selectedMemberId) {
@@ -669,9 +685,9 @@ export default function SendEmailConvoPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold">Send Email Convo</h1>
+        <h1 className="text-2xl font-semibold">Axel Emails</h1>
         <p className="text-sm text-muted-foreground mt-1">
-          Review pending email drafts, wake Axel on a conversational trip to decide whether an email is warranted, or send an immediate email as Axel.
+          Review pending Axel email drafts, wake Axel on a conversational trip to decide whether an email is warranted, or send an immediate email as Axel.
         </p>
       </div>
 
@@ -1102,6 +1118,7 @@ export default function SendEmailConvoPage() {
           <span className="mx-1">·</span>
           <span className="font-medium text-red-400">{rejectedCount}</span> rejected
         </span>
+        <span>Showing {templateFilter === 'all' ? 'both templates' : `template ${templateFilter}`}</span>
       </div>
 
       {hasTruncatedStatus && (
@@ -1111,6 +1128,36 @@ export default function SendEmailConvoPage() {
       )}
 
       <div className="flex flex-col lg:flex-row lg:items-center gap-3">
+        <div className="flex gap-1 bg-accent/30 rounded-lg p-1">
+          <button
+            onClick={() => setTemplateFilter('all')}
+            className={cn(
+              'px-4 py-1.5 text-sm font-medium rounded-md transition-colors',
+              templateFilter === 'all' ? 'bg-background shadow-sm text-foreground' : 'text-muted-foreground hover:text-foreground',
+            )}
+          >
+            Both
+          </button>
+          <button
+            onClick={() => setTemplateFilter('42')}
+            className={cn(
+              'px-4 py-1.5 text-sm font-medium rounded-md transition-colors',
+              templateFilter === '42' ? 'bg-background shadow-sm text-foreground' : 'text-muted-foreground hover:text-foreground',
+            )}
+          >
+            Template 42
+          </button>
+          <button
+            onClick={() => setTemplateFilter('38')}
+            className={cn(
+              'px-4 py-1.5 text-sm font-medium rounded-md transition-colors',
+              templateFilter === '38' ? 'bg-background shadow-sm text-foreground' : 'text-muted-foreground hover:text-foreground',
+            )}
+          >
+            Template 38
+          </button>
+        </div>
+
         <div className="flex gap-1 bg-accent/30 rounded-lg p-1">
           <button
             onClick={() => setTab('pending')}
