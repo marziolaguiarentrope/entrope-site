@@ -731,9 +731,27 @@ export function BookingEditInline({ booking, travellers, onClose, onSave }: Book
 
         if (Object.keys(stay).length > 0) patch.stay = stay;
 
-        // Guests
+        // Guests – sanitize before sending to match backend BookingTraveler schema
+        // (extra="forbid", date_of_birth: date | None — empty strings crash Pydantic)
         if (guests.length > 0) {
-          patch.guests = guests;
+          const ALLOWED_GUEST_FIELDS = [
+            'first_name', 'middle_name', 'last_name', 'date_of_birth',
+            'age', 'is_adult', 'is_primary', 'citizenship', 'traveller_profile_id',
+          ] as const;
+          patch.guests = guests.map((g) => {
+            const clean: Record<string, unknown> = {};
+            for (const key of ALLOWED_GUEST_FIELDS) {
+              const val = (g as Record<string, unknown>)[key];
+              if (val === undefined) continue;
+              // Convert empty strings to null for nullable fields
+              if (val === '' && (key === 'date_of_birth' || key === 'middle_name' || key === 'citizenship' || key === 'traveller_profile_id')) {
+                clean[key] = null;
+              } else {
+                clean[key] = val;
+              }
+            }
+            return clean as BookingTravelerPatch;
+          });
         }
 
         if (Object.keys(patch).length === 0) {
