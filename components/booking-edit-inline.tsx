@@ -8,6 +8,8 @@ import {
   HotelBookingView,
   FlightBookingPatchRequest,
   HotelBookingPatchRequest,
+  HotelPatchData,
+  RoomTypePatchData,
   FlightTicketPatch,
   BookingTravelerPatch,
   VerificationStatus,
@@ -68,8 +70,139 @@ function formatMoney(amount: number | null | undefined, currency: string | null 
 // ─── Shared field classes ─────────────────────────────────────────────────────
 
 const inputCls =
-  'w-full px-3 py-2 bg-background border border-border rounded focus:outline-none focus:ring-2 focus:ring-primary text-sm';
-const labelCls = 'block text-sm text-muted-foreground mb-1';
+  'w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary text-sm transition-all';
+const labelCls = 'block text-xs font-medium text-muted-foreground mb-1';
+const sectionCls = 'border border-border/50 rounded-xl p-4 space-y-3';
+
+// ─── Collapsible Section ──────────────────────────────────────────────────────
+
+function Section({
+  title,
+  icon,
+  badge,
+  defaultOpen = true,
+  children,
+}: {
+  title: string;
+  icon: string;
+  badge?: string;
+  defaultOpen?: boolean;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div className={sectionCls}>
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        className="flex items-center justify-between w-full group"
+      >
+        <div className="flex items-center gap-2">
+          <span className="text-base">{icon}</span>
+          <span className="text-sm font-semibold">{title}</span>
+          {badge && (
+            <span className="px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-primary/15 text-primary">
+              {badge}
+            </span>
+          )}
+        </div>
+        <svg
+          className={cn(
+            'w-4 h-4 text-muted-foreground transition-transform duration-200',
+            open ? 'rotate-180' : ''
+          )}
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+      {open && <div className="space-y-3 pt-1">{children}</div>}
+    </div>
+  );
+}
+
+// ─── Toggle Switch ────────────────────────────────────────────────────────────
+
+function Toggle({
+  checked,
+  onChange,
+  label,
+  description,
+}: {
+  checked: boolean;
+  onChange: (val: boolean) => void;
+  label: string;
+  description?: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={() => onChange(!checked)}
+      className="flex items-center justify-between w-full py-1 group"
+    >
+      <div className="flex flex-col items-start">
+        <span className="text-sm">{label}</span>
+        {description && <span className="text-xs text-muted-foreground">{description}</span>}
+      </div>
+      <div
+        className={cn(
+          'relative w-9 h-5 rounded-full transition-colors duration-200',
+          checked ? 'bg-primary' : 'bg-border'
+        )}
+      >
+        <div
+          className={cn(
+            'absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-transform duration-200',
+            checked ? 'translate-x-4' : 'translate-x-0'
+          )}
+        />
+      </div>
+    </button>
+  );
+}
+
+// ─── Number Stepper ───────────────────────────────────────────────────────────
+
+function NumberStepper({
+  value,
+  onChange,
+  label,
+  min = 0,
+  max = 99,
+}: {
+  value: number;
+  onChange: (val: number) => void;
+  label: string;
+  min?: number;
+  max?: number;
+}) {
+  return (
+    <div className="flex items-center justify-between py-1">
+      <span className="text-sm">{label}</span>
+      <div className="flex items-center gap-1">
+        <button
+          type="button"
+          onClick={() => onChange(Math.max(min, value - 1))}
+          disabled={value <= min}
+          className="w-7 h-7 flex items-center justify-center rounded-lg bg-accent/50 hover:bg-accent disabled:opacity-30 disabled:cursor-not-allowed transition-colors text-sm font-medium"
+        >
+          −
+        </button>
+        <span className="w-8 text-center text-sm font-semibold tabular-nums">{value}</span>
+        <button
+          type="button"
+          onClick={() => onChange(Math.min(max, value + 1))}
+          disabled={value >= max}
+          className="w-7 h-7 flex items-center justify-center rounded-lg bg-accent/50 hover:bg-accent disabled:opacity-30 disabled:cursor-not-allowed transition-colors text-sm font-medium"
+        >
+          +
+        </button>
+      </div>
+    </div>
+  );
+}
 
 // ─── Tab pill component ───────────────────────────────────────────────────────
 
@@ -83,7 +216,7 @@ function TabBar({
   onChange: (tab: string) => void;
 }) {
   return (
-    <div className="flex gap-1 mb-4 flex-wrap">
+    <div className="flex gap-1 flex-wrap">
       {tabs.map((t) => (
         <button
           key={t}
@@ -102,7 +235,7 @@ function TabBar({
   );
 }
 
-// ─── Email viewer (adapted from task-detail.tsx) ──────────────────────────────
+// ─── Inline Email Viewer ──────────────────────────────────────────────────────
 
 function InlineEmailViewer({
   email,
@@ -116,81 +249,62 @@ function InlineEmailViewer({
   const [expanded, setExpanded] = useState(false);
 
   if (loading)
-    return <p className="text-sm text-muted-foreground py-4">Loading email...</p>;
-
-  if (error)
-    return (
-      <div className="bg-red-500/10 rounded p-3">
-        <p className="text-sm text-red-400">{error}</p>
-      </div>
-    );
-
+    return <div className="text-xs text-muted-foreground py-2">Loading source email...</div>;
+  if (error) return <div className="text-xs text-red-400 py-2">{error}</div>;
   if (!email)
     return (
-      <div className="bg-accent/30 rounded p-3">
-        <p className="text-sm text-muted-foreground">No source email found for this booking.</p>
+      <div className="text-xs text-muted-foreground py-2">
+        No source email found for this booking.
       </div>
     );
 
   return (
-    <div className="space-y-3 text-sm">
-      <div className="space-y-1">
-        <div>
-          <span className="text-muted-foreground">From: </span>
-          <span>{email.from_address || 'N/A'}</span>
-        </div>
-        <div>
-          <span className="text-muted-foreground">To: </span>
-          <span>{email.to_address || 'N/A'}</span>
-        </div>
-        <div>
-          <span className="text-muted-foreground">Subject: </span>
-          <span className="font-medium">{email.subject || 'N/A'}</span>
-        </div>
-        {email.received_at && (
+    <div className="space-y-2 text-xs">
+      <div className="space-y-1 text-muted-foreground">
+        {email.from_address && (
           <div>
-            <span className="text-muted-foreground">Received: </span>
-            <span>{new Date(email.received_at).toLocaleString()}</span>
+            <span className="font-medium text-foreground">From:</span> {email.from_address}
+          </div>
+        )}
+        {email.to_address && (
+          <div>
+            <span className="font-medium text-foreground">To:</span> {email.to_address}
+          </div>
+        )}
+        {email.subject && (
+          <div>
+            <span className="font-medium text-foreground">Subject:</span> {email.subject}
           </div>
         )}
       </div>
 
-      <div className="border-t border-border pt-3">
-        <div className="flex items-center justify-between mb-2">
-          <span className="text-xs text-muted-foreground font-medium">Email Body</span>
+      {email.body_html && (
+        <div>
           <button
             onClick={() => setExpanded(!expanded)}
-            className="text-xs text-primary hover:underline"
+            className="text-xs text-primary hover:underline mb-1"
           >
-            {expanded ? 'Collapse' : 'Expand'}
+            {expanded ? '▾ Collapse email body' : '▸ Expand email body'}
           </button>
-        </div>
-        <div
-          className={cn(
-            'bg-background rounded p-3 overflow-y-auto text-sm whitespace-pre-wrap',
-            expanded ? 'max-h-[600px]' : 'max-h-48'
+          {expanded && (
+            <div
+              className="bg-white text-black p-2 rounded text-xs max-h-[300px] overflow-y-auto"
+              dangerouslySetInnerHTML={{ __html: email.body_html }}
+            />
           )}
-          dangerouslySetInnerHTML={{ __html: email.body || 'No content' }}
-        />
-      </div>
+        </div>
+      )}
 
       {email.attachments && email.attachments.length > 0 && (
-        <div className="border-t border-border pt-3">
-          <p className="text-xs text-muted-foreground mb-1">Attachments:</p>
-          <div className="flex flex-wrap gap-2">
-            {email.attachments.map((att, i) => (
-              <span key={i} className="px-2 py-1 bg-background text-xs rounded">
-                {att.filename}
-              </span>
-            ))}
-          </div>
+        <div className="text-muted-foreground">
+          {email.attachments.length} attachment{email.attachments.length !== 1 ? 's' : ''}
         </div>
       )}
     </div>
   );
 }
 
-// ─── Hotel lookup panel ───────────────────────────────────────────────────────
+// ─── Hotel Lookup Panel ───────────────────────────────────────────────────────
 
 function HotelLookupPanel({
   initialName,
@@ -201,99 +315,68 @@ function HotelLookupPanel({
   onSelect: (match: HotelMatchResult) => void;
   onClose: () => void;
 }) {
-  const [searchName, setSearchName] = useState(initialName);
-  const [searchAddress, setSearchAddress] = useState('');
+  const [query, setQuery] = useState(initialName);
+  const [address, setAddress] = useState('');
   const [results, setResults] = useState<HotelMatchResult[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [searching, setSearching] = useState(false);
 
   async function handleSearch() {
-    if (!searchName.trim()) return;
-    setLoading(true);
-    setError(null);
-    setResults([]);
+    if (!query.trim()) return;
+    setSearching(true);
     try {
-      const resp = await api.matchHotel({
-        hotel_name: searchName.trim(),
-        address: searchAddress.trim() || undefined,
-      });
-      setResults(resp.matches);
-      if (resp.matches.length === 0) setError('No matches found. Try adjusting the hotel name or address.');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to search hotels');
+      const res = await api.matchHotel({ hotel_name: query, address: address || undefined });
+      setResults(res.matches || []);
+    } catch {
+      setResults([]);
     } finally {
-      setLoading(false);
+      setSearching(false);
     }
   }
 
   return (
-    <div className="mt-2 border border-border rounded-lg p-3 bg-accent/20 space-y-3">
-      <div className="flex items-center justify-between">
-        <span className="text-sm font-medium">Find Hotel ID</span>
-        <button onClick={onClose} className="text-muted-foreground hover:text-foreground">
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-          </svg>
+    <div className="mt-2 border border-border rounded-xl p-3 space-y-2 bg-accent/20">
+      <div className="flex gap-2">
+        <input
+          type="text"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Hotel name"
+          className={cn(inputCls, 'flex-1')}
+          onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
+        />
+        <input
+          type="text"
+          value={address}
+          onChange={(e) => setAddress(e.target.value)}
+          placeholder="Address (optional)"
+          className={cn(inputCls, 'flex-1')}
+          onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
+        />
+      </div>
+      <div className="flex gap-2">
+        <button
+          onClick={handleSearch}
+          disabled={searching}
+          className="px-3 py-1.5 text-xs bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 disabled:opacity-50 transition-colors"
+        >
+          {searching ? 'Searching...' : 'Search'}
+        </button>
+        <button onClick={onClose} className="px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors">
+          Cancel
         </button>
       </div>
-      <div className="grid grid-cols-2 gap-2">
-        <div>
-          <label className={labelCls}>Hotel Name</label>
-          <input
-            type="text"
-            value={searchName}
-            onChange={(e) => setSearchName(e.target.value)}
-            placeholder="e.g. Marriott Downtown"
-            className={inputCls}
-          />
-        </div>
-        <div>
-          <label className={labelCls}>Address (optional)</label>
-          <input
-            type="text"
-            value={searchAddress}
-            onChange={(e) => setSearchAddress(e.target.value)}
-            placeholder="e.g. 123 Main St, New York"
-            className={inputCls}
-          />
-        </div>
-      </div>
-      <button
-        onClick={handleSearch}
-        disabled={!searchName.trim() || loading}
-        className="w-full px-4 py-2 bg-primary text-primary-foreground rounded hover:bg-primary/90 disabled:opacity-50 transition-colors text-sm"
-      >
-        {loading ? 'Searching...' : 'Search'}
-      </button>
-      {error && <p className="text-sm text-yellow-400">{error}</p>}
       {results.length > 0 && (
-        <div className="space-y-1 max-h-48 overflow-y-auto">
-          <p className="text-xs text-muted-foreground">{results.length} match{results.length !== 1 ? 'es' : ''}</p>
+        <div className="space-y-1 max-h-[200px] overflow-y-auto">
           {results.map((m, i) => (
             <button
               key={i}
               onClick={() => onSelect(m)}
-              className="w-full text-left p-2 bg-accent/30 hover:bg-accent/50 rounded transition-colors"
+              className="w-full text-left px-3 py-2 rounded-lg hover:bg-accent/50 transition-colors text-xs"
             >
-              <div className="flex items-center justify-between">
-                <span className="font-medium text-sm">{m.name}</span>
-                <span
-                  className={cn(
-                    'text-xs px-2 py-0.5 rounded',
-                    m.confidence_score >= 0.8
-                      ? 'bg-green-500/20 text-green-400'
-                      : m.confidence_score >= 0.5
-                        ? 'bg-yellow-500/20 text-yellow-400'
-                        : 'bg-red-500/20 text-red-400'
-                  )}
-                >
-                  {Math.round(m.confidence_score * 100)}%
-                </span>
+              <div className="font-medium">{m.name}</div>
+              <div className="text-muted-foreground">
+                Confidence: {m.confidence_score} · {m.match_type}
               </div>
-              <div className="text-xs text-muted-foreground mt-0.5">
-                {m.match_type} · {m.matched_fields.join(', ')}
-              </div>
-              <div className="text-xs text-muted-foreground font-mono mt-0.5">{m.hotel_id}</div>
             </button>
           ))}
         </div>
@@ -302,9 +385,7 @@ function HotelLookupPanel({
   );
 }
 
-// ─── Main Component ───────────────────────────────────────────────────────────
-
-// ─── Traveler ID resolver ────────────────────────────────────────────────────
+// ─── Traveler ID resolver ─────────────────────────────────────────────────────
 
 function resolveTravelerId(
   id: string,
@@ -320,12 +401,10 @@ function resolveTravelerId(
       };
     }
   }
-  // If no match found and it looks like a UUID, return empty names
   const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(id);
   if (isUuid) {
     return { first_name: '', last_name: '', is_primary: false };
   }
-  // Otherwise treat as a "First Last" name string
   const parts = id.split(' ');
   return {
     first_name: parts[0] || '',
@@ -334,7 +413,18 @@ function resolveTravelerId(
   };
 }
 
-// ─── Main Component ───────────────────────────────────────────────────────────
+// ─── Meal Plan Options ────────────────────────────────────────────────────────
+
+const MEAL_PLANS = [
+  { value: '', label: '— None —' },
+  { value: 'room_only', label: 'Room Only' },
+  { value: 'breakfast', label: 'Breakfast' },
+  { value: 'half_board', label: 'Half Board' },
+  { value: 'full_board', label: 'Full Board' },
+  { value: 'all_inclusive', label: 'All Inclusive' },
+];
+
+// ─── Main Component ──────────────────────────────────────────────────────────
 
 interface BookingEditInlineProps {
   booking: BookingView;
@@ -349,12 +439,13 @@ export function BookingEditInline({ booking, travellers, onClose, onSave }: Book
   const hotelData = booking.hotel;
 
   const flightTabs = ['Details', 'Itinerary', 'Passengers'];
-  const hotelTabs = ['Details', 'Stay', 'Guests'];
+  const hotelTabs = ['Details', 'Stay', 'Hotel & Room', 'Guests'];
   const tabs = isHotel ? hotelTabs : flightTabs;
 
   const [activeTab, setActiveTab] = useState(tabs[0]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [successFields, setSuccessFields] = useState<string[] | null>(null);
 
   // ── Details fields ──────────────────────────────────────────────────────
   const [confirmationCode, setConfirmationCode] = useState(
@@ -372,7 +463,7 @@ export function BookingEditInline({ booking, travellers, onClose, onSave }: Book
   );
   const [priceCurrency, setPriceCurrency] = useState(initCurrency);
 
-  // ── Hotel stay fields ───────────────────────────────────────────────────
+  // ── Hotel stay fields ─────────────────────────────────────────────────
   const [hotelId, setHotelId] = useState(hotelData?.hotel_id || '');
   const [hotelName, setHotelName] = useState(hotelData?.hotel_name || '');
   const [checkInDate, setCheckInDate] = useState(hotelData?.check_in || hotelData?.check_in_date || '');
@@ -380,16 +471,49 @@ export function BookingEditInline({ booking, travellers, onClose, onSave }: Book
   const [roomType, setRoomType] = useState(hotelData?.room_type || '');
   const [showHotelLookup, setShowHotelLookup] = useState(false);
 
-  // ── Hotel guests ────────────────────────────────────────────────────────
+  // ── Occupancy fields (NEW) ────────────────────────────────────────────
+  const [rooms, setRooms] = useState(1);
+  const [adults, setAdults] = useState(2);
+  const [children, setChildren] = useState(0);
+  const [childrenAges, setChildrenAges] = useState<number[]>([]);
+  const [refundable, setRefundable] = useState(false);
+  const [mealPlan, setMealPlan] = useState('');
+
+  // ── Hotel property fields (NEW) ───────────────────────────────────────
+  const [hotelChain, setHotelChain] = useState('');
+  const [hotelBrand, setHotelBrand] = useState('');
+  const [hotelCity, setHotelCity] = useState('');
+  const [hotelCountry, setHotelCountry] = useState('');
+  const [hotelAddress, setHotelAddress] = useState('');
+  const [hotelPostalCode, setHotelPostalCode] = useState('');
+  const [hotelLat, setHotelLat] = useState('');
+  const [hotelLng, setHotelLng] = useState('');
+  const [hotelStarRating, setHotelStarRating] = useState('');
+  const [hotelPhone, setHotelPhone] = useState('');
+  const [hotelEmail, setHotelEmail] = useState('');
+
+  // ── Room type fields (NEW) ────────────────────────────────────────────
+  const [rtName, setRtName] = useState('');
+  const [rtBedType, setRtBedType] = useState('');
+  const [rtBedCount, setRtBedCount] = useState('');
+  const [rtMaxOccupancy, setRtMaxOccupancy] = useState('');
+  const [rtMaxAdults, setRtMaxAdults] = useState('');
+  const [rtMaxChildren, setRtMaxChildren] = useState('');
+  const [rtSqft, setRtSqft] = useState('');
+  const [rtSqm, setRtSqm] = useState('');
+  const [rtView, setRtView] = useState('');
+  const [rtSmoking, setRtSmoking] = useState(false);
+  const [rtAccessible, setRtAccessible] = useState(false);
+
+  // ── Hotel guests ──────────────────────────────────────────────────────
   const [guests, setGuests] = useState<BookingTravelerPatch[]>(() => {
     if (!hotelData?.guests || hotelData.guests.length === 0) return [];
     return hotelData.guests.map((g) => {
-      // guests from the API are traveler profile IDs — resolve to names
       return resolveTravelerId(typeof g === 'string' ? g : '', travellers);
     });
   });
 
-  // ── Flight itinerary ────────────────────────────────────────────────────
+  // ── Flight itinerary ──────────────────────────────────────────────────
   type SegmentDraft = {
     origin: string;
     destination: string;
@@ -428,7 +552,6 @@ export function BookingEditInline({ booking, travellers, onClose, onSave }: Book
           })),
         };
       }
-      // Old schema
       return {
         direction: dir,
         segments: [
@@ -446,11 +569,10 @@ export function BookingEditInline({ booking, travellers, onClose, onSave }: Book
     });
   });
 
-  // ── Flight tickets/passengers ───────────────────────────────────────────
+  // ── Flight tickets/passengers ─────────────────────────────────────────
   const [tickets, setTickets] = useState<FlightTicketPatch[]>(() => {
     if (!flightData?.passengers || flightData.passengers.length === 0) return [];
     return flightData.passengers.map((name) => {
-      // passengers might be IDs or names — resolve via travellers
       const resolved = resolveTravelerId(typeof name === 'string' ? name : '', travellers);
       return {
         traveler: resolved,
@@ -460,7 +582,7 @@ export function BookingEditInline({ booking, travellers, onClose, onSave }: Book
     });
   });
 
-  // ── Source email state (side panel) ─────────────────────────────────────
+  // ── Source email state (side panel) ───────────────────────────────────
   const [showEmailPanel, setShowEmailPanel] = useState(false);
   const [email, setEmail] = useState<RawEmail | null>(null);
   const [emailLoading, setEmailLoading] = useState(false);
@@ -479,7 +601,7 @@ export function BookingEditInline({ booking, travellers, onClose, onSave }: Book
       .then((data) => setEmail(data))
       .catch((err) => {
         if (err?.status === 404) {
-          setEmailError(null); // email will be null → shows "no email" message
+          setEmailError(null);
         } else {
           setEmailError(err instanceof Error ? err.message : 'Failed to load email');
         }
@@ -487,9 +609,9 @@ export function BookingEditInline({ booking, travellers, onClose, onSave }: Book
       .finally(() => setEmailLoading(false));
   }, [showEmailPanel, emailFetched, isHotel, booking.id]);
 
-  // ── Auto-fetch hotel_id if missing ─────────────────────────────────────
+  // ── Auto-fetch hotel_id if missing ────────────────────────────────────
   useEffect(() => {
-    if (!isHotel || hotelId) return; // only fetch for hotels with missing hotel_id
+    if (!isHotel || hotelId) return;
     let cancelled = false;
     api
       .getHotelBookingDetail(booking.id)
@@ -498,16 +620,25 @@ export function BookingEditInline({ booking, travellers, onClose, onSave }: Book
           setHotelId(detail.hotel_id);
         }
       })
-      .catch(() => {
-        // Silently ignore — hotel_id stays empty, operator can use Lookup
-      });
+      .catch(() => {});
     return () => { cancelled = true; };
   }, [isHotel, booking.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Save handler ────────────────────────────────────────────────────────
+  // ── Sync children ages array with children count ──────────────────────
+  useEffect(() => {
+    setChildrenAges((prev) => {
+      if (children === 0) return [];
+      if (prev.length === children) return prev;
+      if (prev.length < children) return [...prev, ...Array(children - prev.length).fill(5)];
+      return prev.slice(0, children);
+    });
+  }, [children]);
+
+  // ── Save handler ──────────────────────────────────────────────────────
   async function handleSave() {
     setSaving(true);
     setError(null);
+    setSuccessFields(null);
 
     try {
       if (isHotel) {
@@ -520,7 +651,6 @@ export function BookingEditInline({ booking, travellers, onClose, onSave }: Book
         if (bookingProvider && bookingProvider !== origProvider) patch.booking_provider = bookingProvider;
         if (verificationStatus) patch.verification_status = verificationStatus;
 
-        // Price — send display amount as-is; BE converts to minor units via Money.from_decimal()
         const newPrice = priceAmount ? parseFloat(priceAmount) : null;
         if (newPrice !== null && !isNaN(newPrice) && newPrice > 0) {
           patch.customer_price = { amount: newPrice, currency: priceCurrency };
@@ -533,25 +663,73 @@ export function BookingEditInline({ booking, travellers, onClose, onSave }: Book
         const origRoomType = hotelData?.room_type || '';
         const origHotelName = hotelData?.hotel_name || '';
 
-        const stayChanged =
-          hotelId !== origHotelId ||
-          hotelName !== origHotelName ||
-          checkInDate !== origCheckIn ||
-          checkOutDate !== origCheckOut ||
-          roomType !== origRoomType;
+        // Build stay patch
+        const stay: HotelBookingPatchRequest['stay'] = {};
 
-        if (stayChanged) {
-          const stay: HotelBookingPatchRequest['stay'] = {};
-          if (hotelId !== origHotelId || hotelName !== origHotelName) {
-            stay.hotel = {};
-            if (hotelId) stay.hotel.id = hotelId;
-            if (hotelName) stay.hotel.name = hotelName;
-          }
-          if (checkInDate && checkInDate !== origCheckIn) stay.check_in = checkInDate;
-          if (checkOutDate && checkOutDate !== origCheckOut) stay.check_out = checkOutDate;
-          if (roomType && roomType !== origRoomType) stay.room_type_name = roomType;
-          if (Object.keys(stay).length > 0) patch.stay = stay;
+        // Hotel identity
+        if (hotelId !== origHotelId || hotelName !== origHotelName) {
+          const hotel: HotelPatchData = {};
+          if (hotelId) hotel.id = hotelId;
+          if (hotelName) hotel.name = hotelName;
+          if (hotelChain) hotel.chain = hotelChain;
+          if (hotelBrand) hotel.brand = hotelBrand;
+          if (hotelCity) hotel.city = hotelCity;
+          if (hotelCountry) hotel.country = hotelCountry;
+          if (hotelAddress) hotel.address = hotelAddress;
+          if (hotelPostalCode) hotel.postal_code = hotelPostalCode;
+          if (hotelLat) hotel.latitude = parseFloat(hotelLat);
+          if (hotelLng) hotel.longitude = parseFloat(hotelLng);
+          if (hotelStarRating) hotel.star_rating = parseFloat(hotelStarRating);
+          if (hotelPhone) hotel.phone = hotelPhone;
+          if (hotelEmail) hotel.email = hotelEmail;
+          if (Object.keys(hotel).length > 0) stay.hotel = hotel;
+        } else {
+          // Even if name/id didn't change, still send property updates
+          const hotel: HotelPatchData = {};
+          if (hotelChain) hotel.chain = hotelChain;
+          if (hotelBrand) hotel.brand = hotelBrand;
+          if (hotelCity) hotel.city = hotelCity;
+          if (hotelCountry) hotel.country = hotelCountry;
+          if (hotelAddress) hotel.address = hotelAddress;
+          if (hotelPostalCode) hotel.postal_code = hotelPostalCode;
+          if (hotelLat) hotel.latitude = parseFloat(hotelLat);
+          if (hotelLng) hotel.longitude = parseFloat(hotelLng);
+          if (hotelStarRating) hotel.star_rating = parseFloat(hotelStarRating);
+          if (hotelPhone) hotel.phone = hotelPhone;
+          if (hotelEmail) hotel.email = hotelEmail;
+          if (Object.keys(hotel).length > 0) stay.hotel = hotel;
         }
+
+        if (checkInDate && checkInDate !== origCheckIn) stay.check_in = checkInDate;
+        if (checkOutDate && checkOutDate !== origCheckOut) stay.check_out = checkOutDate;
+        if (roomType && roomType !== origRoomType) stay.room_type_name = roomType;
+
+        // Occupancy
+        stay.rooms = rooms;
+        stay.adults = adults;
+        if (children > 0) {
+          stay.children = children;
+          if (childrenAges.length > 0) stay.children_ages = childrenAges;
+        }
+        stay.refundable = refundable;
+        if (mealPlan) stay.meal_plan = mealPlan;
+
+        // Room type structured data
+        const rt: RoomTypePatchData = {};
+        if (rtName) rt.name = rtName;
+        if (rtBedType) rt.bed_type = rtBedType;
+        if (rtBedCount) rt.bed_count = parseInt(rtBedCount);
+        if (rtMaxOccupancy) rt.max_occupancy = parseInt(rtMaxOccupancy);
+        if (rtMaxAdults) rt.max_adults = parseInt(rtMaxAdults);
+        if (rtMaxChildren) rt.max_children = parseInt(rtMaxChildren);
+        if (rtSqft) rt.sqft = parseInt(rtSqft);
+        if (rtSqm) rt.sqm = parseInt(rtSqm);
+        if (rtView) rt.view = rtView;
+        rt.smoking = rtSmoking;
+        rt.accessible = rtAccessible;
+        if (Object.keys(rt).length > 0) stay.room_type = rt;
+
+        if (Object.keys(stay).length > 0) patch.stay = stay;
 
         // Guests
         if (guests.length > 0) {
@@ -563,7 +741,12 @@ export function BookingEditInline({ booking, travellers, onClose, onSave }: Book
           return;
         }
 
-        await api.patchHotelBooking(booking.id, patch);
+        const res = await api.patchHotelBooking(booking.id, patch);
+        setSuccessFields(res.updated_fields);
+        setTimeout(() => {
+          onSave();
+          onClose();
+        }, 800);
       } else {
         // Flight
         const patch: FlightBookingPatchRequest = {};
@@ -575,13 +758,11 @@ export function BookingEditInline({ booking, travellers, onClose, onSave }: Book
         if (bookingProvider && bookingProvider !== origProvider) patch.booking_provider = bookingProvider;
         if (verificationStatus) patch.verification_status = verificationStatus;
 
-        // Price — send display amount as-is; BE converts to minor units via Money.from_decimal()
         const newPrice = priceAmount ? parseFloat(priceAmount) : null;
         if (newPrice !== null && !isNaN(newPrice) && newPrice > 0) {
           patch.customer_price = { amount: newPrice, currency: priceCurrency };
         }
 
-        // Itinerary — send full legs array if anything changed
         if (legs.length > 0) {
           patch.itinerary = {
             legs: legs.map((leg) => ({
@@ -600,7 +781,6 @@ export function BookingEditInline({ booking, travellers, onClose, onSave }: Book
           };
         }
 
-        // Tickets
         if (tickets.length > 0) {
           patch.tickets = tickets;
         }
@@ -611,10 +791,9 @@ export function BookingEditInline({ booking, travellers, onClose, onSave }: Book
         }
 
         await api.patchFlightBooking(booking.id, patch);
+        onSave();
+        onClose();
       }
-
-      onSave();
-      onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save');
     } finally {
@@ -622,7 +801,7 @@ export function BookingEditInline({ booking, travellers, onClose, onSave }: Book
     }
   }
 
-  // ── Segment helpers ─────────────────────────────────────────────────────
+  // ── Segment helpers ───────────────────────────────────────────────────
   function updateSegment(legIdx: number, segIdx: number, field: keyof SegmentDraft, value: string) {
     setLegs((prev) => {
       const next = prev.map((l) => ({ ...l, segments: l.segments.map((s) => ({ ...s })) }));
@@ -654,7 +833,7 @@ export function BookingEditInline({ booking, travellers, onClose, onSave }: Book
     ]);
   }
 
-  // ── Ticket helpers ──────────────────────────────────────────────────────
+  // ── Ticket helpers ────────────────────────────────────────────────────
   function updateTicket(idx: number, updates: Partial<FlightTicketPatch>) {
     setTickets((prev) =>
       prev.map((t, i) => (i === idx ? { ...t, ...updates } : t))
@@ -671,22 +850,32 @@ export function BookingEditInline({ booking, travellers, onClose, onSave }: Book
     );
   }
 
-  // ── Guest helpers ───────────────────────────────────────────────────────
+  // ── Guest helpers ─────────────────────────────────────────────────────
   function updateGuest(idx: number, field: keyof BookingTravelerPatch, value: string | boolean) {
     setGuests((prev) =>
       prev.map((g, i) => (i === idx ? { ...g, [field]: value } : g))
     );
   }
 
-  // ── Render ──────────────────────────────────────────────────────────────
+  // ── Render ────────────────────────────────────────────────────────────
   return (
-    <div className="bg-card border-2 border-primary/30 rounded-lg p-4 space-y-3">
+    <div className="bg-card border-2 border-primary/30 rounded-xl p-5 space-y-4">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <h4 className="text-sm font-semibold">
-          Edit {isHotel ? 'Hotel' : 'Flight'} Booking
-          <span className="text-xs text-muted-foreground ml-2 font-mono">{booking.id.slice(0, 8)}</span>
-        </h4>
+        <div className="flex items-center gap-3">
+          <div className={cn(
+            'w-8 h-8 rounded-lg flex items-center justify-center text-base',
+            isHotel ? 'bg-purple-500/15 text-purple-400' : 'bg-blue-500/15 text-blue-400'
+          )}>
+            {isHotel ? '🏨' : '✈️'}
+          </div>
+          <div>
+            <h4 className="text-sm font-semibold">
+              Edit {isHotel ? 'Hotel' : 'Flight'} Booking
+            </h4>
+            <span className="text-xs text-muted-foreground font-mono">{booking.id.slice(0, 12)}...</span>
+          </div>
+        </div>
         <div className="flex items-center gap-2">
           <button
             onClick={() => setShowEmailPanel(!showEmailPanel)}
@@ -697,9 +886,9 @@ export function BookingEditInline({ booking, travellers, onClose, onSave }: Book
                 : 'bg-accent/50 text-muted-foreground hover:bg-accent'
             )}
           >
-            {showEmailPanel ? '✉ Hide Email' : '✉ Show Email'}
+            {showEmailPanel ? '✉ Hide Email' : '✉ Source Email'}
           </button>
-          <button onClick={onClose} className="text-muted-foreground hover:text-foreground">
+          <button onClick={onClose} className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>
@@ -713,77 +902,80 @@ export function BookingEditInline({ booking, travellers, onClose, onSave }: Book
       <div className={cn('flex gap-4', showEmailPanel ? 'flex-row' : 'flex-col')}>
 
       {/* Scrollable edit content area */}
-      <div className={cn('max-h-[500px] overflow-y-auto pr-1', showEmailPanel ? 'flex-1 min-w-0' : 'w-full')}>
+      <div className={cn('max-h-[600px] overflow-y-auto pr-1 space-y-4', showEmailPanel ? 'flex-1 min-w-0' : 'w-full')}>
+
         {/* ── DETAILS TAB ──────────────────────────────────────────────── */}
         {activeTab === 'Details' && (
           <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className={labelCls}>Confirmation Code</label>
-                <input type="text" value={confirmationCode} onChange={(e) => setConfirmationCode(e.target.value)} className={inputCls} />
+            <Section title="Booking Info" icon="📋" defaultOpen={true}>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className={labelCls}>Confirmation Code</label>
+                  <input type="text" value={confirmationCode} onChange={(e) => setConfirmationCode(e.target.value)} className={inputCls} />
+                </div>
+                <div>
+                  <label className={labelCls}>Booking Provider</label>
+                  <input type="text" value={bookingProvider} onChange={(e) => setBookingProvider(e.target.value)} className={inputCls} />
+                </div>
               </div>
               <div>
-                <label className={labelCls}>Booking Provider</label>
-                <input type="text" value={bookingProvider} onChange={(e) => setBookingProvider(e.target.value)} className={inputCls} />
-              </div>
-            </div>
-
-            <div>
-              <label className={labelCls}>Verification Status</label>
-              <select
-                value={verificationStatus}
-                onChange={(e) => setVerificationStatus(e.target.value as VerificationStatus | '')}
-                className={inputCls}
-              >
-                <option value="">— No change —</option>
-                <option value="UNVERIFIED">UNVERIFIED</option>
-                <option value="VERIFIED">VERIFIED</option>
-                <option value="REVIEW_PENDING">REVIEW_PENDING</option>
-              </select>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className={labelCls}>Price</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={priceAmount}
-                  onChange={(e) => setPriceAmount(e.target.value)}
-                  placeholder="0.00"
+                <label className={labelCls}>Verification Status</label>
+                <select
+                  value={verificationStatus}
+                  onChange={(e) => setVerificationStatus(e.target.value as VerificationStatus | '')}
                   className={inputCls}
-                />
-              </div>
-              <div>
-                <label className={labelCls}>Currency</label>
-                <select value={priceCurrency} onChange={(e) => setPriceCurrency(e.target.value)} className={inputCls}>
-                  {['USD', 'EUR', 'GBP', 'CAD', 'AUD'].map((c) => (
-                    <option key={c} value={c}>{c}</option>
-                  ))}
+                >
+                  <option value="">— No change —</option>
+                  <option value="UNVERIFIED">UNVERIFIED</option>
+                  <option value="VERIFIED">VERIFIED</option>
+                  <option value="REVIEW_PENDING">REVIEW_PENDING</option>
                 </select>
               </div>
-            </div>
+            </Section>
 
-            {currentPrice.amount !== null && (
-              <p className="text-xs text-muted-foreground">
-                Current: {formatMoney(currentPrice.amount, currentPrice.currency)}
-              </p>
-            )}
+            <Section title="Pricing" icon="💰" defaultOpen={true}>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className={labelCls}>Price</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={priceAmount}
+                    onChange={(e) => setPriceAmount(e.target.value)}
+                    placeholder="0.00"
+                    className={inputCls}
+                  />
+                </div>
+                <div>
+                  <label className={labelCls}>Currency</label>
+                  <select value={priceCurrency} onChange={(e) => setPriceCurrency(e.target.value)} className={inputCls}>
+                    {['USD', 'EUR', 'GBP', 'CAD', 'AUD', 'JPY', 'CHF', 'SEK', 'NOK', 'DKK', 'MXN', 'BRL'].map((c) => (
+                      <option key={c} value={c}>{c}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              {currentPrice.amount !== null && (
+                <p className="text-xs text-muted-foreground">
+                  Current: {formatMoney(currentPrice.amount, currentPrice.currency)}
+                </p>
+              )}
+            </Section>
           </div>
         )}
 
-        {/* ── ITINERARY TAB (flights) ──────────────────────────────────── */}
+        {/* ── ITINERARY TAB (flights) ────────────────────────────────── */}
         {activeTab === 'Itinerary' && !isHotel && (
           <div className="space-y-4">
             {legs.map((leg, li) => (
-              <div key={li} className="border border-border rounded p-3 space-y-3">
+              <div key={li} className="border border-border rounded-xl p-3 space-y-3">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-medium text-muted-foreground">{leg.direction} Leg</span>
                   <span className="text-xs text-muted-foreground">{leg.segments.length} segment{leg.segments.length !== 1 ? 's' : ''}</span>
                 </div>
 
                 {leg.segments.map((seg, si) => (
-                  <div key={si} className="bg-accent/20 rounded p-2 space-y-2">
+                  <div key={si} className="bg-accent/20 rounded-lg p-3 space-y-2">
                     <div className="flex items-center justify-between">
                       <span className="text-xs font-medium">Segment {si + 1}</span>
                       {leg.segments.length > 1 && (
@@ -793,86 +985,41 @@ export function BookingEditInline({ booking, travellers, onClose, onSave }: Book
                     <div className="grid grid-cols-3 gap-2">
                       <div>
                         <label className={labelCls}>Origin</label>
-                        <input
-                          type="text"
-                          value={seg.origin}
-                          onChange={(e) => updateSegment(li, si, 'origin', e.target.value.toUpperCase())}
-                          maxLength={3}
-                          placeholder="JFK"
-                          className={inputCls}
-                        />
+                        <input type="text" value={seg.origin} onChange={(e) => updateSegment(li, si, 'origin', e.target.value.toUpperCase())} maxLength={3} placeholder="JFK" className={inputCls} />
                       </div>
                       <div>
                         <label className={labelCls}>Destination</label>
-                        <input
-                          type="text"
-                          value={seg.destination}
-                          onChange={(e) => updateSegment(li, si, 'destination', e.target.value.toUpperCase())}
-                          maxLength={3}
-                          placeholder="LAX"
-                          className={inputCls}
-                        />
+                        <input type="text" value={seg.destination} onChange={(e) => updateSegment(li, si, 'destination', e.target.value.toUpperCase())} maxLength={3} placeholder="LAX" className={inputCls} />
                       </div>
                       <div>
                         <label className={labelCls}>Cabin</label>
-                        <input
-                          type="text"
-                          value={seg.cabin}
-                          onChange={(e) => updateSegment(li, si, 'cabin', e.target.value)}
-                          placeholder="Economy"
-                          className={inputCls}
-                        />
+                        <input type="text" value={seg.cabin} onChange={(e) => updateSegment(li, si, 'cabin', e.target.value)} placeholder="Economy" className={inputCls} />
                       </div>
                     </div>
                     <div className="grid grid-cols-2 gap-2">
                       <div>
                         <label className={labelCls}>Departure</label>
-                        <input
-                          type="datetime-local"
-                          value={seg.departure}
-                          onChange={(e) => updateSegment(li, si, 'departure', e.target.value)}
-                          className={inputCls}
-                        />
+                        <input type="datetime-local" value={seg.departure} onChange={(e) => updateSegment(li, si, 'departure', e.target.value)} className={inputCls} />
                       </div>
                       <div>
                         <label className={labelCls}>Arrival</label>
-                        <input
-                          type="datetime-local"
-                          value={seg.arrival}
-                          onChange={(e) => updateSegment(li, si, 'arrival', e.target.value)}
-                          className={inputCls}
-                        />
+                        <input type="datetime-local" value={seg.arrival} onChange={(e) => updateSegment(li, si, 'arrival', e.target.value)} className={inputCls} />
                       </div>
                     </div>
                     <div className="grid grid-cols-2 gap-2">
                       <div>
                         <label className={labelCls}>Airline</label>
-                        <input
-                          type="text"
-                          value={seg.airline}
-                          onChange={(e) => updateSegment(li, si, 'airline', e.target.value.toUpperCase())}
-                          placeholder="AA"
-                          className={inputCls}
-                        />
+                        <input type="text" value={seg.airline} onChange={(e) => updateSegment(li, si, 'airline', e.target.value.toUpperCase())} placeholder="AA" className={inputCls} />
                       </div>
                       <div>
                         <label className={labelCls}>Flight #</label>
-                        <input
-                          type="text"
-                          value={seg.flight_number}
-                          onChange={(e) => updateSegment(li, si, 'flight_number', e.target.value)}
-                          placeholder="AA123"
-                          className={inputCls}
-                        />
+                        <input type="text" value={seg.flight_number} onChange={(e) => updateSegment(li, si, 'flight_number', e.target.value)} placeholder="AA123" className={inputCls} />
                       </div>
                     </div>
                   </div>
                 ))}
 
-                <button
-                  onClick={() => addSegment(li)}
-                  className="text-xs text-primary hover:underline"
-                >
+                <button onClick={() => addSegment(li)} className="text-xs text-primary hover:underline">
                   + Add Segment
                 </button>
               </div>
@@ -880,85 +1027,266 @@ export function BookingEditInline({ booking, travellers, onClose, onSave }: Book
 
             <button
               onClick={addLeg}
-              className="w-full py-2 text-sm text-primary border border-dashed border-primary/30 rounded hover:bg-primary/5 transition-colors"
+              className="w-full py-2 text-sm text-primary border border-dashed border-primary/30 rounded-lg hover:bg-primary/5 transition-colors"
             >
               + Add Leg
             </button>
           </div>
         )}
 
-        {/* ── STAY TAB (hotels) ────────────────────────────────────────── */}
+        {/* ── STAY TAB (hotels) ──────────────────────────────────────── */}
         {activeTab === 'Stay' && isHotel && (
           <div className="space-y-4">
-            <div>
-              <label className={labelCls}>
-                Hotel ID <span className="text-xs text-yellow-400">(required for repricing — use Lookup to find)</span>
-              </label>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={hotelId}
-                  onChange={(e) => setHotelId(e.target.value)}
-                  placeholder="Content service hotel ID"
-                  className={cn(inputCls, 'flex-1 font-mono')}
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowHotelLookup(!showHotelLookup)}
-                  className="px-3 py-2 text-sm bg-accent hover:bg-accent/80 rounded transition-colors whitespace-nowrap"
-                >
-                  {showHotelLookup ? 'Close' : 'Lookup'}
-                </button>
+            <Section title="Hotel Identity" icon="🏨" badge="required for repricing" defaultOpen={true}>
+              <div>
+                <label className={labelCls}>Hotel ID</label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={hotelId}
+                    onChange={(e) => setHotelId(e.target.value)}
+                    placeholder="Content service hotel ID"
+                    className={cn(inputCls, 'flex-1 font-mono')}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowHotelLookup(!showHotelLookup)}
+                    className="px-3 py-2 text-xs font-medium bg-accent hover:bg-accent/80 rounded-lg transition-colors whitespace-nowrap"
+                  >
+                    {showHotelLookup ? 'Close' : '🔍 Lookup'}
+                  </button>
+                </div>
+                {showHotelLookup && (
+                  <HotelLookupPanel
+                    initialName={hotelName}
+                    onSelect={(m) => {
+                      setHotelId(m.hotel_id);
+                      setHotelName(m.name);
+                      setShowHotelLookup(false);
+                    }}
+                    onClose={() => setShowHotelLookup(false)}
+                  />
+                )}
               </div>
+              <div>
+                <label className={labelCls}>Hotel Name</label>
+                <input type="text" value={hotelName} onChange={(e) => setHotelName(e.target.value)} className={inputCls} />
+              </div>
+            </Section>
 
-              {showHotelLookup && (
-                <HotelLookupPanel
-                  initialName={hotelName}
-                  onSelect={(m) => {
-                    setHotelId(m.hotel_id);
-                    setHotelName(m.name);
-                    setShowHotelLookup(false);
-                  }}
-                  onClose={() => setShowHotelLookup(false)}
-                />
+            <Section title="Dates & Room" icon="📅" defaultOpen={true}>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className={labelCls}>Check-in</label>
+                  <input type="date" value={checkInDate} onChange={(e) => setCheckInDate(e.target.value)} className={inputCls} />
+                </div>
+                <div>
+                  <label className={labelCls}>Check-out</label>
+                  <input type="date" value={checkOutDate} onChange={(e) => setCheckOutDate(e.target.value)} className={inputCls} />
+                </div>
+              </div>
+              <div>
+                <label className={labelCls}>Room Type</label>
+                <input type="text" value={roomType} onChange={(e) => setRoomType(e.target.value)} placeholder="e.g. Deluxe King" className={inputCls} />
+              </div>
+            </Section>
+
+            <Section title="Occupancy" icon="👥" defaultOpen={true}>
+              <NumberStepper label="Rooms" value={rooms} onChange={setRooms} min={1} max={10} />
+              <div className="border-t border-border/30 pt-2">
+                <NumberStepper label="Adults" value={adults} onChange={setAdults} min={1} max={20} />
+                <NumberStepper label="Children" value={children} onChange={setChildren} min={0} max={10} />
+              </div>
+              {children > 0 && (
+                <div className="bg-accent/20 rounded-lg p-3 space-y-2">
+                  <label className={labelCls}>Children Ages</label>
+                  <div className="flex gap-2 flex-wrap">
+                    {childrenAges.map((age, i) => (
+                      <div key={i} className="flex items-center gap-1">
+                        <span className="text-xs text-muted-foreground">Child {i + 1}:</span>
+                        <input
+                          type="number"
+                          min={0}
+                          max={17}
+                          value={age}
+                          onChange={(e) => {
+                            const val = parseInt(e.target.value) || 0;
+                            setChildrenAges((prev) => prev.map((a, j) => j === i ? val : a));
+                          }}
+                          className="w-14 px-2 py-1 bg-background border border-border rounded-lg text-sm text-center focus:outline-none focus:ring-2 focus:ring-primary/50"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
               )}
-            </div>
+            </Section>
 
-            <div>
-              <label className={labelCls}>Hotel Name</label>
-              <input type="text" value={hotelName} onChange={(e) => setHotelName(e.target.value)} className={inputCls} />
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
+            <Section title="Policy" icon="📜" defaultOpen={false}>
+              <Toggle label="Refundable" checked={refundable} onChange={setRefundable} description="Whether this booking can be refunded" />
               <div>
-                <label className={labelCls}>Check-in Date</label>
-                <input type="date" value={checkInDate} onChange={(e) => setCheckInDate(e.target.value)} className={inputCls} />
+                <label className={labelCls}>Meal Plan</label>
+                <select value={mealPlan} onChange={(e) => setMealPlan(e.target.value)} className={inputCls}>
+                  {MEAL_PLANS.map((mp) => (
+                    <option key={mp.value} value={mp.value}>{mp.label}</option>
+                  ))}
+                </select>
               </div>
-              <div>
-                <label className={labelCls}>Check-out Date</label>
-                <input type="date" value={checkOutDate} onChange={(e) => setCheckOutDate(e.target.value)} className={inputCls} />
-              </div>
-            </div>
-
-            <div>
-              <label className={labelCls}>Room Type</label>
-              <input type="text" value={roomType} onChange={(e) => setRoomType(e.target.value)} className={inputCls} />
-            </div>
+            </Section>
           </div>
         )}
 
-        {/* ── PASSENGERS TAB (flights) ─────────────────────────────────── */}
+        {/* ── HOTEL & ROOM TAB (hotels) ──────────────────────────────── */}
+        {activeTab === 'Hotel & Room' && isHotel && (
+          <div className="space-y-4">
+            <Section title="Hotel Property" icon="🏢" defaultOpen={true}>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className={labelCls}>Chain</label>
+                  <input type="text" value={hotelChain} onChange={(e) => setHotelChain(e.target.value)} placeholder="e.g. Marriott" className={inputCls} />
+                </div>
+                <div>
+                  <label className={labelCls}>Brand</label>
+                  <input type="text" value={hotelBrand} onChange={(e) => setHotelBrand(e.target.value)} placeholder="e.g. Courtyard" className={inputCls} />
+                </div>
+              </div>
+              <div>
+                <label className={labelCls}>Star Rating</label>
+                <div className="flex items-center gap-2">
+                  {[1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5].map((r) => (
+                    <button
+                      key={r}
+                      type="button"
+                      onClick={() => setHotelStarRating(r.toString())}
+                      className={cn(
+                        'px-2 py-1 text-xs rounded-lg transition-colors',
+                        parseFloat(hotelStarRating) === r
+                          ? 'bg-yellow-500/20 text-yellow-400 font-semibold ring-1 ring-yellow-500/40'
+                          : 'bg-accent/50 text-muted-foreground hover:bg-accent'
+                      )}
+                    >
+                      {r}★
+                    </button>
+                  ))}
+                  {hotelStarRating && (
+                    <button
+                      type="button"
+                      onClick={() => setHotelStarRating('')}
+                      className="text-xs text-muted-foreground hover:text-foreground"
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className={labelCls}>Phone</label>
+                  <input type="tel" value={hotelPhone} onChange={(e) => setHotelPhone(e.target.value)} placeholder="+1 (555) 123-4567" className={inputCls} />
+                </div>
+                <div>
+                  <label className={labelCls}>Email</label>
+                  <input type="email" value={hotelEmail} onChange={(e) => setHotelEmail(e.target.value)} placeholder="front.desk@hotel.com" className={inputCls} />
+                </div>
+              </div>
+            </Section>
+
+            <Section title="Location" icon="📍" defaultOpen={false}>
+              <div>
+                <label className={labelCls}>Address</label>
+                <input type="text" value={hotelAddress} onChange={(e) => setHotelAddress(e.target.value)} placeholder="123 Main Street" className={inputCls} />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className={labelCls}>City</label>
+                  <input type="text" value={hotelCity} onChange={(e) => setHotelCity(e.target.value)} placeholder="New York" className={inputCls} />
+                </div>
+                <div>
+                  <label className={labelCls}>Country</label>
+                  <input type="text" value={hotelCountry} onChange={(e) => setHotelCountry(e.target.value)} placeholder="US" className={inputCls} />
+                </div>
+              </div>
+              <div className="grid grid-cols-3 gap-3">
+                <div>
+                  <label className={labelCls}>Postal Code</label>
+                  <input type="text" value={hotelPostalCode} onChange={(e) => setHotelPostalCode(e.target.value)} className={inputCls} />
+                </div>
+                <div>
+                  <label className={labelCls}>Latitude</label>
+                  <input type="text" value={hotelLat} onChange={(e) => setHotelLat(e.target.value)} placeholder="40.7128" className={inputCls} />
+                </div>
+                <div>
+                  <label className={labelCls}>Longitude</label>
+                  <input type="text" value={hotelLng} onChange={(e) => setHotelLng(e.target.value)} placeholder="-74.0060" className={inputCls} />
+                </div>
+              </div>
+            </Section>
+
+            <Section title="Room Details" icon="🛏️" defaultOpen={true}>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className={labelCls}>Room Name</label>
+                  <input type="text" value={rtName} onChange={(e) => setRtName(e.target.value)} placeholder="Deluxe King Room" className={inputCls} />
+                </div>
+                <div>
+                  <label className={labelCls}>Bed Type</label>
+                  <input type="text" value={rtBedType} onChange={(e) => setRtBedType(e.target.value)} placeholder="King, 2 Queens, etc." className={inputCls} />
+                </div>
+              </div>
+              <div className="grid grid-cols-3 gap-3">
+                <div>
+                  <label className={labelCls}>Bed Count</label>
+                  <input type="number" min={0} value={rtBedCount} onChange={(e) => setRtBedCount(e.target.value)} className={inputCls} />
+                </div>
+                <div>
+                  <label className={labelCls}>Max Occupancy</label>
+                  <input type="number" min={0} value={rtMaxOccupancy} onChange={(e) => setRtMaxOccupancy(e.target.value)} className={inputCls} />
+                </div>
+                <div>
+                  <label className={labelCls}>View</label>
+                  <input type="text" value={rtView} onChange={(e) => setRtView(e.target.value)} placeholder="Ocean, City..." className={inputCls} />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className={labelCls}>Max Adults</label>
+                  <input type="number" min={0} value={rtMaxAdults} onChange={(e) => setRtMaxAdults(e.target.value)} className={inputCls} />
+                </div>
+                <div>
+                  <label className={labelCls}>Max Children</label>
+                  <input type="number" min={0} value={rtMaxChildren} onChange={(e) => setRtMaxChildren(e.target.value)} className={inputCls} />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className={labelCls}>Size (sqft)</label>
+                  <input type="number" min={0} value={rtSqft} onChange={(e) => setRtSqft(e.target.value)} className={inputCls} />
+                </div>
+                <div>
+                  <label className={labelCls}>Size (sqm)</label>
+                  <input type="number" min={0} value={rtSqm} onChange={(e) => setRtSqm(e.target.value)} className={inputCls} />
+                </div>
+              </div>
+              <div className="border-t border-border/30 pt-2 space-y-1">
+                <Toggle label="Smoking" checked={rtSmoking} onChange={setRtSmoking} />
+                <Toggle label="Accessible" checked={rtAccessible} onChange={setRtAccessible} description="ADA/wheelchair accessible room" />
+              </div>
+            </Section>
+          </div>
+        )}
+
+        {/* ── PASSENGERS TAB (flights) ───────────────────────────────── */}
         {activeTab === 'Passengers' && !isHotel && (
           <div className="space-y-3">
             {tickets.length === 0 && (
               <p className="text-sm text-muted-foreground">No passengers on this booking.</p>
             )}
             {tickets.map((ticket, i) => (
-              <div key={i} className="border border-border rounded p-3 space-y-2">
+              <div key={i} className="border border-border rounded-xl p-3 space-y-2">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-medium">Passenger {i + 1}</span>
                   <div className="flex items-center gap-2">
-                    <label className="flex items-center gap-1 text-xs">
+                    <label className="flex items-center gap-1 text-xs cursor-pointer">
                       <input
                         type="checkbox"
                         checked={ticket.traveler.is_primary || false}
@@ -980,42 +1308,21 @@ export function BookingEditInline({ booking, travellers, onClose, onSave }: Book
                 <div className="grid grid-cols-2 gap-2">
                   <div>
                     <label className={labelCls}>First Name</label>
-                    <input
-                      type="text"
-                      value={ticket.traveler.first_name || ''}
-                      onChange={(e) => updateTicketTraveler(i, 'first_name', e.target.value)}
-                      className={inputCls}
-                    />
+                    <input type="text" value={ticket.traveler.first_name || ''} onChange={(e) => updateTicketTraveler(i, 'first_name', e.target.value)} className={inputCls} />
                   </div>
                   <div>
                     <label className={labelCls}>Last Name</label>
-                    <input
-                      type="text"
-                      value={ticket.traveler.last_name || ''}
-                      onChange={(e) => updateTicketTraveler(i, 'last_name', e.target.value)}
-                      className={inputCls}
-                    />
+                    <input type="text" value={ticket.traveler.last_name || ''} onChange={(e) => updateTicketTraveler(i, 'last_name', e.target.value)} className={inputCls} />
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-2">
                   <div>
                     <label className={labelCls}>Loyalty Program</label>
-                    <input
-                      type="text"
-                      value={ticket.loyalty_program || ''}
-                      onChange={(e) => updateTicket(i, { loyalty_program: e.target.value })}
-                      placeholder="e.g. AAdvantage"
-                      className={inputCls}
-                    />
+                    <input type="text" value={ticket.loyalty_program || ''} onChange={(e) => updateTicket(i, { loyalty_program: e.target.value })} placeholder="e.g. AAdvantage" className={inputCls} />
                   </div>
                   <div>
                     <label className={labelCls}>Loyalty Number</label>
-                    <input
-                      type="text"
-                      value={ticket.loyalty_number || ''}
-                      onChange={(e) => updateTicket(i, { loyalty_number: e.target.value })}
-                      className={inputCls}
-                    />
+                    <input type="text" value={ticket.loyalty_number || ''} onChange={(e) => updateTicket(i, { loyalty_number: e.target.value })} className={inputCls} />
                   </div>
                 </div>
               </div>
@@ -1027,33 +1334,39 @@ export function BookingEditInline({ booking, travellers, onClose, onSave }: Book
                   { traveler: { first_name: '', last_name: '', is_primary: false }, loyalty_program: '', loyalty_number: '' },
                 ])
               }
-              className="w-full py-2 text-sm text-primary border border-dashed border-primary/30 rounded hover:bg-primary/5 transition-colors"
+              className="w-full py-2 text-sm text-primary border border-dashed border-primary/30 rounded-lg hover:bg-primary/5 transition-colors"
             >
               + Add Passenger
             </button>
           </div>
         )}
 
-        {/* ── GUESTS TAB (hotels) ──────────────────────────────────────── */}
+        {/* ── GUESTS TAB (hotels) ────────────────────────────────────── */}
         {activeTab === 'Guests' && isHotel && (
           <div className="space-y-3">
             {guests.length === 0 && (
               <p className="text-sm text-muted-foreground">No guests on this booking.</p>
             )}
             {guests.map((guest, i) => (
-              <div key={i} className="border border-border rounded p-3 space-y-2">
+              <div key={i} className="border border-border rounded-xl p-4 space-y-3">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-medium">Guest {i + 1}</span>
                   <div className="flex items-center gap-2">
-                    <label className="flex items-center gap-1 text-xs">
-                      <input
-                        type="checkbox"
-                        checked={guest.is_primary || false}
-                        onChange={(e) => updateGuest(i, 'is_primary', e.target.checked)}
-                        className="rounded"
-                      />
-                      Primary
-                    </label>
+                    <div className="w-6 h-6 rounded-full bg-accent/80 flex items-center justify-center text-xs font-semibold">
+                      {i + 1}
+                    </div>
+                    <span className="text-sm font-medium">
+                      {guest.first_name || guest.last_name
+                        ? `${guest.first_name || ''} ${guest.last_name || ''}`.trim()
+                        : `Guest ${i + 1}`
+                      }
+                    </span>
+                    {guest.is_primary && (
+                      <span className="px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-primary/15 text-primary">
+                        Primary
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
                     {guests.length > 1 && (
                       <button
                         onClick={() => setGuests((prev) => prev.filter((_, j) => j !== i))}
@@ -1064,33 +1377,72 @@ export function BookingEditInline({ booking, travellers, onClose, onSave }: Book
                     )}
                   </div>
                 </div>
-                <div className="grid grid-cols-2 gap-2">
+
+                <div className="grid grid-cols-3 gap-2">
                   <div>
                     <label className={labelCls}>First Name</label>
-                    <input
-                      type="text"
-                      value={guest.first_name || ''}
-                      onChange={(e) => updateGuest(i, 'first_name', e.target.value)}
-                      className={inputCls}
-                    />
+                    <input type="text" value={guest.first_name || ''} onChange={(e) => updateGuest(i, 'first_name', e.target.value)} className={inputCls} />
+                  </div>
+                  <div>
+                    <label className={labelCls}>Middle Name</label>
+                    <input type="text" value={guest.middle_name || ''} onChange={(e) => updateGuest(i, 'middle_name', e.target.value)} className={inputCls} />
                   </div>
                   <div>
                     <label className={labelCls}>Last Name</label>
+                    <input type="text" value={guest.last_name || ''} onChange={(e) => updateGuest(i, 'last_name', e.target.value)} className={inputCls} />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className={labelCls}>Date of Birth</label>
                     <input
-                      type="text"
-                      value={guest.last_name || ''}
-                      onChange={(e) => updateGuest(i, 'last_name', e.target.value)}
+                      type="date"
+                      value={guest.date_of_birth || ''}
+                      onChange={(e) => updateGuest(i, 'date_of_birth', e.target.value)}
                       className={inputCls}
                     />
                   </div>
+                  <div>
+                    <label className={labelCls}>Citizenship</label>
+                    <input
+                      type="text"
+                      value={guest.citizenship || ''}
+                      onChange={(e) => updateGuest(i, 'citizenship', e.target.value.toUpperCase())}
+                      maxLength={2}
+                      placeholder="US"
+                      className={inputCls}
+                    />
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-4 pt-1 border-t border-border/30">
+                  <label className="flex items-center gap-1.5 text-xs cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={guest.is_primary || false}
+                      onChange={(e) => updateGuest(i, 'is_primary', e.target.checked)}
+                      className="rounded"
+                    />
+                    Primary Guest
+                  </label>
+                  <label className="flex items-center gap-1.5 text-xs cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={guest.is_adult !== false}
+                      onChange={(e) => updateGuest(i, 'is_adult', e.target.checked)}
+                      className="rounded"
+                    />
+                    Adult
+                  </label>
                 </div>
               </div>
             ))}
             <button
               onClick={() =>
-                setGuests((prev) => [...prev, { first_name: '', last_name: '', is_primary: false }])
+                setGuests((prev) => [...prev, { first_name: '', last_name: '', is_primary: false, is_adult: true }])
               }
-              className="w-full py-2 text-sm text-primary border border-dashed border-primary/30 rounded hover:bg-primary/5 transition-colors"
+              className="w-full py-2.5 text-sm text-primary border border-dashed border-primary/30 rounded-xl hover:bg-primary/5 transition-colors"
             >
               + Add Guest
             </button>
@@ -1099,9 +1451,9 @@ export function BookingEditInline({ booking, travellers, onClose, onSave }: Book
 
       </div>
 
-      {/* ── Email side panel ───────────────────────────────────────────── */}
+      {/* ── Email side panel ─────────────────────────────────────────── */}
       {showEmailPanel && (
-        <div className="w-[400px] min-w-[300px] max-h-[500px] overflow-y-auto border-l border-border pl-4">
+        <div className="w-[400px] min-w-[300px] max-h-[600px] overflow-y-auto border-l border-border pl-4">
           <div className="flex items-center justify-between mb-2">
             <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Source Email</span>
             <button
@@ -1119,23 +1471,54 @@ export function BookingEditInline({ booking, travellers, onClose, onSave }: Book
 
       </div> {/* end side-by-side flex container */}
 
-      {/* ── Footer ─────────────────────────────────────────────────────── */}
-      {error && <div className="text-red-400 text-sm">{error}</div>}
+      {/* ── Footer ───────────────────────────────────────────────────── */}
+      {error && (
+        <div className="flex items-center gap-2 p-3 rounded-lg bg-red-500/10 border border-red-500/20">
+          <svg className="w-4 h-4 text-red-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
+          </svg>
+          <span className="text-red-400 text-sm">{error}</span>
+        </div>
+      )}
 
-      <div className="flex justify-end gap-2 pt-2 border-t border-border">
-        <button
-          onClick={onClose}
-          className="px-4 py-2 text-sm border border-border rounded hover:bg-accent transition-colors"
-        >
-          Cancel
-        </button>
-        <button
-          onClick={handleSave}
-          disabled={saving}
-          className="px-4 py-2 text-sm bg-primary text-primary-foreground rounded hover:bg-primary/90 disabled:opacity-50 transition-colors"
-        >
-          {saving ? 'Saving...' : 'Save'}
-        </button>
+      {successFields && (
+        <div className="flex items-center gap-2 p-3 rounded-lg bg-green-500/10 border border-green-500/20">
+          <svg className="w-4 h-4 text-green-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+          </svg>
+          <span className="text-green-400 text-sm">
+            Saved! Updated: {successFields.join(', ') || 'booking'}
+          </span>
+        </div>
+      )}
+
+      <div className="flex items-center justify-between pt-3 border-t border-border">
+        <span className="text-xs text-muted-foreground">
+          {isHotel ? '4 tabs' : '3 tabs'} · Only changed fields are sent
+        </span>
+        <div className="flex gap-2">
+          <button
+            onClick={onClose}
+            className="px-4 py-2 text-sm border border-border rounded-lg hover:bg-accent transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleSave}
+            disabled={saving || !!successFields}
+            className="px-5 py-2 text-sm font-medium bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 disabled:opacity-50 transition-colors"
+          >
+            {saving ? (
+              <span className="flex items-center gap-2">
+                <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+                Saving...
+              </span>
+            ) : 'Save Changes'}
+          </button>
+        </div>
       </div>
     </div>
   );

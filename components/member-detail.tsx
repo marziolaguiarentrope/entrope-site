@@ -2047,6 +2047,7 @@ function BookingCard({ booking, watch, travellers, opportunities, onRefresh }: {
                   <div className="text-xs text-muted-foreground">
                     {formatDate(checkIn)} - {formatDate(checkOut)}
                     {booking.hotel.room_type && ` · ${booking.hotel.room_type}`}
+                    {booking.hotel.guests && booking.hotel.guests.length > 0 && ` · ${booking.hotel.guests.length} guest${booking.hotel.guests.length !== 1 ? 's' : ''}`}
                   </div>
                   <div className="text-xs mt-1">
                     <span className="text-muted-foreground">Price: </span>

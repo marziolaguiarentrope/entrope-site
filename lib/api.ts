@@ -2045,22 +2045,53 @@ export interface FlightBookingPatchRequest {
   };
 }
 
+export interface HotelPatchData {
+  id?: string;
+  name?: string;
+  chain?: string;
+  brand?: string;
+  city?: string;
+  country?: string;
+  address?: string;
+  postal_code?: string;
+  latitude?: number;
+  longitude?: number;
+  star_rating?: number;
+  phone?: string;
+  email?: string;
+}
+
+export interface RoomTypePatchData {
+  id?: string;
+  name?: string;
+  bed_type?: string;
+  bed_count?: number;
+  max_occupancy?: number;
+  max_adults?: number;
+  max_children?: number;
+  sqft?: number;
+  sqm?: number;
+  view?: string;
+  smoking?: boolean;
+  accessible?: boolean;
+}
+
 export interface HotelBookingPatchRequest {
   confirmation_code?: string;
   booking_provider?: string;
   verification_status?: VerificationStatus;
   stay?: {
-    hotel?: {
-      id?: string;
-      name?: string;
-    };
+    hotel?: HotelPatchData;
+    room_type?: RoomTypePatchData;
     check_in?: string;
     check_out?: string;
     room_type_name?: string;
     rooms?: number;
     adults?: number;
     children?: number;
+    children_ages?: number[];
     refundable?: boolean;
+    meal_plan?: string;
   };
   guests?: BookingTravelerPatch[];
   customer_price?: {
