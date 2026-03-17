@@ -6,6 +6,7 @@ import {
   BookingView,
   FlightBookingView,
   HotelBookingView,
+  HotelBookingDetail,
   FlightBookingPatchRequest,
   HotelBookingPatchRequest,
   HotelPatchData,
@@ -446,6 +447,7 @@ export function BookingEditInline({ booking, travellers, onClose, onSave }: Book
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successFields, setSuccessFields] = useState<string[] | null>(null);
+  const [loadingDetail, setLoadingDetail] = useState(isHotel);
 
   // ── Details fields ──────────────────────────────────────────────────────
   const [confirmationCode, setConfirmationCode] = useState(
@@ -471,7 +473,7 @@ export function BookingEditInline({ booking, travellers, onClose, onSave }: Book
   const [roomType, setRoomType] = useState(hotelData?.room_type || '');
   const [showHotelLookup, setShowHotelLookup] = useState(false);
 
-  // ── Occupancy fields (NEW) ────────────────────────────────────────────
+  // ── Occupancy fields ───────────────────────────────────────────────────
   const [rooms, setRooms] = useState(1);
   const [adults, setAdults] = useState(2);
   const [children, setChildren] = useState(0);
@@ -479,7 +481,7 @@ export function BookingEditInline({ booking, travellers, onClose, onSave }: Book
   const [refundable, setRefundable] = useState(false);
   const [mealPlan, setMealPlan] = useState('');
 
-  // ── Hotel property fields (NEW) ───────────────────────────────────────
+  // ── Hotel property fields ──────────────────────────────────────────────
   const [hotelChain, setHotelChain] = useState('');
   const [hotelBrand, setHotelBrand] = useState('');
   const [hotelCity, setHotelCity] = useState('');
@@ -492,7 +494,7 @@ export function BookingEditInline({ booking, travellers, onClose, onSave }: Book
   const [hotelPhone, setHotelPhone] = useState('');
   const [hotelEmail, setHotelEmail] = useState('');
 
-  // ── Room type fields (NEW) ────────────────────────────────────────────
+  // ── Room type fields ───────────────────────────────────────────────────
   const [rtName, setRtName] = useState('');
   const [rtBedType, setRtBedType] = useState('');
   const [rtBedCount, setRtBedCount] = useState('');
@@ -506,12 +508,81 @@ export function BookingEditInline({ booking, travellers, onClose, onSave }: Book
   const [rtAccessible, setRtAccessible] = useState(false);
 
   // ── Hotel guests ──────────────────────────────────────────────────────
-  const [guests, setGuests] = useState<BookingTravelerPatch[]>(() => {
-    if (!hotelData?.guests || hotelData.guests.length === 0) return [];
-    return hotelData.guests.map((g) => {
-      return resolveTravelerId(typeof g === 'string' ? g : '', travellers);
-    });
-  });
+  const [guests, setGuests] = useState<BookingTravelerPatch[]>([]);
+
+  // ── Fetch hotel booking detail to hydrate all fields ──────────────────
+  useEffect(() => {
+    if (!isHotel) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const detail: HotelBookingDetail = await api.getHotelBookingDetail(booking.id);
+        if (cancelled) return;
+
+        // Hydrate hotel property fields from detail
+        if (detail.hotel_chain) setHotelChain(detail.hotel_chain);
+        if (detail.city) setHotelCity(detail.city);
+        if (detail.country) setHotelCountry(detail.country);
+        if (detail.address) setHotelAddress(detail.address);
+        if (detail.postal_code) setHotelPostalCode(detail.postal_code);
+        if (detail.number_of_rooms) setRooms(detail.number_of_rooms);
+        if (detail.hotel_name && !hotelName) setHotelName(detail.hotel_name);
+        if (detail.room_type && !roomType) setRoomType(detail.room_type);
+        if (detail.check_in_date && !checkInDate) setCheckInDate(detail.check_in_date);
+        if (detail.check_out_date && !checkOutDate) setCheckOutDate(detail.check_out_date);
+        // Hydrate confirmation / provider if not already set from trip view
+        if (detail.confirmation_number && !confirmationCode) setConfirmationCode(detail.confirmation_number);
+        if (detail.booking_provider && !bookingProvider) setBookingProvider(detail.booking_provider);
+
+        // Hydrate guests from detail (GuestSummary has name, is_primary, date_of_birth, citizenship)
+        if (detail.guests && detail.guests.length > 0) {
+          setGuests(detail.guests.map((g) => {
+            const nameParts = (g.name || '').trim().split(/\s+/);
+            const firstName = nameParts[0] || '';
+            const lastName = nameParts.length > 1 ? nameParts.slice(1).join(' ') : '';
+            return {
+              first_name: firstName,
+              last_name: lastName,
+              is_primary: g.is_primary,
+              date_of_birth: g.date_of_birth || undefined,
+              citizenship: g.citizenship || undefined,
+              is_adult: true,
+            };
+          }));
+        } else if (hotelData?.guests && hotelData.guests.length > 0) {
+          // Fallback: trip view only has string[] names
+          setGuests(hotelData.guests.map((name) => {
+            const parts = (typeof name === 'string' ? name : '').trim().split(/\s+/);
+            return {
+              first_name: parts[0] || '',
+              last_name: parts.length > 1 ? parts.slice(1).join(' ') : '',
+              is_primary: false,
+              is_adult: true,
+            };
+          }));
+        }
+      } catch (e) {
+        // If detail fetch fails, fall back to trip view data
+        if (cancelled) return;
+        if (hotelData?.guests && hotelData.guests.length > 0) {
+          setGuests(hotelData.guests.map((name) => {
+            const parts = (typeof name === 'string' ? name : '').trim().split(/\s+/);
+            return {
+              first_name: parts[0] || '',
+              last_name: parts.length > 1 ? parts.slice(1).join(' ') : '',
+              is_primary: false,
+              is_adult: true,
+            };
+          }));
+        }
+        console.warn('Failed to fetch hotel booking detail for edit form:', e);
+      } finally {
+        if (!cancelled) setLoadingDetail(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [booking.id]);
 
   // ── Flight itinerary ──────────────────────────────────────────────────
   type SegmentDraft = {
@@ -921,6 +992,16 @@ export function BookingEditInline({ booking, travellers, onClose, onSave }: Book
 
       {/* Scrollable edit content area */}
       <div className={cn('max-h-[600px] overflow-y-auto pr-1 space-y-4', showEmailPanel ? 'flex-1 min-w-0' : 'w-full')}>
+
+        {loadingDetail && (
+          <div className="flex items-center justify-center py-8 text-sm text-muted-foreground gap-2">
+            <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+            </svg>
+            Loading booking details...
+          </div>
+        )}
 
         {/* ── DETAILS TAB ──────────────────────────────────────────────── */}
         {activeTab === 'Details' && (
