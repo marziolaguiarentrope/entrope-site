@@ -6,7 +6,6 @@ import {
   BookingView,
   FlightBookingView,
   HotelBookingView,
-  HotelBookingDetail,
   FlightBookingPatchRequest,
   HotelBookingPatchRequest,
   HotelPatchData,
@@ -517,49 +516,46 @@ export function BookingEditInline({ booking, travellers, onClose, onSave }: Book
     });
   });
 
-  // ── Fetch hotel booking detail to enrich fields with more data ────────
+  // ── Fetch hotel booking data to enrich fields ──────────────────────────
+  // NOTE: GET /bookings/hotel/{id} doesn't exist in the admin gateway.
+  // Use the hotel-bookings list endpoint with search to find this booking.
   useEffect(() => {
     if (!isHotel) return;
     let cancelled = false;
     (async () => {
       try {
-        const detail: HotelBookingDetail = await api.getHotelBookingDetail(booking.id);
+        // Try the list endpoint with booking ID as search query
+        const listResult = await api.listHotelBookings({ q: booking.id, limit: 1 });
+        const match = listResult?.bookings?.find((b) => b.id === booking.id);
         if (cancelled) return;
 
-        // Hydrate hotel property fields from detail
-        if (detail.hotel_chain) setHotelChain(detail.hotel_chain);
-        if (detail.city) setHotelCity(detail.city);
-        if (detail.country) setHotelCountry(detail.country);
-        if (detail.address) setHotelAddress(detail.address);
-        if (detail.postal_code) setHotelPostalCode(detail.postal_code);
-        if (detail.number_of_rooms) setRooms(detail.number_of_rooms);
-        if (detail.hotel_name && !hotelName) setHotelName(detail.hotel_name);
-        if (detail.room_type && !roomType) setRoomType(detail.room_type);
-        if (detail.check_in_date && !checkInDate) setCheckInDate(detail.check_in_date);
-        if (detail.check_out_date && !checkOutDate) setCheckOutDate(detail.check_out_date);
-        if (detail.confirmation_number && !confirmationCode) setConfirmationCode(detail.confirmation_number);
-        if (detail.booking_provider && !bookingProvider) setBookingProvider(detail.booking_provider);
+        if (match) {
+          // Hydrate hotel property fields
+          if (match.hotel_chain) setHotelChain(match.hotel_chain);
+          if (match.city) setHotelCity(match.city);
+          if (match.country) setHotelCountry(match.country);
+          if (match.confirmation_code && !confirmationCode) setConfirmationCode(match.confirmation_code);
+          if (match.booking_provider && !bookingProvider) setBookingProvider(match.booking_provider);
+          if (match.room_type && !roomType) setRoomType(match.room_type);
 
-        // Upgrade guests with richer data from detail (date_of_birth, citizenship)
-        if (detail.guests && detail.guests.length > 0) {
-          setGuests(detail.guests.map((g) => {
-            const nameParts = (g.name || '').trim().split(/\s+/);
-            const firstName = nameParts[0] || '';
-            const lastName = nameParts.length > 1 ? nameParts.slice(1).join(' ') : '';
-            return {
-              first_name: firstName,
-              last_name: lastName,
-              is_primary: g.is_primary,
-              date_of_birth: g.date_of_birth || undefined,
-              citizenship: g.citizenship || undefined,
-              is_adult: true,
-            };
-          }));
+          // Hydrate guests from the list item (has name, is_primary, citizenship)
+          if (match.guests && match.guests.length > 0) {
+            setGuests(match.guests.map((g) => {
+              const nameParts = (g.name || '').trim().split(/\s+/);
+              const firstName = nameParts[0] || '';
+              const lastName = nameParts.length > 1 ? nameParts.slice(1).join(' ') : '';
+              return {
+                first_name: firstName,
+                last_name: lastName,
+                is_primary: g.is_primary,
+                citizenship: g.citizenship || undefined,
+                is_adult: true,
+              };
+            }));
+          }
         }
-        // If detail.guests is empty, keep the synchronously-initialized guests from trip view
       } catch (e) {
-        // Detail fetch failed — keep the synchronously-initialized guests from trip view
-        if (!cancelled) console.warn('Failed to fetch hotel booking detail for edit form:', e);
+        if (!cancelled) console.warn('Failed to fetch hotel booking data for edit form:', e);
       } finally {
         if (!cancelled) setLoadingDetail(false);
       }
@@ -665,19 +661,7 @@ export function BookingEditInline({ booking, travellers, onClose, onSave }: Book
   }, [showEmailPanel, emailFetched, isHotel, booking.id]);
 
   // ── Auto-fetch hotel_id if missing ────────────────────────────────────
-  useEffect(() => {
-    if (!isHotel || hotelId) return;
-    let cancelled = false;
-    api
-      .getHotelBookingDetail(booking.id)
-      .then((detail) => {
-        if (!cancelled && detail.hotel_id) {
-          setHotelId(detail.hotel_id);
-        }
-      })
-      .catch(() => {});
-    return () => { cancelled = true; };
-  }, [isHotel, booking.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Hotel ID is hydrated from the list endpoint fetch above — no separate call needed
 
   // ── Sync children ages array with children count ──────────────────────
   useEffect(() => {
