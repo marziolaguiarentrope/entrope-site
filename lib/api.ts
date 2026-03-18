@@ -1381,6 +1381,17 @@ class ApiClient {
     return this.fetch<HotelBookingListResponse>(`/hotel-bookings${query ? `?${query}` : ''}`);
   }
 
+  // Hotel Booking lookup by ID (any source — for edit form hydration)
+  async getHotelBookingByIdFromList(bookingId: string): Promise<HotelBookingListItem | null> {
+    const searchParams = new URLSearchParams();
+    // No source filter — search across all sources (axel + imported)
+    searchParams.set('q', bookingId);
+    searchParams.set('limit', '1');
+    const query = searchParams.toString();
+    const result = await this.fetch<HotelBookingListResponse>(`/hotel-bookings?${query}`);
+    return result?.bookings?.find((b) => b.id === bookingId) ?? null;
+  }
+
   // Conv trips
   async listConvTrips(userId: string): Promise<ConvTripSummary[]> {
     return this.fetch<ConvTripSummary[]>(`/conv/trips/${userId}`);

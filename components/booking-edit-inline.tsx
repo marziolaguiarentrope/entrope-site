@@ -524,9 +524,8 @@ export function BookingEditInline({ booking, travellers, onClose, onSave }: Book
     let cancelled = false;
     (async () => {
       try {
-        // Try the list endpoint with booking ID as search query
-        const listResult = await api.listHotelBookings({ q: booking.id, limit: 1 });
-        const match = listResult?.bookings?.find((b) => b.id === booking.id);
+        // Fetch via list endpoint without source filter (works for both axel + imported bookings)
+        const match = await api.getHotelBookingByIdFromList(booking.id);
         if (cancelled) return;
 
         if (match) {
