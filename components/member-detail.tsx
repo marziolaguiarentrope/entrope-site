@@ -266,10 +266,10 @@ function Section({
   };
 
   return (
-    <div className="border border-border rounded-lg overflow-hidden">
+    <div className="border border-border rounded-lg">
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="w-full flex items-center justify-between p-3 bg-accent/30 hover:bg-accent/50 transition-colors"
+        className="w-full flex items-center justify-between p-3 bg-accent/30 hover:bg-accent/50 transition-colors rounded-t-lg"
       >
         <div className="flex items-center gap-2">
           <svg
