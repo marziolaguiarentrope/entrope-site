@@ -1860,6 +1860,7 @@ function BookingCard({ booking, watch, travellers, opportunities, onRefresh }: {
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [showWatchActions, setShowWatchActions] = useState(false);
+  const [showCancelModal, setShowCancelModal] = useState(false);
 
   // Find the active/latest opportunity for this booking
   const bookingOpportunities = opportunities || [];
@@ -2015,6 +2016,17 @@ function BookingCard({ booking, watch, travellers, opportunities, onRefresh }: {
             >
               {showEmail ? 'Hide Email' : 'View Email'}
             </button>
+            {booking.status?.toUpperCase() !== 'CANCELLED' && (
+              <button
+                onClick={() => {
+                  setShowCancelModal(true);
+                  setShowActions(false);
+                }}
+                className="w-full px-3 py-2 text-left text-sm text-red-400 hover:bg-accent transition-colors border-t border-border/50"
+              >
+                Cancel Booking
+              </button>
+            )}
           </div>
         )}
 
@@ -2279,7 +2291,182 @@ function BookingCard({ booking, watch, travellers, opportunities, onRefresh }: {
           />
         </div>
       )}
+
+      {/* Cancel booking modal */}
+      {showCancelModal && (
+        <CancelBookingModal
+          booking={booking}
+          onClose={() => setShowCancelModal(false)}
+          onCancelled={() => {
+            setShowCancelModal(false);
+            onRefresh?.();
+          }}
+        />
+      )}
     </>
+  );
+}
+
+function CancelBookingModal({
+  booking,
+  onClose,
+  onCancelled,
+}: {
+  booking: BookingView;
+  onClose: () => void;
+  onCancelled: () => void;
+}) {
+  const isHotel = booking.type?.toLowerCase() === 'hotel';
+  const bookingType = isHotel ? 'hotel' as const : 'flight' as const;
+  const confCode = getConfirmationCode(booking.flight, booking.hotel);
+
+  const [outcome, setOutcome] = useState<'cancelled' | 'unable_to_cancel'>('cancelled');
+  const [notes, setNotes] = useState('');
+  const [confirmationCode, setConfirmationCode] = useState(confCode || '');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Booking summary label
+  const bookingLabel = isHotel
+    ? booking.hotel?.hotel_name || 'Hotel Booking'
+    : (() => {
+        const legs = booking.flight?.legs || [];
+        if (legs.length > 0) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const first = legs[0] as any;
+          const origin = first.segments?.[0]?.origin || first.departure_airport || '';
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const last = legs[legs.length - 1] as any;
+          const dest = last.segments?.[last.segments.length - 1]?.destination || last.arrival_airport || '';
+          return origin && dest ? `${origin} → ${dest}` : 'Flight Booking';
+        }
+        return 'Flight Booking';
+      })();
+
+  async function handleSubmit() {
+    if (!notes.trim()) return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      await api.markBookingCancelled(
+        bookingType,
+        booking.id,
+        outcome,
+        notes.trim(),
+        confirmationCode.trim() || undefined
+      );
+      onCancelled();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to cancel booking');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-[60]" onClick={onClose}>
+      <div className="bg-card border border-border rounded-lg p-5 w-full max-w-md" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center gap-2 mb-4">
+          <svg className="w-5 h-5 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+          </svg>
+          <h3 className="text-lg font-semibold">Cancel Booking</h3>
+        </div>
+
+        {/* Booking summary */}
+        <div className="bg-accent/30 rounded p-3 mb-4 text-sm">
+          <div className="flex justify-between mb-1">
+            <span className="text-muted-foreground">Type</span>
+            <span className={cn('px-1.5 py-0.5 text-xs rounded', isHotel ? 'bg-purple-500/20 text-purple-400' : 'bg-blue-500/20 text-blue-400')}>
+              {booking.type}
+            </span>
+          </div>
+          <div className="flex justify-between mb-1">
+            <span className="text-muted-foreground">Booking</span>
+            <span className="font-medium">{bookingLabel}</span>
+          </div>
+          {confCode && (
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Confirmation</span>
+              <span className="font-mono text-xs">{confCode}</span>
+            </div>
+          )}
+        </div>
+
+        {/* Outcome */}
+        <div className="mb-3">
+          <label className="text-sm font-medium mb-1.5 block">Outcome</label>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setOutcome('cancelled')}
+              className={cn(
+                'flex-1 px-3 py-2 text-sm rounded border transition-colors',
+                outcome === 'cancelled'
+                  ? 'border-red-500 bg-red-500/10 text-red-400'
+                  : 'border-border hover:bg-accent'
+              )}
+            >
+              Cancelled
+            </button>
+            <button
+              onClick={() => setOutcome('unable_to_cancel')}
+              className={cn(
+                'flex-1 px-3 py-2 text-sm rounded border transition-colors',
+                outcome === 'unable_to_cancel'
+                  ? 'border-yellow-500 bg-yellow-500/10 text-yellow-400'
+                  : 'border-border hover:bg-accent'
+              )}
+            >
+              Unable to Cancel
+            </button>
+          </div>
+        </div>
+
+        {/* Notes */}
+        <div className="mb-3">
+          <label className="text-sm font-medium mb-1.5 block">Notes <span className="text-red-400">*</span></label>
+          <textarea
+            value={notes}
+            onChange={e => setNotes(e.target.value)}
+            placeholder="Reason for cancellation (e.g. customer requested via support)"
+            rows={3}
+            autoFocus
+            className="w-full px-3 py-2 bg-background border border-border rounded focus:outline-none focus:ring-2 focus:ring-red-500/50 text-sm resize-none"
+          />
+        </div>
+
+        {/* Confirmation code override */}
+        <div className="mb-4">
+          <label className="text-sm font-medium mb-1.5 block text-muted-foreground">Confirmation Code (optional)</label>
+          <input
+            type="text"
+            value={confirmationCode}
+            onChange={e => setConfirmationCode(e.target.value)}
+            placeholder={confCode || 'e.g. AQD7CH'}
+            className="w-full px-3 py-2 bg-background border border-border rounded focus:outline-none focus:ring-2 focus:ring-border text-sm font-mono"
+          />
+        </div>
+
+        {error && <p className="text-sm text-red-400 mb-3">{error}</p>}
+
+        <div className="flex justify-end gap-2">
+          <button
+            onClick={onClose}
+            disabled={submitting}
+            className="px-4 py-2 text-sm border border-border rounded hover:bg-accent transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleSubmit}
+            disabled={submitting || !notes.trim()}
+            className="px-4 py-2 text-sm bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors font-medium"
+          >
+            {submitting ? 'Submitting...' : outcome === 'cancelled' ? 'Mark as Cancelled' : 'Mark Unable to Cancel'}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
