@@ -569,6 +569,7 @@ export default function MetricsPage() {
   const [metricsView, setMetricsView] = useState<MetricsView>('registrations');
   const [funnelChartData, setFunnelChartData] = useState<FunnelChartPoint[]>([]);
   const [funnelTotals, setFunnelTotals] = useState<FunnelTotals | null>(null);
+  const [funnelUsers, setFunnelUsers] = useState<OnboardingFunnelUser[]>([]);
   const [adSpend, setAdSpend] = useState<string>(() => {
     if (typeof window !== 'undefined') {
       return localStorage.getItem('axel-metrics-ad-spend') || '';
@@ -732,6 +733,7 @@ export default function MetricsPage() {
       if (dashboardData?.onboarding_funnel) {
         const funnel = dashboardData.onboarding_funnel;
         const users: OnboardingFunnelUser[] = funnel.users || [];
+        setFunnelUsers(users);
 
         // Compute averages
         const bookingHours = users.filter(u => u.hours_to_first_booking !== null).map(u => u.hours_to_first_booking!);
@@ -775,6 +777,7 @@ export default function MetricsPage() {
       } else {
         setFunnelTotals(null);
         setFunnelChartData([]);
+        setFunnelUsers([]);
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to load metrics';
@@ -868,6 +871,365 @@ export default function MetricsPage() {
     const cpOpp = funnelTotals.opportunity > 0 ? spend / funnelTotals.opportunity : 0;
     return { cpr, cpi, cpOpp };
   }, [adSpend, funnelTotals]);
+
+  // Period-over-period deltas for funnel stages (2nd half vs 1st half)
+  const funnelDeltas = useMemo(() => {
+    if (funnelChartData.length < 4) return null;
+    const mid = Math.floor(funnelChartData.length / 2);
+    const first = funnelChartData.slice(0, mid);
+    const second = funnelChartData.slice(mid);
+
+    const sum = (arr: FunnelChartPoint[], key: 'registered' | 'cwi' | 'monitored' | 'opportunity') =>
+      arr.reduce((s, d) => s + d[key], 0);
+
+    const calc = (key: 'registered' | 'cwi' | 'monitored' | 'opportunity') => {
+      const f = sum(first, key);
+      const s = sum(second, key);
+      if (f === 0) return null;
+      return Math.round(((s - f) / f) * 100);
+    };
+
+    return {
+      registered: calc('registered'),
+      cwi: calc('cwi'),
+      monitored: calc('monitored'),
+      opportunity: calc('opportunity'),
+    };
+  }, [funnelChartData]);
+
+  // Executive insights auto-generated from funnel data
+  const executiveInsights = useMemo(() => {
+    if (!funnelTotals || funnelTotals.registered === 0) return null;
+
+    const insights: { type: 'success' | 'warning' | 'info' | 'action'; text: string }[] = [];
+
+    // 1. Biggest drop-off point
+    const stages = [
+      { name: 'Registered → CWI', from: funnelTotals.registered, to: funnelTotals.cwi },
+      { name: 'CWI → Monitored', from: funnelTotals.cwi, to: funnelTotals.monitored },
+      { name: 'Monitored → Opportunity', from: funnelTotals.monitored, to: funnelTotals.opportunity },
+      { name: 'Opportunity → Progressed', from: funnelTotals.opportunity, to: funnelTotals.progressed },
+    ];
+
+    const dropoffs = stages
+      .filter(s => s.from > 0)
+      .map(s => ({ ...s, dropPct: Math.round(((s.from - s.to) / s.from) * 100), lost: s.from - s.to }));
+
+    if (dropoffs.length > 0) {
+      const worst = dropoffs.reduce((a, b) => b.dropPct > a.dropPct ? b : a, dropoffs[0]);
+      if (worst.dropPct > 50) {
+        insights.push({
+          type: 'warning',
+          text: `Biggest bottleneck: ${worst.name} loses ${worst.dropPct}% (${worst.lost.toLocaleString()} users). Focus retention efforts here.`,
+        });
+      } else if (worst.dropPct > 30) {
+        insights.push({
+          type: 'info',
+          text: `Largest drop-off at ${worst.name}: ${worst.dropPct}% (${worst.lost.toLocaleString()} users).`,
+        });
+      }
+    }
+
+    // 2. CWI rate trend (first half vs second half)
+    if (funnelChartData.length >= 4) {
+      const mid = Math.floor(funnelChartData.length / 2);
+      const firstHalf = funnelChartData.slice(0, mid);
+      const secondHalf = funnelChartData.slice(mid);
+      const firstReg = firstHalf.reduce((s, d) => s + d.registered, 0);
+      const firstCwi = firstHalf.reduce((s, d) => s + d.cwi, 0);
+      const secondReg = secondHalf.reduce((s, d) => s + d.registered, 0);
+      const secondCwi = secondHalf.reduce((s, d) => s + d.cwi, 0);
+      const firstRate = firstReg > 0 ? (firstCwi / firstReg) * 100 : 0;
+      const secondRate = secondReg > 0 ? (secondCwi / secondReg) * 100 : 0;
+      const delta = secondRate - firstRate;
+
+      if (Math.abs(delta) > 2) {
+        insights.push({
+          type: delta > 0 ? 'success' : 'warning',
+          text: `CWI rate ${delta > 0 ? 'improving' : 'declining'}: ${Math.abs(delta).toFixed(1)}pp shift (${firstRate.toFixed(0)}% → ${secondRate.toFixed(0)}%) over the period.`,
+        });
+      }
+    }
+
+    // 3. Time to intent assessment
+    if (funnelTotals.avgHoursToBooking !== null) {
+      const hours = funnelTotals.avgHoursToBooking;
+      if (hours <= 24) {
+        insights.push({ type: 'success', text: `Users show intent within ${Math.round(hours)}h on average — strong activation speed.` });
+      } else if (hours <= 72) {
+        insights.push({ type: 'info', text: `Avg ${(hours / 24).toFixed(1)} days to first intent. Consider onboarding nudges at 24h and 48h marks.` });
+      } else {
+        insights.push({ type: 'action', text: `Slow activation: ${(hours / 24).toFixed(1)} days avg to first intent. Add drip emails or in-app prompts to accelerate.` });
+      }
+    }
+
+    // 4. CPR assessment
+    if (cprMetrics) {
+      if (cprMetrics.cpr <= 5) {
+        insights.push({ type: 'success', text: `CPR at $${cprMetrics.cpr.toFixed(2)} — below $5 goal. Ad spend is efficient.` });
+      } else if (cprMetrics.cpr <= 10) {
+        insights.push({ type: 'info', text: `CPR at $${cprMetrics.cpr.toFixed(2)} — above $5 goal. Review ad targeting or creative.` });
+      } else {
+        insights.push({ type: 'action', text: `CPR at $${cprMetrics.cpr.toFixed(2)} — 2x+ above goal. Pause underperforming ad sets and reallocate budget.` });
+      }
+    }
+
+    // 5. End-to-end efficiency
+    const overallConversion = funnelTotals.registered > 0
+      ? (funnelTotals.progressed / funnelTotals.registered) * 100
+      : 0;
+    if (overallConversion > 0) {
+      insights.push({
+        type: overallConversion >= 5 ? 'success' : 'info',
+        text: `End-to-end conversion: ${overallConversion.toFixed(1)}% of registered users reach Progressed stage.`,
+      });
+    }
+
+    // 6. Channel imbalance detection
+    if (funnelUsers.length > 0) {
+      let flightActive = 0, hotelActive = 0;
+      for (const u of funnelUsers) {
+        if (u.flight_bookings + u.flight_watches > 0) flightActive++;
+        if (u.hotel_bookings + u.hotel_watches > 0) hotelActive++;
+      }
+      const total = flightActive + hotelActive;
+      if (total > 0) {
+        const flightPct = Math.round((flightActive / total) * 100);
+        if (flightPct > 80) {
+          insights.push({ type: 'info', text: `${flightPct}% of active users are flight-focused. Consider promoting hotel features to diversify engagement.` });
+        } else if (flightPct < 20) {
+          insights.push({ type: 'info', text: `${100 - flightPct}% of active users are hotel-focused. Flight adoption is low — consider flight-specific campaigns.` });
+        }
+      }
+    }
+
+    // 7. Stalled user warning
+    if (funnelUsers.length > 0) {
+      const now = Date.now();
+      const weekMs = 7 * 24 * 60 * 60 * 1000;
+      const stalledCount = funnelUsers.filter(u => {
+        const age = now - new Date(u.signed_up.endsWith('Z') ? u.signed_up : u.signed_up + 'Z').getTime();
+        const hasActivity = u.flight_bookings + u.hotel_bookings + u.flight_watches + u.hotel_watches > 0;
+        return age > weekMs && !hasActivity;
+      }).length;
+      const stalledPct = Math.round((stalledCount / funnelUsers.length) * 100);
+      if (stalledPct > 30) {
+        insights.push({ type: 'action', text: `${stalledPct}% of users (${stalledCount}) are inactive 7+ days post-signup. Trigger re-engagement flow via email or push.` });
+      }
+    }
+
+    return insights.length > 0 ? insights : null;
+  }, [funnelTotals, funnelChartData, cprMetrics, funnelUsers]);
+
+  // Drop-off analysis: per-stage conversion rates and loss counts
+  const dropoffAnalysis = useMemo(() => {
+    if (!funnelTotals || funnelTotals.registered === 0) return null;
+
+    const stages = [
+      { label: 'Registered', count: funnelTotals.registered, color: CHART_GREEN },
+      { label: 'CWI', count: funnelTotals.cwi, color: CHART_CYAN },
+      { label: 'Monitored', count: funnelTotals.monitored, color: CHART_AMBER },
+      { label: 'Opportunity', count: funnelTotals.opportunity, color: CHART_ORANGE },
+      { label: 'Progressed', count: funnelTotals.progressed, color: '#a78bfa' },
+    ];
+
+    return stages.map((stage, i) => ({
+      ...stage,
+      pctOfTotal: Math.round((stage.count / funnelTotals.registered) * 100),
+      convFromPrev: i === 0 ? 100 : (stages[i - 1].count > 0 ? Math.round((stage.count / stages[i - 1].count) * 100) : 0),
+      lost: i === 0 ? 0 : stages[i - 1].count - stage.count,
+    }));
+  }, [funnelTotals]);
+
+  // At-risk users: stalled at each funnel stage
+  const atRiskAnalysis = useMemo(() => {
+    if (funnelUsers.length === 0) return null;
+
+    const now = Date.now();
+    const dayMs = 24 * 60 * 60 * 1000;
+
+    // Users registered 3+ days ago with no intent (no bookings)
+    const noIntent = funnelUsers.filter(u => {
+      const age = now - new Date(u.signed_up.endsWith('Z') ? u.signed_up : u.signed_up + 'Z').getTime();
+      const hasIntent = u.flight_bookings + u.hotel_bookings > 0;
+      return age > 3 * dayMs && !hasIntent;
+    });
+
+    // Users with bookings but no watches (stalled after first intent)
+    const noWatch = funnelUsers.filter(u => {
+      const hasBooking = u.flight_bookings + u.hotel_bookings > 0;
+      const hasWatch = u.flight_watches + u.hotel_watches > 0;
+      return hasBooking && !hasWatch;
+    });
+
+    // Users with watches but no opportunities (waiting)
+    const noOpp = funnelUsers.filter(u => {
+      const hasWatch = u.flight_watches + u.hotel_watches > 0;
+      const hasOpp = u.flight_opps + u.hotel_opps > 0;
+      return hasWatch && !hasOpp;
+    });
+
+    return {
+      noIntent: noIntent.length,
+      noWatch: noWatch.length,
+      noOpp: noOpp.length,
+      total: funnelUsers.length,
+    };
+  }, [funnelUsers]);
+
+  // Cohort analysis: group users by signup week, show conversion rates per cohort
+  const cohortAnalysis = useMemo(() => {
+    if (funnelUsers.length === 0) return null;
+
+    const cohorts = new Map<string, {
+      label: string;
+      registered: number;
+      cwi: number;
+      monitored: number;
+      opportunity: number;
+    }>();
+
+    for (const u of funnelUsers) {
+      const d = new Date(u.signed_up.endsWith('Z') ? u.signed_up : u.signed_up + 'Z');
+      // Group by week (Monday-start)
+      const dow = d.getUTCDay();
+      const diff = dow === 0 ? -6 : 1 - dow;
+      const monday = new Date(d);
+      monday.setUTCDate(monday.getUTCDate() + diff);
+      const key = `${monday.getUTCFullYear()}-${String(monday.getUTCMonth() + 1).padStart(2, '0')}-${String(monday.getUTCDate()).padStart(2, '0')}`;
+      const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      const label = `${monthNames[monday.getUTCMonth()]} ${monday.getUTCDate()}`;
+
+      const existing = cohorts.get(key) || { label, registered: 0, cwi: 0, monitored: 0, opportunity: 0 };
+      existing.registered++;
+      if (u.flight_bookings + u.hotel_bookings > 0) existing.cwi++;
+      if (u.flight_watches + u.hotel_watches > 0) existing.monitored++;
+      if (u.flight_opps + u.hotel_opps > 0) existing.opportunity++;
+      cohorts.set(key, existing);
+    }
+
+    return Array.from(cohorts.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([key, data]) => ({
+        key,
+        ...data,
+        cwiRate: data.registered > 0 ? Math.round((data.cwi / data.registered) * 100) : 0,
+        monitoredRate: data.registered > 0 ? Math.round((data.monitored / data.registered) * 100) : 0,
+        oppRate: data.registered > 0 ? Math.round((data.opportunity / data.registered) * 100) : 0,
+      }));
+  }, [funnelUsers]);
+
+  // Conversion velocity: distribution of time-to-first-booking
+  const velocityDistribution = useMemo(() => {
+    if (funnelUsers.length === 0) return null;
+
+    const buckets = [
+      { label: '< 1h', min: 0, max: 1, count: 0 },
+      { label: '1-6h', min: 1, max: 6, count: 0 },
+      { label: '6-24h', min: 6, max: 24, count: 0 },
+      { label: '1-3d', min: 24, max: 72, count: 0 },
+      { label: '3-7d', min: 72, max: 168, count: 0 },
+      { label: '7+ days', min: 168, max: Infinity, count: 0 },
+    ];
+
+    let totalWithBooking = 0;
+    for (const u of funnelUsers) {
+      if (u.hours_to_first_booking !== null) {
+        totalWithBooking++;
+        const h = u.hours_to_first_booking;
+        for (const b of buckets) {
+          if (h >= b.min && h < b.max) {
+            b.count++;
+            break;
+          }
+        }
+      }
+    }
+
+    if (totalWithBooking === 0) return null;
+
+    const maxCount = Math.max(...buckets.map(b => b.count));
+    return buckets.map(b => ({
+      ...b,
+      pct: Math.round((b.count / totalWithBooking) * 100),
+      barWidth: maxCount > 0 ? Math.round((b.count / maxCount) * 100) : 0,
+    }));
+  }, [funnelUsers]);
+
+  // Channel breakdown: flight vs hotel activity
+  const channelBreakdown = useMemo(() => {
+    if (funnelUsers.length === 0) return null;
+
+    let flightBookings = 0, hotelBookings = 0;
+    let flightWatches = 0, hotelWatches = 0;
+    let flightOpps = 0, hotelOpps = 0;
+    let flightOnly = 0, hotelOnly = 0, both = 0, neither = 0;
+
+    for (const u of funnelUsers) {
+      flightBookings += u.flight_bookings;
+      hotelBookings += u.hotel_bookings;
+      flightWatches += u.flight_watches;
+      hotelWatches += u.hotel_watches;
+      flightOpps += u.flight_opps;
+      hotelOpps += u.hotel_opps;
+
+      const hasFlight = u.flight_bookings + u.flight_watches > 0;
+      const hasHotel = u.hotel_bookings + u.hotel_watches > 0;
+      if (hasFlight && hasHotel) both++;
+      else if (hasFlight) flightOnly++;
+      else if (hasHotel) hotelOnly++;
+      else neither++;
+    }
+
+    return {
+      flights: { bookings: flightBookings, watches: flightWatches, opps: flightOpps },
+      hotels: { bookings: hotelBookings, watches: hotelWatches, opps: hotelOpps },
+      userSplit: { flightOnly, hotelOnly, both, neither },
+      totalActive: flightOnly + hotelOnly + both,
+    };
+  }, [funnelUsers]);
+
+  // Stalled users: breakdown by days since signup with no progression
+  const stalledBreakdown = useMemo(() => {
+    if (funnelUsers.length === 0) return null;
+
+    const now = Date.now();
+    const dayMs = 24 * 60 * 60 * 1000;
+
+    const brackets = [
+      { label: '1-3 days', min: 1, max: 3, count: 0 },
+      { label: '3-7 days', min: 3, max: 7, count: 0 },
+      { label: '7-14 days', min: 7, max: 14, count: 0 },
+      { label: '14-30 days', min: 14, max: 30, count: 0 },
+      { label: '30+ days', min: 30, max: Infinity, count: 0 },
+    ];
+
+    for (const u of funnelUsers) {
+      const hasAnyActivity = u.flight_bookings + u.hotel_bookings + u.flight_watches + u.hotel_watches > 0;
+      if (hasAnyActivity) continue;
+
+      const ageDays = (now - new Date(u.signed_up.endsWith('Z') ? u.signed_up : u.signed_up + 'Z').getTime()) / dayMs;
+      for (const b of brackets) {
+        if (ageDays >= b.min && ageDays < b.max) {
+          b.count++;
+          break;
+        }
+      }
+    }
+
+    const totalStalled = brackets.reduce((s, b) => s + b.count, 0);
+    if (totalStalled === 0) return null;
+
+    const maxCount = Math.max(...brackets.map(b => b.count));
+    return {
+      brackets: brackets.map(b => ({
+        ...b,
+        pct: Math.round((b.count / totalStalled) * 100),
+        barWidth: maxCount > 0 ? Math.round((b.count / maxCount) * 100) : 0,
+      })),
+      total: totalStalled,
+    };
+  }, [funnelUsers]);
 
   // Export handlers
   function handleExport(type: 'chart_csv' | 'json' | 'funnel_csv' | 'funnel_json') {
@@ -990,7 +1352,7 @@ export default function MetricsPage() {
         <div>
           <h1 className="text-2xl font-semibold">Metrics</h1>
           <p className="text-sm text-muted-foreground mt-1">
-            {metricsView === 'registrations' ? 'User growth and registration trends' : 'Registration to intent conversion funnel'}
+            {metricsView === 'registrations' ? 'User growth and registration trends' : 'Marketing funnel analytics, insights, and cohort performance'}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -1394,6 +1756,11 @@ export default function MetricsPage() {
             <div className="flex-1 min-w-[130px] bg-[#0d1117] border border-[#1a1f2e] rounded-lg p-4 text-center">
               <p className="text-xs text-zinc-500 mb-1">Registered</p>
               <p className="text-2xl font-semibold" style={{ color: CHART_GREEN }}>{funnelTotals.registered.toLocaleString()}</p>
+              {funnelDeltas?.registered != null && (
+                <p className="text-[10px] mt-1" style={{ color: funnelDeltas.registered > 0 ? CHART_GREEN : funnelDeltas.registered < 0 ? '#f87171' : CHART_AXIS }}>
+                  {funnelDeltas.registered > 0 ? '+' : ''}{funnelDeltas.registered}% vs prior half
+                </p>
+              )}
             </div>
             {/* Arrow */}
             <div className="flex flex-col items-center px-1 shrink-0">
@@ -1407,6 +1774,11 @@ export default function MetricsPage() {
               <p className="text-xs text-zinc-500 mb-0.5">CWI</p>
               <p className="text-[10px] text-zinc-600 mb-1">Customers with Intent</p>
               <p className="text-2xl font-semibold" style={{ color: CHART_CYAN }}>{funnelTotals.cwi.toLocaleString()}</p>
+              {funnelDeltas?.cwi != null && (
+                <p className="text-[10px] mt-1" style={{ color: funnelDeltas.cwi > 0 ? CHART_GREEN : funnelDeltas.cwi < 0 ? '#f87171' : CHART_AXIS }}>
+                  {funnelDeltas.cwi > 0 ? '+' : ''}{funnelDeltas.cwi}% vs prior half
+                </p>
+              )}
             </div>
             {/* Arrow */}
             <div className="flex flex-col items-center px-1 shrink-0">
@@ -1419,6 +1791,11 @@ export default function MetricsPage() {
             <div className="flex-1 min-w-[130px] bg-[#0d1117] border border-[#1a1f2e] rounded-lg p-4 text-center">
               <p className="text-xs text-zinc-500 mb-1">Monitored</p>
               <p className="text-2xl font-semibold" style={{ color: CHART_AMBER }}>{funnelTotals.monitored.toLocaleString()}</p>
+              {funnelDeltas?.monitored != null && (
+                <p className="text-[10px] mt-1" style={{ color: funnelDeltas.monitored > 0 ? CHART_GREEN : funnelDeltas.monitored < 0 ? '#f87171' : CHART_AXIS }}>
+                  {funnelDeltas.monitored > 0 ? '+' : ''}{funnelDeltas.monitored}% vs prior half
+                </p>
+              )}
             </div>
             {/* Arrow */}
             <div className="flex flex-col items-center px-1 shrink-0">
@@ -1431,6 +1808,11 @@ export default function MetricsPage() {
             <div className="flex-1 min-w-[130px] bg-[#0d1117] border border-[#1a1f2e] rounded-lg p-4 text-center">
               <p className="text-xs text-zinc-500 mb-1">Opportunity</p>
               <p className="text-2xl font-semibold" style={{ color: CHART_ORANGE }}>{funnelTotals.opportunity.toLocaleString()}</p>
+              {funnelDeltas?.opportunity != null && (
+                <p className="text-[10px] mt-1" style={{ color: funnelDeltas.opportunity > 0 ? CHART_GREEN : funnelDeltas.opportunity < 0 ? '#f87171' : CHART_AXIS }}>
+                  {funnelDeltas.opportunity > 0 ? '+' : ''}{funnelDeltas.opportunity}% vs prior half
+                </p>
+              )}
             </div>
             {/* Arrow */}
             <div className="flex flex-col items-center px-1 shrink-0">
@@ -1457,6 +1839,25 @@ export default function MetricsPage() {
             <p className="text-2xl font-semibold" style={{ color: CHART_CYAN }}>
               {funnelTotals.registered > 0 ? Math.round((funnelTotals.cwi / funnelTotals.registered) * 100) : 0}%
             </p>
+            {(() => {
+              if (funnelChartData.length < 4) return null;
+              const mid = Math.floor(funnelChartData.length / 2);
+              const f1 = funnelChartData.slice(0, mid);
+              const f2 = funnelChartData.slice(mid);
+              const r1 = f1.reduce((s, d) => s + d.registered, 0);
+              const c1 = f1.reduce((s, d) => s + d.cwi, 0);
+              const r2 = f2.reduce((s, d) => s + d.registered, 0);
+              const c2 = f2.reduce((s, d) => s + d.cwi, 0);
+              const rate1 = r1 > 0 ? (c1 / r1) * 100 : 0;
+              const rate2 = r2 > 0 ? (c2 / r2) * 100 : 0;
+              const d = rate2 - rate1;
+              if (Math.abs(d) < 1) return null;
+              return (
+                <p className="text-[10px] mt-0.5" style={{ color: d > 0 ? CHART_GREEN : '#f87171' }}>
+                  {d > 0 ? '+' : ''}{d.toFixed(1)}pp trend
+                </p>
+              );
+            })()}
             <p className="text-xs text-zinc-500">registered → intent</p>
           </div>
           {/* Ad Spend Input */}
@@ -1527,6 +1928,365 @@ export default function MetricsPage() {
             )}
             <p className="text-xs text-zinc-500">signup → first search</p>
           </div>
+        </div>
+      )}
+
+      {/* Executive Insights */}
+      {executiveInsights && !loading && (
+        <div className="bg-[#0d1117] border border-[#1a1f2e] rounded-lg p-5 mb-6">
+          <h3 className="text-sm font-medium text-zinc-300 mb-3 flex items-center gap-2">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-zinc-400">
+              <circle cx="12" cy="12" r="10" />
+              <path d="M12 16v-4" />
+              <path d="M12 8h.01" />
+            </svg>
+            Executive Insights
+          </h3>
+          <div className="space-y-2">
+            {executiveInsights.map((insight, i) => (
+              <div
+                key={i}
+                className="flex items-start gap-2.5 text-sm"
+              >
+                <span
+                  className="mt-0.5 w-1.5 h-1.5 rounded-full shrink-0"
+                  style={{
+                    backgroundColor:
+                      insight.type === 'success' ? CHART_GREEN
+                      : insight.type === 'warning' ? '#f87171'
+                      : insight.type === 'action' ? CHART_ORANGE
+                      : CHART_CYAN,
+                  }}
+                />
+                <span className={cn(
+                  'leading-relaxed',
+                  insight.type === 'success' && 'text-zinc-300',
+                  insight.type === 'warning' && 'text-zinc-300',
+                  insight.type === 'action' && 'text-zinc-300',
+                  insight.type === 'info' && 'text-zinc-400',
+                )}>
+                  {insight.text}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── Section: Funnel Health ── */}
+      {/* Drop-off Analysis + At-Risk Users */}
+      {dropoffAnalysis && !loading && (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
+          {/* Funnel waterfall */}
+          <div className="lg:col-span-2 bg-[#0d1117] border border-[#1a1f2e] rounded-lg p-5">
+            <h3 className="text-sm font-medium text-zinc-300 mb-4">Funnel Drop-off Analysis</h3>
+            <div className="space-y-3">
+              {dropoffAnalysis.map((stage, i) => (
+                <div key={stage.label}>
+                  <div className="flex items-center justify-between mb-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-medium text-zinc-300">{stage.label}</span>
+                      <span className="text-xs text-zinc-500">{stage.count.toLocaleString()}</span>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      {i > 0 && (
+                        <span className="text-[10px] text-zinc-500">
+                          {stage.convFromPrev}% from {dropoffAnalysis[i - 1].label}
+                          {stage.lost > 0 && <span className="text-red-400/70 ml-1">(-{stage.lost.toLocaleString()})</span>}
+                        </span>
+                      )}
+                      <span className="text-xs font-medium" style={{ color: stage.color }}>{stage.pctOfTotal}%</span>
+                    </div>
+                  </div>
+                  <div className="h-2 bg-zinc-800/50 rounded-full overflow-hidden">
+                    <div
+                      className="h-full rounded-full transition-all duration-500"
+                      style={{
+                        width: `${stage.pctOfTotal}%`,
+                        backgroundColor: stage.color,
+                        opacity: 0.8,
+                      }}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* At-risk users */}
+          {atRiskAnalysis && (
+            <div className="bg-[#0d1117] border border-[#1a1f2e] rounded-lg p-5">
+              <h3 className="text-sm font-medium text-zinc-300 mb-4">At-Risk Users</h3>
+              <div className="space-y-4">
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-xs text-zinc-400">Registered 3+ days, no intent</span>
+                    <span className="text-sm font-semibold text-red-400">{atRiskAnalysis.noIntent.toLocaleString()}</span>
+                  </div>
+                  <div className="h-1.5 bg-zinc-800/50 rounded-full overflow-hidden">
+                    <div
+                      className="h-full rounded-full bg-red-400/70"
+                      style={{ width: `${atRiskAnalysis.total > 0 ? Math.min(100, (atRiskAnalysis.noIntent / atRiskAnalysis.total) * 100) : 0}%` }}
+                    />
+                  </div>
+                  <p className="text-[10px] text-zinc-600 mt-0.5">Target with re-engagement email or push notification</p>
+                </div>
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-xs text-zinc-400">Has intent, no watch set</span>
+                    <span className="text-sm font-semibold" style={{ color: CHART_AMBER }}>{atRiskAnalysis.noWatch.toLocaleString()}</span>
+                  </div>
+                  <div className="h-1.5 bg-zinc-800/50 rounded-full overflow-hidden">
+                    <div
+                      className="h-full rounded-full"
+                      style={{ backgroundColor: CHART_AMBER, opacity: 0.7, width: `${atRiskAnalysis.total > 0 ? Math.min(100, (atRiskAnalysis.noWatch / atRiskAnalysis.total) * 100) : 0}%` }}
+                    />
+                  </div>
+                  <p className="text-[10px] text-zinc-600 mt-0.5">Nudge to set up price monitoring</p>
+                </div>
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-xs text-zinc-400">Monitoring, no opportunity yet</span>
+                    <span className="text-sm font-semibold" style={{ color: CHART_CYAN }}>{atRiskAnalysis.noOpp.toLocaleString()}</span>
+                  </div>
+                  <div className="h-1.5 bg-zinc-800/50 rounded-full overflow-hidden">
+                    <div
+                      className="h-full rounded-full"
+                      style={{ backgroundColor: CHART_CYAN, opacity: 0.7, width: `${atRiskAnalysis.total > 0 ? Math.min(100, (atRiskAnalysis.noOpp / atRiskAnalysis.total) * 100) : 0}%` }}
+                    />
+                  </div>
+                  <p className="text-[10px] text-zinc-600 mt-0.5">Normal — waiting for price drops</p>
+                </div>
+                <div className="pt-2 border-t border-zinc-800">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-zinc-500">Total users in funnel</span>
+                    <span className="text-sm font-medium text-zinc-300">{atRiskAnalysis.total.toLocaleString()}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Cohort Analysis + Conversion Velocity */}
+      {(cohortAnalysis || velocityDistribution) && !loading && (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
+          {/* Cohort table */}
+          {cohortAnalysis && cohortAnalysis.length > 0 && (
+            <div className="lg:col-span-2 bg-[#0d1117] border border-[#1a1f2e] rounded-lg p-5 overflow-x-auto">
+              <h3 className="text-sm font-medium text-zinc-300 mb-3">Weekly Cohort Conversion</h3>
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="text-zinc-500 border-b border-zinc-800">
+                    <th className="text-left py-2 pr-3 font-medium">Week of</th>
+                    <th className="text-right py-2 px-2 font-medium">Registered</th>
+                    <th className="text-right py-2 px-2 font-medium">CWI %</th>
+                    <th className="text-right py-2 px-2 font-medium">Monitored %</th>
+                    <th className="text-right py-2 px-2 font-medium">Opp %</th>
+                    <th className="py-2 pl-3 font-medium">CWI Rate</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(() => {
+                    const visible = cohortAnalysis.slice(-12);
+                    const rates = visible.map(c => c.cwiRate);
+                    const maxRate = Math.max(...rates);
+                    const minRate = Math.min(...rates);
+                    return visible.map(c => (
+                    <tr key={c.key} className={cn(
+                      "border-b border-zinc-800/50 hover:bg-zinc-800/20 transition-colors",
+                      c.cwiRate === maxRate && maxRate > 0 && "bg-[#00C80508]",
+                      c.cwiRate === minRate && minRate < maxRate && "bg-[#f8717108]",
+                    )}>
+                      <td className="py-2 pr-3 text-zinc-300 font-medium">
+                        {c.label}
+                        {c.cwiRate === maxRate && maxRate > 0 && <span className="ml-1 text-[9px] align-top" style={{ color: CHART_GREEN }}>BEST</span>}
+                        {c.cwiRate === minRate && minRate < maxRate && <span className="ml-1 text-[9px] align-top text-red-400/70">LOW</span>}
+                      </td>
+                      <td className="py-2 px-2 text-right text-zinc-400">{c.registered}</td>
+                      <td className="py-2 px-2 text-right" style={{ color: CHART_CYAN }}>{c.cwiRate}%</td>
+                      <td className="py-2 px-2 text-right" style={{ color: CHART_AMBER }}>{c.monitoredRate}%</td>
+                      <td className="py-2 px-2 text-right" style={{ color: CHART_ORANGE }}>{c.oppRate}%</td>
+                      <td className="py-2 pl-3">
+                        <div className="flex items-center gap-1.5">
+                          <div className="h-1.5 bg-zinc-800 rounded-full overflow-hidden w-16">
+                            <div
+                              className="h-full rounded-full"
+                              style={{ width: `${c.cwiRate}%`, backgroundColor: CHART_CYAN, opacity: 0.8 }}
+                            />
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+                  ));
+                  })()}
+                </tbody>
+              </table>
+              {cohortAnalysis.length > 12 && (
+                <p className="text-[10px] text-zinc-600 mt-2">Showing most recent 12 of {cohortAnalysis.length} cohorts</p>
+              )}
+            </div>
+          )}
+
+          {/* Conversion velocity */}
+          {velocityDistribution && (
+            <div className="bg-[#0d1117] border border-[#1a1f2e] rounded-lg p-5">
+              <h3 className="text-sm font-medium text-zinc-300 mb-3">Time to First Intent</h3>
+              <p className="text-[10px] text-zinc-500 mb-4">How quickly users search after signup</p>
+              <div className="space-y-3">
+                {velocityDistribution.map(b => (
+                  <div key={b.label}>
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-xs text-zinc-400 w-16">{b.label}</span>
+                      <span className="text-xs text-zinc-500">{b.count} ({b.pct}%)</span>
+                    </div>
+                    <div className="h-2 bg-zinc-800/50 rounded-full overflow-hidden">
+                      <div
+                        className="h-full rounded-full transition-all duration-500"
+                        style={{
+                          width: `${b.barWidth}%`,
+                          backgroundColor: b.min < 24 ? CHART_GREEN : b.min < 72 ? CHART_CYAN : CHART_AMBER,
+                          opacity: 0.8,
+                        }}
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Channel Breakdown + Stalled Users */}
+      {(channelBreakdown || stalledBreakdown) && !loading && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
+          {/* Channel breakdown */}
+          {channelBreakdown && (
+            <div className="bg-[#0d1117] border border-[#1a1f2e] rounded-lg p-5">
+              <h3 className="text-sm font-medium text-zinc-300 mb-4">Channel Breakdown</h3>
+              <div className="grid grid-cols-2 gap-4 mb-4">
+                <div>
+                  <p className="text-[10px] text-zinc-500 uppercase tracking-wider mb-2">Flights</p>
+                  <div className="space-y-1.5">
+                    <div className="flex justify-between text-xs">
+                      <span className="text-zinc-400">Searches</span>
+                      <span className="text-zinc-200 font-medium">{channelBreakdown.flights.bookings.toLocaleString()}</span>
+                    </div>
+                    <div className="flex justify-between text-xs">
+                      <span className="text-zinc-400">Watches</span>
+                      <span className="text-zinc-200 font-medium">{channelBreakdown.flights.watches.toLocaleString()}</span>
+                    </div>
+                    <div className="flex justify-between text-xs">
+                      <span className="text-zinc-400">Opportunities</span>
+                      <span className="text-zinc-200 font-medium">{channelBreakdown.flights.opps.toLocaleString()}</span>
+                    </div>
+                  </div>
+                </div>
+                <div>
+                  <p className="text-[10px] text-zinc-500 uppercase tracking-wider mb-2">Hotels</p>
+                  <div className="space-y-1.5">
+                    <div className="flex justify-between text-xs">
+                      <span className="text-zinc-400">Searches</span>
+                      <span className="text-zinc-200 font-medium">{channelBreakdown.hotels.bookings.toLocaleString()}</span>
+                    </div>
+                    <div className="flex justify-between text-xs">
+                      <span className="text-zinc-400">Watches</span>
+                      <span className="text-zinc-200 font-medium">{channelBreakdown.hotels.watches.toLocaleString()}</span>
+                    </div>
+                    <div className="flex justify-between text-xs">
+                      <span className="text-zinc-400">Opportunities</span>
+                      <span className="text-zinc-200 font-medium">{channelBreakdown.hotels.opps.toLocaleString()}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              {/* User split visual */}
+              <div className="pt-3 border-t border-zinc-800">
+                <p className="text-[10px] text-zinc-500 mb-2">User Channel Mix</p>
+                {channelBreakdown.totalActive > 0 ? (
+                  <div className="flex h-3 rounded-full overflow-hidden gap-0.5">
+                    {channelBreakdown.userSplit.flightOnly > 0 && (
+                      <div
+                        className="rounded-full"
+                        style={{
+                          width: `${(channelBreakdown.userSplit.flightOnly / channelBreakdown.totalActive) * 100}%`,
+                          backgroundColor: CHART_CYAN,
+                          opacity: 0.8,
+                        }}
+                        title={`Flight only: ${channelBreakdown.userSplit.flightOnly}`}
+                      />
+                    )}
+                    {channelBreakdown.userSplit.both > 0 && (
+                      <div
+                        className="rounded-full"
+                        style={{
+                          width: `${(channelBreakdown.userSplit.both / channelBreakdown.totalActive) * 100}%`,
+                          backgroundColor: CHART_GREEN,
+                          opacity: 0.8,
+                        }}
+                        title={`Both: ${channelBreakdown.userSplit.both}`}
+                      />
+                    )}
+                    {channelBreakdown.userSplit.hotelOnly > 0 && (
+                      <div
+                        className="rounded-full"
+                        style={{
+                          width: `${(channelBreakdown.userSplit.hotelOnly / channelBreakdown.totalActive) * 100}%`,
+                          backgroundColor: CHART_AMBER,
+                          opacity: 0.8,
+                        }}
+                        title={`Hotel only: ${channelBreakdown.userSplit.hotelOnly}`}
+                      />
+                    )}
+                  </div>
+                ) : (
+                  <p className="text-xs text-zinc-600">No active users</p>
+                )}
+                <div className="flex items-center gap-4 mt-2 text-[10px] text-zinc-500">
+                  <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full" style={{ backgroundColor: CHART_CYAN }} /> Flight only ({channelBreakdown.userSplit.flightOnly})</span>
+                  <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full" style={{ backgroundColor: CHART_GREEN }} /> Both ({channelBreakdown.userSplit.both})</span>
+                  <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full" style={{ backgroundColor: CHART_AMBER }} /> Hotel only ({channelBreakdown.userSplit.hotelOnly})</span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Stalled users by age */}
+          {stalledBreakdown && (
+            <div className="bg-[#0d1117] border border-[#1a1f2e] rounded-lg p-5">
+              <h3 className="text-sm font-medium text-zinc-300 mb-1">Stalled Users by Age</h3>
+              <p className="text-[10px] text-zinc-500 mb-4">
+                {stalledBreakdown.total.toLocaleString()} users registered but took no action
+              </p>
+              <div className="space-y-3">
+                {stalledBreakdown.brackets.map(b => (
+                  <div key={b.label}>
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-xs text-zinc-400">{b.label}</span>
+                      <span className="text-xs text-zinc-500">{b.count} ({b.pct}%)</span>
+                    </div>
+                    <div className="h-2 bg-zinc-800/50 rounded-full overflow-hidden">
+                      <div
+                        className="h-full rounded-full transition-all duration-500"
+                        style={{
+                          width: `${b.barWidth}%`,
+                          backgroundColor: b.min < 7 ? CHART_AMBER : b.min < 14 ? CHART_ORANGE : '#f87171',
+                          opacity: 0.8,
+                        }}
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="mt-4 pt-3 border-t border-zinc-800">
+                <p className="text-[10px] text-zinc-500">
+                  Users stalled 7+ days are unlikely to convert organically. Target with re-engagement campaigns.
+                </p>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
