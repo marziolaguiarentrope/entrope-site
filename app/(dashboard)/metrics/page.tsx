@@ -683,8 +683,8 @@ export default function MetricsPage() {
 
       // Fetch funnel data in parallel with bucket counts
       const daysForFunnel = effectiveDates.start
-        ? Math.max(1, Math.ceil((effectiveDates.end.getTime() - effectiveDates.start.getTime()) / (1000 * 60 * 60 * 24)))
-        : undefined;
+        ? Math.min(30, Math.max(1, Math.ceil((effectiveDates.end.getTime() - effectiveDates.start.getTime()) / (1000 * 60 * 60 * 24))))
+        : 30;
       const funnelPromise = api.getBusinessDashboard(daysForFunnel).catch((err) => {
         const msg = err instanceof Error ? err.message : 'Failed to load funnel data';
         setFunnelError(msg);
