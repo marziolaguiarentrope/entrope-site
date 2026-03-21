@@ -569,6 +569,7 @@ export default function MetricsPage() {
   const [metricsView, setMetricsView] = useState<MetricsView>('registrations');
   const [funnelChartData, setFunnelChartData] = useState<FunnelChartPoint[]>([]);
   const [funnelTotals, setFunnelTotals] = useState<FunnelTotals | null>(null);
+  const [funnelError, setFunnelError] = useState<string | null>(null);
   const [funnelUsers, setFunnelUsers] = useState<OnboardingFunnelUser[]>([]);
   const [adSpend, setAdSpend] = useState<string>(() => {
     if (typeof window !== 'undefined') {
@@ -635,6 +636,7 @@ export default function MetricsPage() {
   const fetchData = useCallback(async () => {
     setLoading(true);
     setError(null);
+    setFunnelError(null);
     setFetchProgress('Generating buckets...');
 
     try {
@@ -683,7 +685,11 @@ export default function MetricsPage() {
       const daysForFunnel = effectiveDates.start
         ? Math.max(1, Math.ceil((effectiveDates.end.getTime() - effectiveDates.start.getTime()) / (1000 * 60 * 60 * 24)))
         : undefined;
-      const funnelPromise = api.getBusinessDashboard(daysForFunnel).catch(() => null);
+      const funnelPromise = api.getBusinessDashboard(daysForFunnel).catch((err) => {
+        const msg = err instanceof Error ? err.message : 'Failed to load funnel data';
+        setFunnelError(msg);
+        return null;
+      });
 
       // Process buckets in batches
       for (let i = 0; i < buckets.length; i += BATCH_SIZE) {
@@ -731,6 +737,7 @@ export default function MetricsPage() {
       // Process funnel data
       const dashboardData = await funnelPromise;
       if (dashboardData?.onboarding_funnel) {
+        setFunnelError(null);
         const funnel = dashboardData.onboarding_funnel;
         const users: OnboardingFunnelUser[] = funnel.users || [];
         setFunnelUsers(users);
@@ -899,9 +906,35 @@ export default function MetricsPage() {
 
   // Executive insights auto-generated from funnel data
   const executiveInsights = useMemo(() => {
-    if (!funnelTotals || funnelTotals.registered === 0) return null;
-
     const insights: { type: 'success' | 'warning' | 'info' | 'action'; text: string }[] = [];
+
+    // Registration-based insights (always available if we have registration data)
+    if (!funnelTotals && totalInRange > 0) {
+      insights.push({ type: 'info', text: `${totalInRange.toLocaleString()} new registrations in this period. Funnel breakdown unavailable — retry or check backend status.` });
+      if (stats.growthRate !== null) {
+        insights.push({
+          type: stats.growthRate > 0 ? 'success' : stats.growthRate < -10 ? 'warning' : 'info',
+          text: `Registration growth: ${stats.growthRate > 0 ? '+' : ''}${stats.growthRate.toFixed(0)}% (2nd half vs 1st half of period).`,
+        });
+      }
+      if (stats.vsLifetime !== null) {
+        insights.push({
+          type: stats.vsLifetime > 10 ? 'success' : stats.vsLifetime < -10 ? 'warning' : 'info',
+          text: `Daily registration rate is ${stats.vsLifetime > 0 ? '+' : ''}${stats.vsLifetime.toFixed(0)}% vs lifetime average (${stats.dailyRateInRange.toFixed(1)}/day vs ${stats.lifetimeDailyAvg?.toFixed(1)}/day).`,
+        });
+      }
+      const spend = parseFloat(adSpend) || 0;
+      if (spend > 0) {
+        const cpr = spend / totalInRange;
+        insights.push({
+          type: cpr <= 5 ? 'success' : cpr <= 10 ? 'info' : 'action',
+          text: `CPR at $${cpr.toFixed(2)} based on ${totalInRange} registrations. ${cpr <= 5 ? 'Below $5 goal.' : cpr <= 10 ? 'Above $5 goal — review targeting.' : 'Well above goal — pause underperformers.'}`,
+        });
+      }
+      return insights.length > 0 ? insights : null;
+    }
+
+    if (!funnelTotals || funnelTotals.registered === 0) return null;
 
     // 1. Biggest drop-off point
     const stages = [
@@ -1019,7 +1052,7 @@ export default function MetricsPage() {
     }
 
     return insights.length > 0 ? insights : null;
-  }, [funnelTotals, funnelChartData, cprMetrics, funnelUsers]);
+  }, [funnelTotals, funnelChartData, cprMetrics, funnelUsers, totalInRange, stats, adSpend]);
 
   // Drop-off analysis: per-stage conversion rates and loss counts
   const dropoffAnalysis = useMemo(() => {
@@ -1749,13 +1782,13 @@ export default function MetricsPage() {
       {metricsView === 'funnel' && (<>
 
       {/* Funnel Overview Cards */}
-      {funnelTotals && !loading && (
+      {!loading && (funnelTotals || totalInRange > 0) && (
         <div className="mb-6">
           <div className="flex items-center gap-2 overflow-x-auto pb-2">
             {/* Registered */}
             <div className="flex-1 min-w-[130px] bg-[#0d1117] border border-[#1a1f2e] rounded-lg p-4 text-center">
               <p className="text-xs text-zinc-500 mb-1">Registered</p>
-              <p className="text-2xl font-semibold" style={{ color: CHART_GREEN }}>{funnelTotals.registered.toLocaleString()}</p>
+              <p className="text-2xl font-semibold" style={{ color: CHART_GREEN }}>{(funnelTotals?.registered ?? totalInRange).toLocaleString()}</p>
               {funnelDeltas?.registered != null && (
                 <p className="text-[10px] mt-1" style={{ color: funnelDeltas.registered > 0 ? CHART_GREEN : funnelDeltas.registered < 0 ? '#f87171' : CHART_AXIS }}>
                   {funnelDeltas.registered > 0 ? '+' : ''}{funnelDeltas.registered}% vs prior half
@@ -1765,7 +1798,7 @@ export default function MetricsPage() {
             {/* Arrow */}
             <div className="flex flex-col items-center px-1 shrink-0">
               <span className="text-xs font-medium" style={{ color: CHART_CYAN }}>
-                {funnelTotals.registered > 0 ? Math.round((funnelTotals.cwi / funnelTotals.registered) * 100) : 0}%
+                {funnelTotals && funnelTotals.registered > 0 ? Math.round((funnelTotals.cwi / funnelTotals.registered) * 100) : '\u2014'}
               </span>
               <svg width="20" height="12" viewBox="0 0 20 12" className="text-zinc-600"><path d="M0 6h16M12 1l5 5-5 5" fill="none" stroke="currentColor" strokeWidth="1.5" /></svg>
             </div>
@@ -1773,7 +1806,7 @@ export default function MetricsPage() {
             <div className="flex-1 min-w-[130px] bg-[#0d1117] border border-[#1a1f2e] rounded-lg p-4 text-center">
               <p className="text-xs text-zinc-500 mb-0.5">CWI</p>
               <p className="text-[10px] text-zinc-600 mb-1">Customers with Intent</p>
-              <p className="text-2xl font-semibold" style={{ color: CHART_CYAN }}>{funnelTotals.cwi.toLocaleString()}</p>
+              <p className="text-2xl font-semibold" style={{ color: CHART_CYAN }}>{funnelTotals ? funnelTotals.cwi.toLocaleString() : '\u2014'}</p>
               {funnelDeltas?.cwi != null && (
                 <p className="text-[10px] mt-1" style={{ color: funnelDeltas.cwi > 0 ? CHART_GREEN : funnelDeltas.cwi < 0 ? '#f87171' : CHART_AXIS }}>
                   {funnelDeltas.cwi > 0 ? '+' : ''}{funnelDeltas.cwi}% vs prior half
@@ -1783,14 +1816,14 @@ export default function MetricsPage() {
             {/* Arrow */}
             <div className="flex flex-col items-center px-1 shrink-0">
               <span className="text-xs font-medium" style={{ color: CHART_AMBER }}>
-                {funnelTotals.cwi > 0 ? Math.round((funnelTotals.monitored / funnelTotals.cwi) * 100) : 0}%
+                {funnelTotals && funnelTotals.cwi > 0 ? Math.round((funnelTotals.monitored / funnelTotals.cwi) * 100) : '\u2014'}
               </span>
               <svg width="20" height="12" viewBox="0 0 20 12" className="text-zinc-600"><path d="M0 6h16M12 1l5 5-5 5" fill="none" stroke="currentColor" strokeWidth="1.5" /></svg>
             </div>
             {/* Monitored */}
             <div className="flex-1 min-w-[130px] bg-[#0d1117] border border-[#1a1f2e] rounded-lg p-4 text-center">
               <p className="text-xs text-zinc-500 mb-1">Monitored</p>
-              <p className="text-2xl font-semibold" style={{ color: CHART_AMBER }}>{funnelTotals.monitored.toLocaleString()}</p>
+              <p className="text-2xl font-semibold" style={{ color: CHART_AMBER }}>{funnelTotals ? funnelTotals.monitored.toLocaleString() : '\u2014'}</p>
               {funnelDeltas?.monitored != null && (
                 <p className="text-[10px] mt-1" style={{ color: funnelDeltas.monitored > 0 ? CHART_GREEN : funnelDeltas.monitored < 0 ? '#f87171' : CHART_AXIS }}>
                   {funnelDeltas.monitored > 0 ? '+' : ''}{funnelDeltas.monitored}% vs prior half
@@ -1800,14 +1833,14 @@ export default function MetricsPage() {
             {/* Arrow */}
             <div className="flex flex-col items-center px-1 shrink-0">
               <span className="text-xs font-medium" style={{ color: CHART_ORANGE }}>
-                {funnelTotals.monitored > 0 ? Math.round((funnelTotals.opportunity / funnelTotals.monitored) * 100) : 0}%
+                {funnelTotals && funnelTotals.monitored > 0 ? Math.round((funnelTotals.opportunity / funnelTotals.monitored) * 100) : '\u2014'}
               </span>
               <svg width="20" height="12" viewBox="0 0 20 12" className="text-zinc-600"><path d="M0 6h16M12 1l5 5-5 5" fill="none" stroke="currentColor" strokeWidth="1.5" /></svg>
             </div>
             {/* Opportunity */}
             <div className="flex-1 min-w-[130px] bg-[#0d1117] border border-[#1a1f2e] rounded-lg p-4 text-center">
               <p className="text-xs text-zinc-500 mb-1">Opportunity</p>
-              <p className="text-2xl font-semibold" style={{ color: CHART_ORANGE }}>{funnelTotals.opportunity.toLocaleString()}</p>
+              <p className="text-2xl font-semibold" style={{ color: CHART_ORANGE }}>{funnelTotals ? funnelTotals.opportunity.toLocaleString() : '\u2014'}</p>
               {funnelDeltas?.opportunity != null && (
                 <p className="text-[10px] mt-1" style={{ color: funnelDeltas.opportunity > 0 ? CHART_GREEN : funnelDeltas.opportunity < 0 ? '#f87171' : CHART_AXIS }}>
                   {funnelDeltas.opportunity > 0 ? '+' : ''}{funnelDeltas.opportunity}% vs prior half
@@ -1817,30 +1850,30 @@ export default function MetricsPage() {
             {/* Arrow */}
             <div className="flex flex-col items-center px-1 shrink-0">
               <span className="text-xs font-medium text-zinc-400">
-                {funnelTotals.opportunity > 0 ? Math.round((funnelTotals.progressed / funnelTotals.opportunity) * 100) : 0}%
+                {funnelTotals && funnelTotals.opportunity > 0 ? Math.round((funnelTotals.progressed / funnelTotals.opportunity) * 100) : '\u2014'}
               </span>
               <svg width="20" height="12" viewBox="0 0 20 12" className="text-zinc-600"><path d="M0 6h16M12 1l5 5-5 5" fill="none" stroke="currentColor" strokeWidth="1.5" /></svg>
             </div>
             {/* Progressed */}
             <div className="flex-1 min-w-[130px] bg-[#0d1117] border border-[#1a1f2e] rounded-lg p-4 text-center">
               <p className="text-xs text-zinc-500 mb-1">Progressed</p>
-              <p className="text-2xl font-semibold text-zinc-200">{funnelTotals.progressed.toLocaleString()}</p>
+              <p className="text-2xl font-semibold text-zinc-200">{funnelTotals ? funnelTotals.progressed.toLocaleString() : '\u2014'}</p>
             </div>
           </div>
         </div>
       )}
 
       {/* Marketing KPI Cards */}
-      {funnelTotals && !loading && (
+      {!loading && (funnelTotals || totalInRange > 0) && (
         <div className="grid grid-cols-2 sm:grid-cols-5 gap-4 mb-6">
           {/* CWI Rate */}
           <div className="bg-[#0d1117] border border-[#1a1f2e] rounded-lg p-4">
             <p className="text-xs text-zinc-500 mb-1">CWI Rate</p>
             <p className="text-2xl font-semibold" style={{ color: CHART_CYAN }}>
-              {funnelTotals.registered > 0 ? Math.round((funnelTotals.cwi / funnelTotals.registered) * 100) : 0}%
+              {funnelTotals && funnelTotals.registered > 0 ? Math.round((funnelTotals.cwi / funnelTotals.registered) * 100) : '\u2014'}%
             </p>
             {(() => {
-              if (funnelChartData.length < 4) return null;
+              if (!funnelChartData || funnelChartData.length < 4) return null;
               const mid = Math.floor(funnelChartData.length / 2);
               const f1 = funnelChartData.slice(0, mid);
               const f2 = funnelChartData.slice(mid);
@@ -1858,7 +1891,7 @@ export default function MetricsPage() {
                 </p>
               );
             })()}
-            <p className="text-xs text-zinc-500">registered → intent</p>
+            <p className="text-xs text-zinc-500">registered &rarr; intent</p>
           </div>
           {/* Ad Spend Input */}
           <div className="bg-[#0d1117] border border-[#1a1f2e] rounded-lg p-4">
@@ -1899,6 +1932,13 @@ export default function MetricsPage() {
                   </div>
                 </div>
               </>
+            ) : parseFloat(adSpend) > 0 && totalInRange > 0 ? (
+              <>
+                <p className="text-2xl font-semibold" style={{ color: (parseFloat(adSpend) / totalInRange) <= 5 ? '#00C805' : (parseFloat(adSpend) / totalInRange) <= 10 ? '#f59e0b' : '#f87171' }}>
+                  ${(parseFloat(adSpend) / totalInRange).toFixed(2)}
+                </p>
+                <p className="text-[10px] text-zinc-600">based on registration count</p>
+              </>
             ) : (
               <p className="text-2xl font-semibold text-zinc-600">&mdash;</p>
             )}
@@ -1917,7 +1957,7 @@ export default function MetricsPage() {
           {/* Avg Time to Intent */}
           <div className="bg-[#0d1117] border border-[#1a1f2e] rounded-lg p-4">
             <p className="text-xs text-zinc-500 mb-1">Avg Time to Intent</p>
-            {funnelTotals.avgHoursToBooking !== null ? (
+            {funnelTotals?.avgHoursToBooking !== null && funnelTotals?.avgHoursToBooking !== undefined ? (
               <p className="text-2xl font-semibold text-zinc-200">
                 {funnelTotals.avgHoursToBooking < 24
                   ? `${Math.round(funnelTotals.avgHoursToBooking)}h`
@@ -1926,7 +1966,7 @@ export default function MetricsPage() {
             ) : (
               <p className="text-2xl font-semibold text-zinc-600">&mdash;</p>
             )}
-            <p className="text-xs text-zinc-500">signup → first search</p>
+            <p className="text-xs text-zinc-500">signup &rarr; first search</p>
           </div>
         </div>
       )}
@@ -1970,6 +2010,23 @@ export default function MetricsPage() {
               </div>
             ))}
           </div>
+        </div>
+      )}
+
+      {/* Funnel data error banner */}
+      {funnelError && !loading && (
+        <div className="bg-[#0d1117] border border-amber-500/30 rounded-lg p-4 mb-6 flex items-center justify-between">
+          <div>
+            <p className="text-sm text-amber-400 font-medium">Funnel data unavailable</p>
+            <p className="text-xs text-zinc-500 mt-0.5">{funnelError}. Showing registration metrics as fallback.</p>
+          </div>
+          <button
+            onClick={fetchData}
+            className="px-3 py-1.5 text-xs font-medium rounded-md text-white transition-colors hover:opacity-90"
+            style={{ backgroundColor: '#06b6d4' }}
+          >
+            Retry
+          </button>
         </div>
       )}
 
@@ -2308,10 +2365,28 @@ export default function MetricsPage() {
             <div className="inline-block animate-spin w-6 h-6 border-2 rounded-full mb-3" style={{ borderColor: CHART_CYAN, borderTopColor: 'transparent' }} />
             <p className="text-zinc-400 text-sm">{fetchProgress || 'Loading funnel data...'}</p>
           </div>
-        ) : funnelChartData.length === 0 ? (
+        ) : funnelChartData.length === 0 && chartData.length === 0 ? (
           <div className="text-center py-16 text-zinc-500">
-            <p>No funnel data available for this range</p>
+            <p>No data available for this range</p>
           </div>
+        ) : funnelChartData.length === 0 && chartData.length > 0 ? (
+          <>
+            <div className="flex items-center gap-4 mb-4">
+              <h3 className="text-sm font-medium text-zinc-300">Registration Trend</h3>
+              <span className="text-xs text-zinc-500">(Funnel breakdown unavailable &mdash; showing registrations)</span>
+            </div>
+            <div className="h-[400px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={chartData} margin={{ top: 10, right: 10, left: 10, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#1a1f2e" />
+                  <XAxis dataKey="date" tick={{ fontSize: 11, fill: '#6b7280' }} tickLine={false} axisLine={{ stroke: '#1a1f2e' }} interval="preserveStartEnd" />
+                  <YAxis tick={{ fontSize: 11, fill: '#6b7280' }} tickLine={false} axisLine={{ stroke: '#1a1f2e' }} allowDecimals={false} tickFormatter={(v: number) => v >= 1000 ? `${(v / 1000).toFixed(v >= 10000 ? 0 : 1)}k` : v.toLocaleString()} />
+                  <Tooltip content={<CustomTooltip />} cursor={{ fill: '#00C80540' }} />
+                  <Bar dataKey="count" fill="#00C805" radius={[4, 4, 0, 0]} opacity={0.7} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </>
         ) : (
           <>
             <div className="flex items-center gap-4 mb-4">
@@ -2400,9 +2475,9 @@ export default function MetricsPage() {
       )}
 
       {/* Funnel Footer */}
-      {!loading && funnelTotals && (
+      {!loading && (funnelTotals || totalInRange > 0) && (
         <p className="text-xs text-muted-foreground mt-3">
-          Funnel: {funnelTotals.registered.toLocaleString()} registered → {funnelTotals.cwi.toLocaleString()} CWI ({funnelTotals.registered > 0 ? Math.round((funnelTotals.cwi / funnelTotals.registered) * 100) : 0}%)
+          Funnel: {(funnelTotals?.registered ?? totalInRange).toLocaleString()} registered{funnelTotals ? ` \u2192 ${funnelTotals.cwi.toLocaleString()} CWI (${funnelTotals.registered > 0 ? Math.round((funnelTotals.cwi / funnelTotals.registered) * 100) : 0}%)` : ''}
           {` \u00b7 ${dateRangeLabel}`}
           {` \u00b7 ${TIMEZONE_OPTIONS.find(o => o.value === timezone)?.label ?? timezone} time`}
         </p>
