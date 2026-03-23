@@ -596,7 +596,11 @@ export function AgentFlightBookingDetailPanel({
     if (!bookingId) return null;
     for (const trip of relatedTrips) {
       const match = trip.bookings.find((b) => b.id === bookingId);
-      if (match?.flight?.confirmation_code) return match.flight.confirmation_code;
+      if (match?.flight?.confirmation_code) {
+        const code = match.flight.confirmation_code;
+        if (PLACEHOLDER_CONFIRMATION_CODES.has(code.toUpperCase())) return null;
+        return code;
+      }
     }
     return null;
   }, [bookingId, relatedTrips]);
