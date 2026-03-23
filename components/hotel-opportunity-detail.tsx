@@ -1,8 +1,8 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
-import { HotelOpportunity, BookingEnrichment, api, RawEmail, UserBasicInfo, MemberContext, HotelOpportunityView } from '@/lib/api';
+import { HotelOpportunity, BookingEnrichment, api, RawEmail, UserBasicInfo, MemberContext, HotelOpportunityView, HotelBookingListItem } from '@/lib/api';
 import { cn, formatDate, fromMinorUnits } from '@/lib/utils';
 
 const TERMINAL_STATUSES = new Set(['completed', 'failed', 'declined', 'expired', 'withdrawn', 'cancelled']);
@@ -125,11 +125,22 @@ function HotelBookingDetailsModule({
   opportunity: HotelOpportunity;
   bookingEnrichment?: BookingEnrichment;
 }) {
+  // Fallback: fetch room_type from hotel-bookings list when enrichment doesn't have it
+  const [fallbackRoomType, setFallbackRoomType] = useState<string | null>(null);
+  useEffect(() => {
+    if (bookingEnrichment?.room_type || !opportunity.old_booking_id) return;
+    let cancelled = false;
+    api.getHotelBookingByIdFromList(opportunity.old_booking_id)
+      .then(item => { if (!cancelled && item?.room_type) setFallbackRoomType(item.room_type); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [bookingEnrichment?.room_type, opportunity.old_booking_id]);
+
   const hotelName = bookingEnrichment?.hotel_name || opportunity.hotel_name || 'Unknown Hotel';
   const city = bookingEnrichment?.hotel_city || null;
   const checkIn = bookingEnrichment?.check_in || opportunity.check_in;
   const checkOut = bookingEnrichment?.check_out || opportunity.check_out;
-  const roomType = bookingEnrichment?.room_type || null;
+  const roomType = bookingEnrichment?.room_type || fallbackRoomType;
   const guestNames = bookingEnrichment?.guests || [];
   const primaryGuestName = guestNames[0] || null;
   const bookedWith = bookingEnrichment?.booked_with || opportunity.old_booking_provider;
@@ -451,15 +462,18 @@ function EmailSidePanel({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
+  const fetchEmail = useCallback(() => {
     setLoading(true);
+    setError(null);
     api.getEmailForBooking('hotel', bookingId)
-      .then(data => { if (!cancelled) setEmail(data); })
-      .catch(err => { if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load email'); })
-      .finally(() => { if (!cancelled) setLoading(false); });
-    return () => { cancelled = true; };
+      .then(data => setEmail(data))
+      .catch(err => setError(err instanceof Error ? err.message : 'Failed to load email'))
+      .finally(() => setLoading(false));
   }, [bookingId]);
+
+  useEffect(() => {
+    fetchEmail();
+  }, [fetchEmail]);
 
   return (
     <div className="w-full max-w-md bg-card border-l border-border h-full overflow-y-auto flex flex-col">
@@ -479,8 +493,14 @@ function EmailSidePanel({
         {loading ? (
           <p className="text-sm text-muted-foreground text-center py-8">Loading email...</p>
         ) : error ? (
-          <div className="bg-red-500/10 rounded-lg p-3">
+          <div className="bg-red-500/10 rounded-lg p-3 space-y-2">
             <p className="text-sm text-red-400">{error}</p>
+            <button
+              onClick={fetchEmail}
+              className="text-xs text-primary hover:underline"
+            >
+              Retry
+            </button>
           </div>
         ) : email ? (
           <div className="space-y-3">
