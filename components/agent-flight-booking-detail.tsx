@@ -581,7 +581,6 @@ export function AgentFlightBookingDetailPanel({
     return () => { cancelled = true; };
   }, [task.user_id]);
 
-  const userName = useMemo(() => userDisplayName(detail.user), [detail.user]);
   const bookingId = flightBooking?.id || summary.booking_id || task.booking_id || null;
   const travelerProfiles = useMemo(
     () => mergeTravelerProfiles(detail.traveler_profiles, memberContext?.travellers),
@@ -593,6 +592,14 @@ export function AgentFlightBookingDetailPanel({
       : [],
     [bookingId, memberContext?.trips],
   );
+  const axelConfirmationCode = useMemo(() => {
+    if (!bookingId) return null;
+    for (const trip of relatedTrips) {
+      const match = trip.bookings.find((b) => b.id === bookingId);
+      if (match?.flight?.confirmation_code) return match.flight.confirmation_code;
+    }
+    return null;
+  }, [bookingId, relatedTrips]);
   const relatedWatches = useMemo(
     () => (memberContext?.watches || []).filter(
       (watch) =>
@@ -620,12 +627,8 @@ export function AgentFlightBookingDetailPanel({
     }
     return Array.from(thoughts.values()).sort((a, b) => b.created_at.localeCompare(a.created_at));
   }, [bookingId, relatedTrips]);
-  const verifiedEmails = detail.user?.verified_emails || [];
   const memberPhone = userPhone(detail.user) || memberContext?.user_extras.phone || null;
   const memberEmail = detail.user?.email || memberContext?.user_extras.email || null;
-  const memberThreshold = detail.user?.action_threshold_usd ?? memberContext?.user?.action_threshold_usd ?? null;
-  const memberForwardingEmail = memberContext?.user?.forwarding_email || null;
-  const memberForwardingSlug = detail.user?.forwarding_slug || null;
   const currentRecordLocator = normalizeConfirmationCode(rawRecordLocator);
   const currentBookingProvider = (flightBooking?.booking_provider || '').trim();
   const normalizedConfirmationCode = normalizeConfirmationCode(confirmationCode);
@@ -826,6 +829,12 @@ export function AgentFlightBookingDetailPanel({
                 <OutcomeBadge outcome={task.outcome} />
               </div>
               <p className="mt-0.5 text-xs text-muted-foreground truncate">{carrierDisplay} · {task.id.slice(0, 8)}</p>
+              {(memberEmail || memberPhone) && (
+                <p className="mt-0.5 flex flex-wrap gap-x-3 text-xs text-muted-foreground">
+                  {memberEmail && <span>{memberEmail}</span>}
+                  {memberPhone && <span>{memberPhone}</span>}
+                </p>
+              )}
             </div>
             <div className="flex items-center gap-1 shrink-0">
               {canUnclaim && (
@@ -876,6 +885,7 @@ export function AgentFlightBookingDetailPanel({
               <span className="font-semibold text-green-400">{formatMoneyCents(summary.price_paid_cents, summary.currency || 'USD')}</span>
             </div>
             <div className="mt-1 flex flex-wrap gap-x-4 text-xs text-muted-foreground">
+              {axelConfirmationCode && <span>Axel: <span className="font-mono font-semibold text-foreground">{axelConfirmationCode}</span></span>}
               <span>Confirmation: <span className="font-mono">{displayConfirmationCode(rawRecordLocator)}</span></span>
               <span>Provider: {flightBooking?.booking_provider || summary.booking_provider || '—'}</span>
               <span>Status: {flightBooking?.status || summary.booking_status || '—'}</span>
@@ -1248,56 +1258,6 @@ export function AgentFlightBookingDetailPanel({
               <DetailField label="Original Price" value={formatMoney(flightBooking?.original_price)} />
               <DetailField label="Total Savings" value={formatMoney(flightBooking?.total_savings)} />
             </div>
-          </CollapsibleSection>
-
-          <CollapsibleSection title="Member">
-            <div className="grid gap-2 md:grid-cols-2">
-              <DetailField label="Member" value={userName} />
-              <DetailField label="Email" value={memberEmail} />
-              <DetailField label="Phone" value={memberPhone} />
-              <DetailField label="Member Since" value={formatDateTime(detail.user?.member_since)} />
-              <DetailField label="User Status" value={humanizeToken(detail.user?.status)} />
-              <DetailField label="Subscription" value={memberContext?.user?.subscription_status || '—'} />
-              <DetailField label="Membership Ends" value={formatDateTime(memberContext?.user_extras.membership_expires_at)} />
-              <DetailField label="Forwarding Slug" value={memberForwardingSlug} monospace />
-              <DetailField label="Forwarding Email" value={memberForwardingEmail} />
-              <DetailField
-                label="Auto Reprice"
-                value={[
-                  detail.user?.auto_reprice_flights ? 'Flights' : null,
-                  detail.user?.auto_reprice_hotels ? 'Hotels' : null,
-                ].filter(Boolean).join(' + ') || 'Off'}
-              />
-              <DetailField
-                label="Action Threshold"
-                value={memberThreshold !== null ? formatMoneyCents(memberThreshold * 100, 'USD') : '—'}
-              />
-              <DetailField
-                label="Contact Verification"
-                value={[
-                  detail.user?.email_verified ? 'Email verified' : null,
-                  detail.user?.phone_verified ? 'Phone verified' : null,
-                ].filter(Boolean).join(' · ') || '—'}
-              />
-            </div>
-            {verifiedEmails.length > 0 && (
-              <div className="mt-3 rounded-lg border border-border bg-background/50 p-3">
-                <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Verified Emails</div>
-                <div className="mt-1 flex flex-wrap gap-1">
-                  {verifiedEmails.map((email) => (
-                    <span key={email} className="rounded-full border border-border bg-background/80 px-2 py-0.5 text-xs">{email}</span>
-                  ))}
-                </div>
-              </div>
-            )}
-            {(memberContextLoading || memberContextError) && (
-              <div className={cn(
-                'mt-3 rounded-lg border p-2.5 text-sm',
-                memberContextError ? 'border-red-500/30 bg-red-500/10 text-red-300' : 'border-border bg-accent/20 text-muted-foreground',
-              )}>
-                {memberContextError || 'Loading member context...'}
-              </div>
-            )}
           </CollapsibleSection>
 
           <CollapsibleSection title="Member Context">
