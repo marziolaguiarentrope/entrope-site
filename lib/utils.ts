@@ -115,3 +115,22 @@ export function exportCSV(rows: Record<string, unknown>[], filename: string) {
 export function exportJSON(data: unknown, filename: string) {
   downloadFile(JSON.stringify(data, null, 2), filename, 'application/json');
 }
+
+/**
+ * Relative time string ("just now", "5m ago", "3d ago", etc.).
+ * Falls back to locale date string for anything older than a week.
+ */
+export function timeAgo(dateString: string): string {
+  const now = new Date();
+  const date = new Date(dateString);
+  const seconds = Math.floor((now.getTime() - date.getTime()) / 1000);
+
+  if (seconds < 60) return 'just now';
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days}d ago`;
+  return date.toLocaleDateString();
+}

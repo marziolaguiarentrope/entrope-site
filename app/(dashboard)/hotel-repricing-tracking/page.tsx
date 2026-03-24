@@ -224,7 +224,7 @@ function KanbanCard({
             {opp.cancellation_capability === 'we_cancel' ? 'we cancel' : 'they cancel'}
           </span>
         )}
-        {opp.old_booking_status && opp.stage === 'pending_cancel' && (
+        {opp.old_booking_status && (opp.stage === 'pending_cancel' || opp.stage === 'active') && (
           <span className={cn(
             'px-1.5 py-0.5 text-[10px] rounded font-medium',
             opp.old_booking_status === 'active' ? 'bg-yellow-500/15 text-yellow-400' : 'bg-green-500/15 text-green-400',
@@ -476,6 +476,9 @@ export default function HotelRepricingTrackingPage() {
         if (cancelIds.has(o.id)) return 'pending_cancel';
         if (TERMINAL_STATUSES.has(o.status)) return 'done';
         if (o.status === 'needs_intervention') return 'needs_intervention';
+        // If old booking still needs cancelling, route to pending_cancel
+        // so ops can see and act on it even if the backend endpoint didn't return it
+        if (o.old_booking_status && o.old_booking_status !== 'cancelled') return 'pending_cancel';
         // pending_payment items are not actionable by operators — group with active
         return 'active';
       }

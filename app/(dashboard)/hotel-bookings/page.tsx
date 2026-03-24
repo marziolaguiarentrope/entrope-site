@@ -2,26 +2,11 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import Link from 'next/link';
-import { cn, fromMinorUnits, parseLocalDate } from '@/lib/utils';
-import { api, HotelBookingListItem, UserBasicInfo } from '@/lib/api';
+import { cn, fromMinorUnits, parseLocalDate, timeAgo } from '@/lib/utils';
+import { api, HotelBookingListItem, HotelCheckoutSession, UserBasicInfo } from '@/lib/api';
 import { HotelBookingDetail } from '@/components/hotel-booking-detail';
 
 // ── Helpers ──────────────────────────────────────────────
-
-function timeAgo(dateString: string): string {
-  const now = new Date();
-  const date = new Date(dateString);
-  const seconds = Math.floor((now.getTime() - date.getTime()) / 1000);
-
-  if (seconds < 60) return 'just now';
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  if (days < 7) return `${days}d ago`;
-  return date.toLocaleDateString();
-}
 
 function formatMoney(amount: number | null | undefined, currency: string | null | undefined): string {
   if (amount === null || amount === undefined) return '—';
@@ -63,7 +48,19 @@ function isCheckInUrgent(checkIn: string | null): boolean {
   const d = parseLocalDate(checkIn);
   const now = new Date();
   const diffMs = d.getTime() - now.getTime();
-  return diffMs > 0 && diffMs < 48 * 60 * 60 * 1000; // within 48 hours
+  return diffMs > 0 && diffMs < 48 * 60 * 60 * 1000;
+}
+
+function derivePaymentType(cancellationPolicy: string | null): { label: string; className: string } {
+  if (!cancellationPolicy) return { label: 'Unknown', className: 'bg-zinc-500/20 text-zinc-400' };
+  const lower = cancellationPolicy.toLowerCase();
+  if (lower.includes('free cancellation') || lower.includes('refundable')) {
+    return { label: 'Pay Later', className: 'bg-green-500/20 text-green-400' };
+  }
+  if (lower.includes('non-refundable') || lower.includes('prepaid')) {
+    return { label: 'Prepaid', className: 'bg-blue-500/20 text-blue-400' };
+  }
+  return { label: 'Unknown', className: 'bg-zinc-500/20 text-zinc-400' };
 }
 
 // ── Status Badge ─────────────────────────────────────────
@@ -75,6 +72,9 @@ function StatusBadge({ status }: { status: string }) {
     pending: 'bg-yellow-500/20 text-yellow-400',
     cancelled: 'bg-red-500/20 text-red-400',
     completed: 'bg-zinc-500/20 text-zinc-400',
+    accepted: 'bg-green-500/20 text-green-400',
+    active: 'bg-blue-500/20 text-blue-400',
+    expired: 'bg-zinc-500/20 text-zinc-400',
   };
   return (
     <span className={cn('px-2 py-0.5 text-xs rounded font-medium whitespace-nowrap', colors[status] || 'bg-zinc-500/20 text-zinc-400')}>
@@ -100,8 +100,208 @@ const VIEW_FILTERS: ViewFilterConfig[] = [
   { key: 'cancelled', label: 'Cancelled' },
 ];
 
+type SessionTab = 'accepted' | 'payment' | 'guests' | 'all';
+
+const SESSION_TABS: { key: SessionTab; label: string }[] = [
+  { key: 'accepted', label: 'Accepted' },
+  { key: 'payment', label: 'At Payment' },
+  { key: 'guests', label: 'At Guests' },
+  { key: 'all', label: 'All Sessions' },
+];
+
 type SortField = 'check_in_date' | 'created_at' | 'customer_price_amount' | 'hotel_name';
 type SortDir = 'asc' | 'desc';
+
+// ── Checkout Sessions Section ────────────────────────────
+
+function CheckoutSessionsSection() {
+  const [tab, setTab] = useState<SessionTab>('accepted');
+  const [sessions, setSessions] = useState<HotelCheckoutSession[]>([]);
+  const [totalCount, setTotalCount] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [userInfoMap, setUserInfoMap] = useState<Map<string, UserBasicInfo>>(new Map());
+  const [enriching, setEnriching] = useState(false);
+
+  const fetchSessions = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const params: Parameters<typeof api.listHotelCheckoutSessions>[0] = { limit: 100 };
+      if (tab === 'accepted') params.accepted_only = true;
+      else if (tab === 'payment') params.checkout_step = 'payment';
+      else if (tab === 'guests') params.checkout_step = 'guests';
+
+      const res = await api.listHotelCheckoutSessions(params);
+      setSessions(res.sessions);
+      setTotalCount(res.total_count);
+
+      const userIds = [...new Set(res.sessions.map(s => s.user_id).filter(Boolean))];
+      if (userIds.length > 0) {
+        setEnriching(true);
+        api.batchGetUserBasicInfo(userIds)
+          .then(map => setUserInfoMap(map))
+          .catch(() => {})
+          .finally(() => setEnriching(false));
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to fetch checkout sessions';
+      if (msg.includes('404')) {
+        setError('Checkout sessions endpoint not yet available. Pending ENG-17424 deployment.');
+      } else {
+        setError(msg);
+      }
+      setSessions([]);
+      setTotalCount(0);
+    } finally {
+      setLoading(false);
+    }
+  }, [tab]);
+
+  useEffect(() => { fetchSessions(); }, [fetchSessions]);
+
+  return (
+    <div className="mb-8">
+      <div className="flex items-center justify-between mb-3">
+        <div>
+          <h2 className="text-lg font-semibold">Checkout Sessions</h2>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Bookings from the hotel_book_now flow — prepaid and pay-later reservations
+          </p>
+        </div>
+        {!error && (
+          <span className="text-xs text-muted-foreground">{totalCount} sessions</span>
+        )}
+      </div>
+
+      {/* Tab filters */}
+      <div className="flex items-center gap-1 mb-3">
+        {SESSION_TABS.map(t => (
+          <button
+            key={t.key}
+            onClick={() => setTab(t.key)}
+            className={cn(
+              'px-3 py-1.5 text-xs font-medium rounded-lg transition-colors',
+              tab === t.key
+                ? 'bg-primary text-primary-foreground'
+                : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
+            )}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Graceful 404 */}
+      {error && (
+        <div className="p-4 bg-yellow-500/10 border border-yellow-500/20 rounded-lg">
+          <p className="text-yellow-400 text-sm">{error}</p>
+        </div>
+      )}
+
+      {/* Loading */}
+      {loading && !error && (
+        <div className="flex items-center justify-center py-8 text-muted-foreground text-sm">
+          Loading checkout sessions...
+        </div>
+      )}
+
+      {/* Empty */}
+      {!loading && !error && sessions.length === 0 && (
+        <div className="flex items-center justify-center py-8 text-muted-foreground text-sm">
+          No checkout sessions found.
+        </div>
+      )}
+
+      {/* Table */}
+      {!error && sessions.length > 0 && (
+        <div className="bg-card border border-border rounded-lg overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead className="border-b border-border bg-accent/30">
+                <tr>
+                  <th className="text-left text-xs font-medium text-muted-foreground px-3 py-2 whitespace-nowrap">Status</th>
+                  <th className="text-left text-xs font-medium text-muted-foreground px-3 py-2 whitespace-nowrap">Hotel</th>
+                  <th className="text-left text-xs font-medium text-muted-foreground px-3 py-2 whitespace-nowrap">Room Type</th>
+                  <th className="text-left text-xs font-medium text-muted-foreground px-3 py-2 whitespace-nowrap">Dates</th>
+                  <th className="text-right text-xs font-medium text-muted-foreground px-3 py-2 whitespace-nowrap">Price</th>
+                  <th className="text-left text-xs font-medium text-muted-foreground px-3 py-2 whitespace-nowrap">Payment Type</th>
+                  <th className="text-left text-xs font-medium text-muted-foreground px-3 py-2 whitespace-nowrap">Step</th>
+                  <th className="text-left text-xs font-medium text-muted-foreground px-3 py-2 whitespace-nowrap">Account</th>
+                  <th className="text-left text-xs font-medium text-muted-foreground px-3 py-2 whitespace-nowrap">Accepted</th>
+                </tr>
+              </thead>
+              <tbody>
+                {sessions.map(session => {
+                  const u = userInfoMap.get(session.user_id);
+                  const urgent = isCheckInUrgent(session.check_in) && session.status !== 'expired';
+                  const notBooked = session.accepted_at && !session.booking_id;
+                  const payment = derivePaymentType(session.cancellation_policy);
+
+                  return (
+                    <tr
+                      key={session.id}
+                      className={cn(
+                        'border-b border-border last:border-0 hover:bg-accent/50 transition-colors',
+                        urgent && 'border-l-[3px] border-l-orange-500',
+                      )}
+                    >
+                      <td className="px-3 py-2.5">
+                        <div className="flex items-center gap-1.5">
+                          <StatusBadge status={session.status} />
+                          {notBooked && (
+                            <span className="px-2 py-0.5 text-xs rounded font-medium whitespace-nowrap bg-red-500/20 text-red-400">
+                              NOT BOOKED
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-3 py-2.5 max-w-[200px]">
+                        <p className="text-sm font-medium truncate">{session.hotel_name || '—'}</p>
+                      </td>
+                      <td className="px-3 py-2.5 text-xs text-muted-foreground truncate max-w-[140px]">
+                        {session.room_type || '—'}
+                      </td>
+                      <td className="px-3 py-2.5 text-xs whitespace-nowrap">
+                        {formatDateRange(session.check_in, session.check_out)}
+                      </td>
+                      <td className="px-3 py-2.5 text-xs font-mono whitespace-nowrap text-right">
+                        {formatMoney(session.price_amount, session.price_currency)}
+                      </td>
+                      <td className="px-3 py-2.5">
+                        <span className={cn('px-2 py-0.5 text-xs rounded font-medium whitespace-nowrap', payment.className)}>
+                          {payment.label}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2.5 text-xs text-muted-foreground whitespace-nowrap capitalize">
+                        {session.checkout_step || '—'}
+                      </td>
+                      <td className="px-3 py-2.5 text-sm">
+                        {enriching && !u ? (
+                          <span className="inline-block bg-muted-foreground/15 rounded animate-pulse h-3 w-20" />
+                        ) : u?.name ? (
+                          <Link
+                            href={`/users-list/${session.user_id}`}
+                            className="text-primary hover:underline truncate block max-w-[140px]"
+                          >
+                            {u.name}
+                          </Link>
+                        ) : '—'}
+                      </td>
+                      <td className="px-3 py-2.5 text-xs text-muted-foreground whitespace-nowrap">
+                        {session.accepted_at ? timeAgo(session.accepted_at) : '—'}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 // ── Main Page ────────────────────────────────────────────
 
@@ -142,7 +342,7 @@ export default function HotelBookingsPage() {
   useEffect(() => {
     const t = setTimeout(() => {
       setDebouncedSearch(search);
-      setPage(0); // Reset to first page on search change
+      setPage(0);
     }, 300);
     return () => clearTimeout(t);
   }, [search]);
@@ -183,7 +383,6 @@ export default function HotelBookingsPage() {
       case 'cancelled':
         params.status = 'cancelled';
         break;
-      // 'all' — no status filter
     }
 
     if (debouncedSearch) {
@@ -203,7 +402,6 @@ export default function HotelBookingsPage() {
       setBookings(res.bookings);
       setTotalCount(res.total_count);
 
-      // Background enrichment: extract unique user_ids
       const userIds = [...new Set(res.bookings.map(b => b.user_id).filter(Boolean))];
       if (userIds.length > 0) {
         setEnriching(true);
@@ -215,7 +413,6 @@ export default function HotelBookingsPage() {
     } catch (err) {
       if (!silent) {
         const msg = err instanceof Error ? err.message : 'Failed to fetch hotel bookings';
-        // Graceful 404 handling — backend may not be deployed yet
         if (msg.includes('404')) {
           setError('Hotel bookings endpoint not yet available. The backend endpoint is pending deployment — check FAC ticket for status.');
         } else {
@@ -270,7 +467,7 @@ export default function HotelBookingsPage() {
 
   // Column sort handler
   function handleSort(field: SortField) {
-    if (view === 'upcoming') return; // Upcoming always sorts by check-in asc
+    if (view === 'upcoming') return;
     if (sortBy === field) {
       setSortDir(d => d === 'asc' ? 'desc' : 'asc');
     } else {
@@ -305,6 +502,12 @@ export default function HotelBookingsPage() {
           {loading ? 'Loading...' : '↻ Refresh'}
         </button>
       </div>
+
+      {/* ── Checkout Sessions (hotel_book_now pipeline) ── */}
+      <CheckoutSessionsSection />
+
+      {/* ── Confirmed Bookings ── */}
+      <h2 className="text-lg font-semibold mb-3">Confirmed Bookings</h2>
 
       {/* View filter tabs */}
       <div className="flex items-center gap-1 mb-3">

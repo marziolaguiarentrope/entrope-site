@@ -250,17 +250,19 @@ function HotelBookingDetailsModule({
             </span>
           </>
         )}
-        {opportunity.cancellation_capability && (
-          <>
-            <span className="text-muted-foreground">Cancellation</span>
-            <span className={cn(
-              'text-right text-sm',
-              opportunity.cancellation_capability === 'we_cancel' ? 'text-green-400' : 'text-yellow-400',
-            )}>
-              {opportunity.cancellation_capability === 'we_cancel' ? 'Auto (we cancel)' : 'Manual (they cancel)'}
-            </span>
-          </>
-        )}
+        <>
+          <span className="text-muted-foreground">Cancellation</span>
+          <span className={cn(
+            'text-right text-sm',
+            opportunity.cancellation_capability === 'we_cancel' ? 'text-green-400'
+              : opportunity.cancellation_capability === 'they_cancel' ? 'text-yellow-400'
+              : 'text-red-400 italic',
+          )}>
+            {opportunity.cancellation_capability === 'we_cancel' ? 'Auto (we cancel)'
+              : opportunity.cancellation_capability === 'they_cancel' ? 'Manual (they cancel)'
+              : 'Not set'}
+          </span>
+        </>
         {opportunity.cancellation_scheduled_at && (
           <>
             <span className="text-muted-foreground">Cancel By</span>
@@ -284,17 +286,17 @@ function HotelBookingDetailsModule({
             <span className="text-right text-xs">{bookedWith}</span>
           </>
         )}
-        {opportunity.old_booking_status && (
-          <>
-            <span className="text-muted-foreground">Original Booking</span>
-            <span className={cn(
-              'text-right text-xs font-medium',
-              opportunity.old_booking_status === 'active' ? 'text-yellow-400' : 'text-green-400',
-            )}>
-              {opportunity.old_booking_status}
-            </span>
-          </>
-        )}
+        <>
+          <span className="text-muted-foreground">Original Booking</span>
+          <span className={cn(
+            'text-right text-xs font-medium',
+            opportunity.old_booking_status === 'active' ? 'text-yellow-400'
+              : opportunity.old_booking_status === 'cancelled' ? 'text-green-400'
+              : 'text-muted-foreground italic',
+          )}>
+            {opportunity.old_booking_status || 'Unknown'}
+          </span>
+        </>
       </div>
 
       {/* IDs */}
@@ -717,6 +719,7 @@ export function HotelOpportunityDetail({
             {variant === 'cancel' ? 'Pending Cancellation'
               : variant === 'payment' ? 'Pending Payment'
               : opportunity.status === 'needs_intervention' ? 'Needs Intervention'
+              : (opportunity.old_booking_status && opportunity.old_booking_status !== 'cancelled') ? 'Repricing Details — Cancel Needed'
               : 'Repricing Details'}
           </h2>
           <p className="text-sm text-muted-foreground">
@@ -803,8 +806,8 @@ export function HotelOpportunityDetail({
           </div>
         )}
 
-        {/* Actions for cancel variant */}
-        {variant === 'cancel' && opportunity.old_booking_status === 'active' && !showConfirm && !cancelSuccess && (
+        {/* Actions for cancellation — shown when original booking still needs cancelling */}
+        {(variant === 'cancel' || (variant === 'active' && opportunity.old_booking_status && opportunity.old_booking_status !== 'cancelled')) && !showConfirm && !cancelSuccess && (
           <div className="space-y-4">
             <div>
               <label className="block text-sm font-medium mb-1">
@@ -866,7 +869,7 @@ export function HotelOpportunityDetail({
         )}
 
         {/* Confirmation */}
-        {variant === 'cancel' && opportunity.old_booking_status === 'active' && showConfirm && !cancelSuccess && (
+        {(variant === 'cancel' || (variant === 'active' && opportunity.old_booking_status && opportunity.old_booking_status !== 'cancelled')) && showConfirm && !cancelSuccess && (
           <div className="space-y-4">
             <div className="bg-green-500/10 rounded-lg p-4">
               <h4 className="font-medium text-green-400 mb-2">Confirm Cancellation</h4>

@@ -1392,6 +1392,31 @@ class ApiClient {
     return result?.bookings?.find((b) => b.id === bookingId) ?? null;
   }
 
+  // Hotel Checkout Sessions (hotel_book_now pipeline)
+  async listHotelCheckoutSessions(params?: {
+    offset?: number;
+    limit?: number;
+    status?: string;
+    checkout_step?: string;
+    accepted_only?: boolean;
+    sort_by?: string;
+    sort_dir?: string;
+    q?: string;
+  }): Promise<HotelCheckoutSessionListResponse> {
+    const searchParams = new URLSearchParams();
+    if (params?.offset !== undefined) searchParams.set('offset', params.offset.toString());
+    if (params?.limit !== undefined) searchParams.set('limit', params.limit.toString());
+    if (params?.status) searchParams.set('status', params.status);
+    if (params?.checkout_step) searchParams.set('checkout_step', params.checkout_step);
+    if (params?.accepted_only) searchParams.set('accepted_only', 'true');
+    if (params?.sort_by) searchParams.set('sort_by', params.sort_by);
+    if (params?.sort_dir) searchParams.set('sort_dir', params.sort_dir);
+    if (params?.q) searchParams.set('q', params.q);
+
+    const query = searchParams.toString();
+    return this.fetch<HotelCheckoutSessionListResponse>(`/hotel-checkout-sessions${query ? `?${query}` : ''}`);
+  }
+
   // Conv trips
   async listConvTrips(userId: string): Promise<ConvTripSummary[]> {
     return this.fetch<ConvTripSummary[]>(`/conv/trips/${userId}`);
@@ -1578,6 +1603,33 @@ export interface HotelBookingListItem {
 
 export interface HotelBookingListResponse {
   bookings: HotelBookingListItem[];
+  total_count: number;
+  limit: number;
+  offset: number;
+}
+
+// ── Hotel Checkout Sessions (hotel_book_now pipeline) ─────
+
+export interface HotelCheckoutSession {
+  id: string;
+  user_id: string;
+  hotel_name: string | null;
+  room_type: string | null;
+  check_in: string;                          // ISO date
+  check_out: string;                         // ISO date
+  checkout_step: string;                     // guests | payment
+  status: string;                            // active | accepted | completed | expired
+  price_amount: number | null;               // Minor units
+  price_currency: string | null;
+  cancellation_policy: string | null;        // "Free cancellation until ..." or "Non-refundable ..."
+  booking_id: string | null;                 // null = not booked, present = linked to hotel_bookings
+  accepted_at: string | null;                // null = not yet accepted
+  created_at: string;
+  updated_at: string;
+}
+
+export interface HotelCheckoutSessionListResponse {
+  sessions: HotelCheckoutSession[];
   total_count: number;
   limit: number;
   offset: number;

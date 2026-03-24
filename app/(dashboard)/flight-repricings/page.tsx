@@ -427,7 +427,7 @@ export default function CompleteRepricingsPage() {
     <div>
       {/* Header */}
       <div className="mb-6">
-        <h1 className="text-2xl font-semibold">Complete Repricings</h1>
+        <h1 className="text-2xl font-semibold">Flight Repricings</h1>
         <p className="text-sm text-muted-foreground mt-1">
           Flight repricing tasks — work queue and history
         </p>

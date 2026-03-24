@@ -11,7 +11,7 @@ import { cn } from '@/lib/utils';
 const navItems = [
   { href: '/tasks', icon: ListTodo, label: 'Tasks' },
   { href: '/manual-import', icon: FileText, label: 'Manual Import' },
-  { href: '/complete-repricings', icon: Plane, label: 'Complete Repricings' },
+  { href: '/flight-repricings', icon: Plane, label: 'Flight Repricings' },
   { href: '/agent-flight-bookings', icon: Plane, label: 'Agent Flight Bookings' },
   { href: '/flight-watch-conversions', icon: Plane, label: 'Flight Conversions' },
   { href: '/flight-repricing-funnel', icon: Filter, label: 'Flight Funnel' },
