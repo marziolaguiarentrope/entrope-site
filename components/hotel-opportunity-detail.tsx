@@ -197,7 +197,7 @@ function HotelBookingDetailsModule({
       {/* Room + guest */}
       {(roomType || primaryGuestName) && (
         <div className="text-xs text-muted-foreground space-y-0.5">
-          {roomType && <p>{roomType}</p>}
+          {roomType && <p>Room Type: {roomType}</p>}
           {primaryGuestName && <p>Guest: {primaryGuestName}</p>}
           {guestNames.length > 1 && <p className="text-xs">+{guestNames.length - 1} more guest{guestNames.length > 2 ? 's' : ''}</p>}
         </div>
