@@ -285,6 +285,29 @@ function HotelBookingDetailsModule({
         </>
       </div>
 
+      {/* Outstanding offer banner */}
+      {opportunity.outstanding_offer && (
+        <div className="mt-2 p-2.5 rounded-md bg-cyan-500/10 border border-cyan-500/20">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-medium text-cyan-400">New Unapproved Offer</span>
+            <span className="text-[10px] text-muted-foreground">{opportunity.outstanding_offer.status}</span>
+          </div>
+          {opportunity.outstanding_offer.displayed_savings_low_cents != null && opportunity.outstanding_offer.displayed_savings_currency && (
+            <p className="text-xs text-cyan-300/80 mt-1">
+              Savings: {formatMoney(opportunity.outstanding_offer.displayed_savings_low_cents, opportunity.outstanding_offer.displayed_savings_currency)}
+              {opportunity.outstanding_offer.displayed_savings_high_cents != null &&
+                opportunity.outstanding_offer.displayed_savings_high_cents !== opportunity.outstanding_offer.displayed_savings_low_cents &&
+                ` – ${formatMoney(opportunity.outstanding_offer.displayed_savings_high_cents, opportunity.outstanding_offer.displayed_savings_currency)}`
+              }
+            </p>
+          )}
+          <div className="flex items-center gap-1.5 mt-1 text-[10px] text-muted-foreground">
+            <span className="font-mono">{opportunity.outstanding_offer.opportunity_id.slice(0, 8)}…</span>
+            <CopyButton value={opportunity.outstanding_offer.opportunity_id} />
+          </div>
+        </div>
+      )}
+
       {/* IDs */}
       <div className="pt-2 border-t border-purple-500/10 flex items-center justify-between">
         <div className="flex flex-wrap gap-3">
@@ -766,24 +789,24 @@ export function HotelOpportunityDetail({
         {opportunity.outstanding_offer && (
           <section>
             <h3 className="text-sm font-medium text-muted-foreground mb-2">Outstanding Offer</h3>
-            <div className="rounded-lg border border-purple-500/30 bg-purple-500/5 p-3 space-y-1.5">
-              <p className="text-xs text-purple-300">
-                A newer price drop has been surfaced to the user but <span className="font-semibold">not yet accepted</span>.
+            <div className="rounded-lg border border-cyan-500/30 bg-cyan-500/5 p-3 space-y-1.5">
+              <p className="text-xs text-cyan-300">
+                A newer price drop exists for this booking but has <span className="font-semibold">not yet been approved</span>.
               </p>
-              <div className="flex items-center gap-3 text-xs">
-                {opportunity.outstanding_offer.target_price_amount != null && (
-                  <span className="text-purple-400 font-mono font-medium">
-                    Target: {formatMoney(opportunity.outstanding_offer.target_price_amount, opportunity.outstanding_offer.target_price_currency)}
-                  </span>
-                )}
-                {opportunity.outstanding_offer.savings_amount != null && (
+              {opportunity.outstanding_offer.displayed_savings_low_cents != null && opportunity.outstanding_offer.displayed_savings_currency && (
+                <div className="flex items-center gap-3 text-xs">
                   <span className="text-green-400 font-mono font-medium">
-                    {formatMoney(opportunity.outstanding_offer.savings_amount, opportunity.outstanding_offer.target_price_currency)} savings
+                    {formatMoney(opportunity.outstanding_offer.displayed_savings_low_cents, opportunity.outstanding_offer.displayed_savings_currency)}
+                    {opportunity.outstanding_offer.displayed_savings_high_cents != null &&
+                      opportunity.outstanding_offer.displayed_savings_high_cents !== opportunity.outstanding_offer.displayed_savings_low_cents &&
+                      ` – ${formatMoney(opportunity.outstanding_offer.displayed_savings_high_cents, opportunity.outstanding_offer.displayed_savings_currency)}`
+                    }
+                    {' savings'}
                   </span>
-                )}
-              </div>
+                </div>
+              )}
               <p className="text-[10px] text-muted-foreground">
-                Surfaced {timeAgo(opportunity.outstanding_offer.created_at)} · ID: {opportunity.outstanding_offer.id.slice(0, 8)}
+                Created {timeAgo(opportunity.outstanding_offer.created_at)} · ID: {opportunity.outstanding_offer.opportunity_id.slice(0, 8)}
               </p>
             </div>
           </section>
