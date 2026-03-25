@@ -1,7 +1,14 @@
 'use client';
 
+import Link from 'next/link';
 import { useState, useRef, useCallback } from 'react';
-import { api, ConvTripSummary, WakeResponse, WakeInterceptedTool } from '@/lib/api';
+import {
+  api,
+  BulkAutoWakeEnableResponse,
+  ConvTripSummary,
+  UserBasicInfo,
+  WakeInterceptedTool,
+} from '@/lib/api';
 import { cn } from '@/lib/utils';
 
 function timeAgo(dateString: string): string {
@@ -631,11 +638,195 @@ function BatchResultRow({ result, dryRun }: { result: BatchUserResult; dryRun: b
 }
 
 // ---------------------------------------------------------------------------
+// Auto Wake
+// ---------------------------------------------------------------------------
+
+interface AutoWakeEnabledUser extends UserBasicInfo {}
+
+interface AutoWakeRunResult extends BulkAutoWakeEnableResponse {
+  users: AutoWakeEnabledUser[];
+}
+
+function formatSelection(selection: string): string {
+  if (selection === 'most_recently_active') return 'Most recently active users';
+  return selection.replaceAll('_', ' ');
+}
+
+function displayUserName(user: AutoWakeEnabledUser): string {
+  return user.name || user.email || user.id;
+}
+
+function AutoWake() {
+  const [userLimit, setUserLimit] = useState('50');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<AutoWakeRunResult | null>(null);
+
+  async function handleEnableAutoWake(e: React.FormEvent) {
+    e.preventDefault();
+    const parsedLimit = Number.parseInt(userLimit, 10);
+    if (!Number.isFinite(parsedLimit) || parsedLimit <= 0) {
+      setError('Enter a positive user count.');
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      const res = await api.bulkEnableConvAutoWake(parsedLimit);
+      const userInfo = await api.batchGetUserBasicInfo(res.user_ids);
+      const users = res.user_ids.map((userId) => userInfo.get(userId) ?? {
+        id: userId,
+        email: null,
+        phone: null,
+        name: null,
+      });
+      setResult({ ...res, users });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to enable auto wake');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="bg-card border border-border rounded-lg p-4 space-y-4">
+        <div>
+          <h2 className="text-sm font-medium text-muted-foreground">Cohort Control</h2>
+          <p className="text-sm text-foreground/90 mt-1">
+            Enable scheduled wake for the next cohort of most recently active users.
+          </p>
+        </div>
+
+        <form onSubmit={handleEnableAutoWake} className="flex flex-col gap-3 max-w-xl">
+          <label className="space-y-1">
+            <span className="text-sm font-medium">Users to enable</span>
+            <input
+              type="number"
+              min={1}
+              step={1}
+              value={userLimit}
+              onChange={(e) => setUserLimit(e.target.value)}
+              className="w-full px-4 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary text-sm"
+            />
+          </label>
+          <div className="flex items-center gap-3">
+            <button
+              type="submit"
+              disabled={loading}
+              className="px-4 py-2 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-50 transition-colors"
+            >
+              {loading ? 'Enabling...' : `Enable ${userLimit || '0'} users`}
+            </button>
+            <span className="text-xs text-muted-foreground">
+              Selection: most recently active, excluding internal test users
+            </span>
+          </div>
+        </form>
+
+        <div className="grid gap-3 md:grid-cols-2">
+          <div className="p-3 rounded-lg bg-accent/40 border border-border">
+            <p className="text-xs font-medium text-muted-foreground mb-1">Pilot Review Flow</p>
+            <p className="text-sm text-foreground/85">
+              Drafted outreach will appear in the existing Pending Emails and Text Messages queues for operator review.
+            </p>
+          </div>
+          <div className="p-3 rounded-lg bg-accent/40 border border-border">
+            <p className="text-xs font-medium text-muted-foreground mb-1">What You Won&apos;t See Here</p>
+            <p className="text-sm text-foreground/85">
+              Quiet wakes that only update wake notes or stay silent still need DB review during the pilot.
+            </p>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap gap-3 text-xs">
+          <Link href="/send-email-convo" className="text-primary hover:underline">
+            Review pending emails →
+          </Link>
+          <Link href="/text-messages" className="text-primary hover:underline">
+            Review pending SMS →
+          </Link>
+        </div>
+
+        {error && (
+          <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-sm text-red-400">
+            {error}
+          </div>
+        )}
+      </div>
+
+      {result && (
+        <div className="bg-card border border-border rounded-lg p-4 space-y-4">
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 className="text-sm font-medium text-muted-foreground">Last Enable Run</h2>
+            <span className="px-2 py-0.5 text-xs rounded bg-blue-500/15 text-blue-400">
+              {formatSelection(result.selection)}
+            </span>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div className="rounded-lg border border-border bg-accent/30 p-3">
+              <p className="text-xs text-muted-foreground">Requested</p>
+              <p className="text-lg font-semibold mt-1">{result.requested}</p>
+            </div>
+            <div className="rounded-lg border border-border bg-accent/30 p-3">
+              <p className="text-xs text-muted-foreground">Enabled</p>
+              <p className="text-lg font-semibold mt-1">{result.enabled}</p>
+            </div>
+            <div className="rounded-lg border border-border bg-accent/30 p-3">
+              <p className="text-xs text-muted-foreground">Returned Users</p>
+              <p className="text-lg font-semibold mt-1">{result.users.length}</p>
+            </div>
+          </div>
+
+          {result.users.length === 0 ? (
+            <div className="text-sm text-muted-foreground">
+              No additional eligible users were enabled in this run.
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <p className="text-xs font-medium text-muted-foreground">
+                Enabled Users
+              </p>
+              <div className="bg-card border border-border rounded-lg divide-y divide-border">
+                {result.users.map((user) => (
+                  <div key={user.id} className="px-4 py-3 flex items-start justify-between gap-4">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium truncate">{displayUserName(user)}</p>
+                      <div className="mt-0.5 space-y-0.5">
+                        {user.email && (
+                          <p className="text-xs text-muted-foreground truncate">{user.email}</p>
+                        )}
+                        <p className="text-[10px] text-muted-foreground/60 font-mono break-all">
+                          {user.id}
+                        </p>
+                      </div>
+                    </div>
+                    <Link
+                      href={`/users-list/${user.id}`}
+                      className="text-xs text-primary hover:underline whitespace-nowrap"
+                    >
+                      Member profile →
+                    </Link>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
 
 export default function WakePage() {
-  const [tab, setTab] = useState<'single' | 'batch'>('single');
+  const [tab, setTab] = useState<'single' | 'batch' | 'auto'>('single');
 
   return (
     <div>
@@ -669,9 +860,20 @@ export default function WakePage() {
         >
           Batch Wake
         </button>
+        <button
+          onClick={() => setTab('auto')}
+          className={cn(
+            'px-3 py-1.5 text-sm font-medium rounded-md transition-colors',
+            tab === 'auto'
+              ? 'bg-background text-foreground shadow-sm'
+              : 'text-muted-foreground hover:text-foreground'
+          )}
+        >
+          Auto Wake
+        </button>
       </div>
 
-      {tab === 'single' ? <SingleUserWake /> : <BatchWake />}
+      {tab === 'single' ? <SingleUserWake /> : tab === 'batch' ? <BatchWake /> : <AutoWake />}
     </div>
   );
 }
