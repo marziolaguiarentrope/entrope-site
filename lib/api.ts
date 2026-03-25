@@ -1453,6 +1453,13 @@ class ApiClient {
       body: JSON.stringify(body),
     });
   }
+
+  async bulkEnableConvAutoWake(userLimit: number): Promise<BulkAutoWakeEnableResponse> {
+    return this.fetch<BulkAutoWakeEnableResponse>('/conv/auto-wake/enable-bulk', {
+      method: 'POST',
+      body: JSON.stringify({ user_limit: userLimit }),
+    });
+  }
 }
 
 export interface ConvTripSummary {
@@ -1522,6 +1529,13 @@ export interface WakeResponse {
   pending_email_draft?: WakePendingEmailDraft | null;
   dry_run?: boolean;
   intercepted_tools?: WakeInterceptedTool[];
+}
+
+export interface BulkAutoWakeEnableResponse {
+  requested: number;
+  enabled: number;
+  user_ids: string[];
+  selection: string;
 }
 
 export interface HotelOpportunity {
