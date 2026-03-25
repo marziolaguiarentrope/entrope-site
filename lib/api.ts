@@ -1524,6 +1524,16 @@ export interface WakeResponse {
   intercepted_tools?: WakeInterceptedTool[];
 }
 
+/** An unapproved ACTIVE opportunity for the same booking — returned by the admin gateway. */
+export interface OutstandingOffer {
+  id: string;
+  target_price_amount: number | null;      // Minor units
+  target_price_currency: string | null;
+  savings_amount: number | null;           // Minor units — vs original booking price
+  created_at: string;                      // When this price drop was surfaced
+  surfaced_at: string | null;
+}
+
 export interface HotelOpportunity {
   id: string;
   user_id: string;
@@ -1542,6 +1552,7 @@ export interface HotelOpportunity {
   cancellation_capability: string | null;
   cancellation_scheduled_at: string | null;
   created_at: string;
+  outstanding_offer?: OutstandingOffer | null;  // Present when a newer unapproved price drop exists
 }
 
 export interface HotelOpportunityListResponse {
