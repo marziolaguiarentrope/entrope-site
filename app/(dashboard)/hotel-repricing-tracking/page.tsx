@@ -2,26 +2,11 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import Link from 'next/link';
-import { cn, formatDate, fromMinorUnits } from '@/lib/utils';
+import { cn, formatDate, fromMinorUnits, timeAgo } from '@/lib/utils';
 import { api, HotelOpportunity, BookingEnrichment, UserBasicInfo } from '@/lib/api';
 import { HotelOpportunityDetail } from '@/components/hotel-opportunity-detail';
 
 // ── Helpers ──────────────────────────────────────────────
-
-function timeAgo(dateString: string): string {
-  const now = new Date();
-  const date = new Date(dateString);
-  const seconds = Math.floor((now.getTime() - date.getTime()) / 1000);
-
-  if (seconds < 60) return 'just now';
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  if (days < 7) return `${days}d ago`;
-  return date.toLocaleDateString();
-}
 
 function formatMoney(amount: number | null | undefined, currency: string | null | undefined): string {
   if (amount === null || amount === undefined) return '—';
@@ -236,6 +221,18 @@ function KanbanCard({
           <StatusBadge status={opp.status} />
         )}
       </div>
+
+      {/* Outstanding offer: newer unapproved price drop for same booking */}
+      {opp.outstanding_offer && (
+        <div className="flex items-center gap-1.5 px-2 py-1 rounded bg-purple-500/10 border border-purple-500/20">
+          <span className="text-[10px] font-medium text-purple-400">
+            New drop: {formatMoney(opp.outstanding_offer.savings_amount, opp.outstanding_offer.target_price_currency)} savings
+          </span>
+          <span className="text-[10px] text-purple-400/60">
+            · {timeAgo(opp.outstanding_offer.created_at)}
+          </span>
+        </div>
+      )}
 
       {/* Footer: conf code + time */}
       <div className="flex items-center justify-between text-[10px] text-muted-foreground pt-0.5">

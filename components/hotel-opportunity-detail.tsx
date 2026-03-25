@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { HotelOpportunity, BookingEnrichment, api, RawEmail, UserBasicInfo, MemberContext, HotelOpportunityView, HotelBookingListItem } from '@/lib/api';
-import { cn, formatDate, fromMinorUnits } from '@/lib/utils';
+import { cn, formatDate, fromMinorUnits, timeAgo } from '@/lib/utils';
 
 const TERMINAL_STATUSES = new Set(['completed', 'failed', 'declined', 'expired', 'withdrawn', 'cancelled']);
 
@@ -21,20 +21,6 @@ function formatMoney(amount: number | null | undefined, currency: string | null 
 function formatMoneyObj(price: { amount: number; currency: string } | null | undefined): string {
   if (!price) return '—';
   return formatMoney(price.amount, price.currency);
-}
-
-function timeAgo(dateString: string): string {
-  const now = new Date();
-  const date = new Date(dateString);
-  const seconds = Math.floor((now.getTime() - date.getTime()) / 1000);
-  if (seconds < 60) return 'just now';
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  if (days < 7) return `${days}d ago`;
-  return date.toLocaleDateString();
 }
 
 function CopyButton({ value }: { value: string }) {
@@ -774,6 +760,33 @@ export function HotelOpportunityDetail({
               onClose={() => setShowEmail(false)}
             />
           </div>
+        )}
+
+        {/* Outstanding Offer — newer unapproved price drop for same booking */}
+        {opportunity.outstanding_offer && (
+          <section>
+            <h3 className="text-sm font-medium text-muted-foreground mb-2">Outstanding Offer</h3>
+            <div className="rounded-lg border border-purple-500/30 bg-purple-500/5 p-3 space-y-1.5">
+              <p className="text-xs text-purple-300">
+                A newer price drop has been surfaced to the user but <span className="font-semibold">not yet accepted</span>.
+              </p>
+              <div className="flex items-center gap-3 text-xs">
+                {opportunity.outstanding_offer.target_price_amount != null && (
+                  <span className="text-purple-400 font-mono font-medium">
+                    Target: {formatMoney(opportunity.outstanding_offer.target_price_amount, opportunity.outstanding_offer.target_price_currency)}
+                  </span>
+                )}
+                {opportunity.outstanding_offer.savings_amount != null && (
+                  <span className="text-green-400 font-mono font-medium">
+                    {formatMoney(opportunity.outstanding_offer.savings_amount, opportunity.outstanding_offer.target_price_currency)} savings
+                  </span>
+                )}
+              </div>
+              <p className="text-[10px] text-muted-foreground">
+                Surfaced {timeAgo(opportunity.outstanding_offer.created_at)} · ID: {opportunity.outstanding_offer.id.slice(0, 8)}
+              </p>
+            </div>
+          </section>
         )}
 
         {/* Repricing History */}
