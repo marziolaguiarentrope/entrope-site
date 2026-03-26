@@ -159,6 +159,7 @@ function matchesOutboundSearch(message: PendingSms, query: string): boolean {
   return !!(
     bodyPreview.toLowerCase().includes(q) ||
     message.to_name?.toLowerCase().includes(q) ||
+    message.to_email?.toLowerCase().includes(q) ||
     message.to_phone?.toLowerCase().includes(q) ||
     message.user_id?.toLowerCase().includes(q) ||
     message.decided_by?.toLowerCase().includes(q) ||
@@ -190,8 +191,8 @@ function sortPendingSms(items: PendingSms[], key: SortKey, dir: SortDir): Pendin
         bVal = new Date(b.created_at).getTime();
         break;
       case 'member':
-        aVal = (a.to_name || a.to_phone || '').toLowerCase();
-        bVal = (b.to_name || b.to_phone || '').toLowerCase();
+        aVal = (a.to_email || a.to_phone || a.to_name || '').toLowerCase();
+        bVal = (b.to_email || b.to_phone || b.to_name || '').toLowerCase();
         break;
       case 'message':
         aVal = previewText(a.body).toLowerCase();
@@ -285,7 +286,7 @@ function PendingSmsRow({
       <td className="px-3 py-3"><ApprovalBadge status={message.approval_status} /></td>
       <td className="px-3 py-3"><DeliveryBadge status={message.status} /></td>
       <td className="px-3 py-3 text-sm whitespace-nowrap">
-        <div className="font-medium">{message.to_name || 'Unknown'}</div>
+        <div className="font-medium">{message.to_email || message.to_name || 'Unknown'}</div>
         <div className="text-xs text-muted-foreground">{message.to_phone || '—'}</div>
       </td>
       <td className="px-3 py-3 text-sm">

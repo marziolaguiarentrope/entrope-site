@@ -164,6 +164,7 @@ export interface PendingEmail {
   user_id: string;
   template_id?: string | null;
   to_email: string | null;
+  to_phone: string | null;
   to_name: string | null;
   subject: string | null;
   preheader: string | null;
@@ -207,6 +208,7 @@ export interface PendingSms {
   id: string;
   user_id: string;
   to_phone: string | null;
+  to_email: string | null;
   to_name: string | null;
   body: string | null;
   status: string;
