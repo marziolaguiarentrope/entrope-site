@@ -168,6 +168,7 @@ function matchesEmailSearch(email: PendingEmail, query: string): boolean {
     bodyPreview.toLowerCase().includes(q) ||
     email.to_name?.toLowerCase().includes(q) ||
     email.to_email?.toLowerCase().includes(q) ||
+    email.to_phone?.toLowerCase().includes(q) ||
     email.user_id?.toLowerCase().includes(q) ||
     email.decided_by?.toLowerCase().includes(q) ||
     email.rejection_reason?.toLowerCase().includes(q)
@@ -189,8 +190,8 @@ function sortPendingEmails(items: PendingEmail[], key: SortKey, dir: SortDir): P
         bVal = (b.subject || '').toLowerCase();
         break;
       case 'member':
-        aVal = (a.to_name || a.to_email || '').toLowerCase();
-        bVal = (b.to_name || b.to_email || '').toLowerCase();
+        aVal = (a.to_email || a.to_phone || a.to_name || '').toLowerCase();
+        bVal = (b.to_email || b.to_phone || b.to_name || '').toLowerCase();
         break;
       case 'delivery':
         aVal = `${a.approval_status}:${a.status}`;
@@ -280,8 +281,8 @@ function PendingEmailRow({
       <td className="px-3 py-3"><ApprovalBadge status={email.approval_status} /></td>
       <td className="px-3 py-3"><DeliveryBadge status={email.status} /></td>
       <td className="px-3 py-3 text-sm whitespace-nowrap">
-        <div className="font-medium">{email.to_name || 'Unknown'}</div>
-        <div className="text-xs text-muted-foreground">{email.to_email || '—'}</div>
+        <div className="font-medium">{email.to_email || email.to_name || 'Unknown'}</div>
+        <div className="text-xs text-muted-foreground">{email.to_phone || '—'}</div>
       </td>
       <td className="px-3 py-3 text-sm">
         <div className="font-medium truncate max-w-[360px]">{email.subject || '(No subject)'}</div>

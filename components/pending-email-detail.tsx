@@ -160,7 +160,11 @@ export function PendingEmailDetail({
           <div className="grid grid-cols-1 gap-2 text-sm">
             <div className="flex gap-2">
               <span className="text-muted-foreground shrink-0">To</span>
-              <span className="break-all">{message.to_name || message.to_email || 'Unknown recipient'}</span>
+              <span className="break-all">{message.to_email || message.to_name || 'Unknown recipient'}</span>
+            </div>
+            <div className="flex gap-2">
+              <span className="text-muted-foreground shrink-0">Phone</span>
+              <span>{message.to_phone || '—'}</span>
             </div>
             <div className="flex gap-2">
               <span className="text-muted-foreground shrink-0">Subject</span>
