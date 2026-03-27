@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { FileText, Plane, Hotel, BedDouble, AlertTriangle, LogOut, ListTodo, Search, Contact, BarChart3, TrendingUp, Wrench, Mail, Filter, MessageSquare, DollarSign, Bell } from 'lucide-react';
+import { FileText, Plane, Hotel, BedDouble, AlertTriangle, LogOut, ListTodo, Search, Contact, BarChart3, TrendingUp, Wrench, Mail, Filter, MessageSquare, DollarSign, Bell, Megaphone } from 'lucide-react';
 import { useAuth } from '@/contexts/auth-context';
 import { api } from '@/lib/api';
 import { cn } from '@/lib/utils';
@@ -28,6 +28,7 @@ const navItems = [
   { href: '/text-messages', icon: MessageSquare, label: 'Text Messages' },
   { href: '/wake', icon: Bell, label: 'Wake Center' },
   { href: '/escalations', icon: AlertTriangle, label: 'Escalations' },
+  { href: '/marketing-hub', icon: Megaphone, label: 'Marketing Hub' },
 ];
 
 export function Sidebar() {
