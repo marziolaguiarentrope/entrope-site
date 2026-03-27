@@ -268,12 +268,17 @@ function PendingSmsRow({
   message,
   selected,
   onClick,
+  onQuickApprove,
+  onQuickReject,
 }: {
   message: PendingSms;
   selected: boolean;
   onClick: () => void;
+  onQuickApprove: (id: string) => void;
+  onQuickReject: (id: string) => void;
 }) {
   const preview = previewText(message.body);
+  const isPending = message.approval_status === 'PENDING';
 
   return (
     <tr
@@ -295,13 +300,43 @@ function PendingSmsRow({
       <td className="px-3 py-3 text-xs text-muted-foreground whitespace-nowrap">{timeAgo(message.created_at)}</td>
       <td className="px-3 py-3 text-xs text-muted-foreground whitespace-nowrap">{message.decided_by || '—'}</td>
       <td className="px-3 py-3">
-        <Link
-          href={`/users-list/${message.user_id}`}
-          onClick={(e) => e.stopPropagation()}
-          className="text-xs text-primary hover:underline whitespace-nowrap"
-        >
-          Profile →
-        </Link>
+        {isPending ? (
+          <div className="flex items-center gap-1">
+            <button
+              onClick={(e) => { e.stopPropagation(); onQuickApprove(message.id); }}
+              title="Quick approve"
+              className="p-1.5 rounded-md bg-green-600/20 text-green-400 hover:bg-green-600/40 transition-colors"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+              </svg>
+            </button>
+            <button
+              onClick={(e) => { e.stopPropagation(); onQuickReject(message.id); }}
+              title="Quick reject"
+              className="p-1.5 rounded-md bg-red-600/20 text-red-400 hover:bg-red-600/40 transition-colors"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+            <Link
+              href={`/users-list/${message.user_id}`}
+              onClick={(e) => e.stopPropagation()}
+              className="text-xs text-primary hover:underline whitespace-nowrap ml-1"
+            >
+              Profile →
+            </Link>
+          </div>
+        ) : (
+          <Link
+            href={`/users-list/${message.user_id}`}
+            onClick={(e) => e.stopPropagation()}
+            className="text-xs text-primary hover:underline whitespace-nowrap"
+          >
+            Profile →
+          </Link>
+        )}
       </td>
     </tr>
   );
@@ -589,6 +624,54 @@ export default function TextMessagesPage() {
       if (!prev) return prev;
       return { ...prev, message: { ...prev.message, ...updated } };
     });
+  }
+
+  function advanceToNextPending(currentId: string) {
+    const pendingList = messages
+      .filter((m) => m.approval_status === 'PENDING' && m.id !== currentId)
+      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    if (pendingList.length > 0) {
+      openDetail(pendingList[0].id);
+    } else {
+      closeDetail();
+    }
+  }
+
+  function handleMessageUpdateAndAdvance(updated: PendingSms) {
+    handleMessageUpdate(updated);
+    if (updated.approval_status !== 'PENDING') {
+      advanceToNextPending(updated.id);
+    }
+  }
+
+  const [quickActionLoading, setQuickActionLoading] = useState<string | null>(null);
+
+  async function handleQuickApprove(id: string) {
+    if (quickActionLoading) return;
+    setQuickActionLoading(id);
+    try {
+      const updated = await api.approvePendingSms(id);
+      handleMessageUpdate({ ...messages.find((m) => m.id === id)!, ...updated });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Quick approve failed');
+    } finally {
+      setQuickActionLoading(null);
+    }
+  }
+
+  async function handleQuickReject(id: string) {
+    const reason = window.prompt('Rejection reason:');
+    if (!reason?.trim()) return;
+    if (quickActionLoading) return;
+    setQuickActionLoading(id);
+    try {
+      const updated = await api.rejectPendingSms(id, reason.trim());
+      handleMessageUpdate({ ...messages.find((m) => m.id === id)!, ...updated });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Quick reject failed');
+    } finally {
+      setQuickActionLoading(null);
+    }
   }
 
   async function handleMemberLookup(event: FormEvent<HTMLFormElement>) {
@@ -1334,7 +1417,7 @@ export default function TextMessagesPage() {
                     <SortHeader label="Message" sortKey="message" currentKey={sortKey} dir={sortDir} onSort={handleSort} />
                     <SortHeader label="Drafted" sortKey="created" currentKey={sortKey} dir={sortDir} onSort={handleSort} />
                     <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground whitespace-nowrap">Decided By</th>
-                    <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground whitespace-nowrap">Profile</th>
+                    <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground whitespace-nowrap">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1344,6 +1427,8 @@ export default function TextMessagesPage() {
                       message={message}
                       selected={selectedSmsId === message.id}
                       onClick={() => openDetail(message.id)}
+                      onQuickApprove={handleQuickApprove}
+                      onQuickReject={handleQuickReject}
                     />
                   ))}
                 </tbody>
@@ -1430,6 +1515,8 @@ export default function TextMessagesPage() {
           detail={selectedDetail}
           onClose={closeDetail}
           onMessageUpdate={handleMessageUpdate}
+          onAdvance={advanceToNextPending}
+          pendingRemaining={messages.filter((m) => m.approval_status === 'PENDING' && m.id !== selectedDetail.message.id).length}
         />
       )}
     </div>

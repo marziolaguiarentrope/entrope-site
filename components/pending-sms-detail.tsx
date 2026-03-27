@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { api, CommunicationView, PendingSms, PendingSmsDetail as PendingSmsDetailData } from '@/lib/api';
 import { cn } from '@/lib/utils';
@@ -79,6 +79,10 @@ interface PendingSmsDetailProps {
   onClose: () => void;
   onMessageUpdate: (message: PendingSms) => void;
   renderInline?: boolean;
+  /** Called after approve/reject so the parent can auto-advance to the next pending message */
+  onAdvance?: (currentId: string) => void;
+  /** Pending count remaining (shown in header for context) */
+  pendingRemaining?: number;
 }
 
 export function PendingSmsDetail({
@@ -86,6 +90,8 @@ export function PendingSmsDetail({
   onClose,
   onMessageUpdate,
   renderInline,
+  onAdvance,
+  pendingRemaining,
 }: PendingSmsDetailProps) {
   const message = detail.message;
   const canAct = message.approval_status === 'PENDING';
@@ -100,9 +106,28 @@ export function PendingSmsDetail({
   const characterCount = getCharacterCount(message.body);
   const segmentCount = getSegmentCount(message.body);
 
+  // Keyboard shortcuts: A = approve, Escape = close
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      // Don't trigger if user is typing in an input/textarea
+      const tag = (e.target as HTMLElement).tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        onClose();
+      }
+      if (e.key === 'a' && canAct && !loading && !showReject) {
+        e.preventDefault();
+        handleApprove();
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  });
+
   async function handleApprove() {
     if (!canAct || loading) return;
-    if (!window.confirm('Approve and send this text message?')) return;
 
     setLoading(true);
     setError(null);
@@ -110,6 +135,7 @@ export function PendingSmsDetail({
       const updated = await api.approvePendingSms(message.id);
       onMessageUpdate({ ...message, ...updated });
       setShowReject(false);
+      onAdvance?.(message.id);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to approve SMS');
     } finally {
@@ -132,6 +158,7 @@ export function PendingSmsDetail({
       onMessageUpdate({ ...message, ...updated });
       setShowReject(false);
       setRejectReason('');
+      onAdvance?.(message.id);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to reject SMS');
     } finally {
@@ -143,11 +170,23 @@ export function PendingSmsDetail({
     <>
       <div className="sticky top-0 bg-card border-b border-border p-4 flex items-center justify-between z-10">
         <div>
-          <h2 className="text-lg font-semibold">Pending SMS</h2>
+          <div className="flex items-center gap-2">
+            <h2 className="text-lg font-semibold">Pending SMS</h2>
+            {pendingRemaining != null && pendingRemaining > 0 && (
+              <span className="text-xs bg-yellow-500/20 text-yellow-400 px-2 py-0.5 rounded font-medium">
+                {pendingRemaining} left
+              </span>
+            )}
+          </div>
           <div className="flex items-center gap-2 mt-1">
             <ApprovalBadge status={message.approval_status} />
             <DeliveryBadge status={message.status} />
             <span className="text-xs text-muted-foreground">{timeAgo(message.created_at)}</span>
+            {canAct && (
+              <span className="text-[10px] text-muted-foreground/60 ml-1">
+                press A to approve · Esc to close
+              </span>
+            )}
           </div>
         </div>
         {!renderInline && (
