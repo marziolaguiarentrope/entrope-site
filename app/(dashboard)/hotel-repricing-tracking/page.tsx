@@ -222,15 +222,20 @@ function KanbanCard({
         )}
       </div>
 
-      {/* Outstanding offer: newer unapproved price drop for same booking */}
+      {/* Outstanding offer indicator */}
       {opp.outstanding_offer && (
-        <div className="flex items-center gap-1.5 px-2 py-1 rounded bg-purple-500/10 border border-purple-500/20">
-          <span className="text-[10px] font-medium text-purple-400">
-            New drop: {formatMoney(opp.outstanding_offer.savings_amount, opp.outstanding_offer.target_price_currency)} savings
-          </span>
-          <span className="text-[10px] text-purple-400/60">
-            · {timeAgo(opp.outstanding_offer.created_at)}
-          </span>
+        <div className="flex items-center gap-1.5 text-[10px] bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 rounded px-2 py-1">
+          <span className="font-medium">New offer available</span>
+          {opp.outstanding_offer.displayed_savings_low_cents != null && opp.outstanding_offer.displayed_savings_currency && (
+            <span className="font-mono">
+              {formatMoney(opp.outstanding_offer.displayed_savings_low_cents, opp.outstanding_offer.displayed_savings_currency)}
+              {opp.outstanding_offer.displayed_savings_high_cents != null &&
+                opp.outstanding_offer.displayed_savings_high_cents !== opp.outstanding_offer.displayed_savings_low_cents &&
+                `–${formatMoney(opp.outstanding_offer.displayed_savings_high_cents, opp.outstanding_offer.displayed_savings_currency)}`
+              }
+              {' savings'}
+            </span>
+          )}
         </div>
       )}
 
@@ -480,7 +485,7 @@ export default function HotelRepricingTrackingPage() {
         return 'active';
       }
 
-      // Deduplicate: active endpoint returns everything non-terminal
+      // Deduplicate: active endpoint returns approved non-terminal opportunities
       const seen = new Set<string>();
       const all: EnrichedOpportunity[] = [];
 

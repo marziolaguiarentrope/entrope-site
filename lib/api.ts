@@ -164,6 +164,7 @@ export interface PendingEmail {
   user_id: string;
   template_id?: string | null;
   to_email: string | null;
+  to_phone: string | null;
   to_name: string | null;
   subject: string | null;
   preheader: string | null;
@@ -207,6 +208,7 @@ export interface PendingSms {
   id: string;
   user_id: string;
   to_phone: string | null;
+  to_email: string | null;
   to_name: string | null;
   body: string | null;
   status: string;
@@ -1538,14 +1540,13 @@ export interface BulkAutoWakeEnableResponse {
   selection: string;
 }
 
-/** An unapproved ACTIVE opportunity for the same booking — returned by the admin gateway. */
-export interface OutstandingOffer {
-  id: string;
-  target_price_amount: number | null;      // Minor units
-  target_price_currency: string | null;
-  savings_amount: number | null;           // Minor units — vs original booking price
-  created_at: string;                      // When this price drop was surfaced
-  surfaced_at: string | null;
+export interface OutstandingOfferSummary {
+  opportunity_id: string;
+  status: string;
+  created_at: string;
+  displayed_savings_low_cents: number | null;
+  displayed_savings_high_cents: number | null;
+  displayed_savings_currency: string | null;
 }
 
 export interface HotelOpportunity {
@@ -1566,7 +1567,8 @@ export interface HotelOpportunity {
   cancellation_capability: string | null;
   cancellation_scheduled_at: string | null;
   created_at: string;
-  outstanding_offer?: OutstandingOffer | null;  // Present when a newer unapproved price drop exists
+  // Outstanding (unapproved) offer for the same booking, if one exists
+  outstanding_offer?: OutstandingOfferSummary | null;
 }
 
 export interface HotelOpportunityListResponse {
