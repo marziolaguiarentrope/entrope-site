@@ -17,31 +17,20 @@ import {
   api,
   OnboardingFunnelUser,
   BusinessDashboardResponse,
-  RepricingPipelineIssue,
-  RepricingPipelineResponse,
   UserBasicInfo,
 } from '@/lib/api';
 
 // ── Constants ────────────────────────────────────────────
 
 const FUNNEL_STAGES = [
-  { key: 'signed_up', label: 'Signed Up', description: 'Users who created an account', color: '#6366f1' },
-  { key: 'has_booking', label: 'Has Flight Booking', description: 'Forwarded a flight confirmation email', color: '#8b5cf6' },
-  { key: 'has_watch', label: 'Being Monitored', description: 'Active price watch running', color: '#a78bfa' },
-  { key: 'has_opportunity', label: 'Opportunity Found', description: 'Price drop detected, user notified', color: '#c084fc' },
-  { key: 'has_opportunity_progressed', label: 'Progressed', description: 'User approved or repricing completed', color: '#00C805' },
+  { key: 'signed_up', label: 'Registered', description: 'Created an account', color: '#6366f1' },
+  { key: 'has_booking', label: 'CWI', description: 'Customer With Intent — forwarded a booking email', color: '#8b5cf6' },
+  { key: 'has_watch', label: 'Monitored', description: 'Active price watch running on their booking', color: '#a78bfa' },
+  { key: 'has_opportunity', label: 'Opportunity', description: 'Price drop found, user notified', color: '#c084fc' },
+  { key: 'has_opportunity_progressed', label: 'Converted', description: 'Approved repricing or completed savings', color: '#00C805' },
 ] as const;
 
 type FunnelStageKey = typeof FUNNEL_STAGES[number]['key'];
-
-// Opportunity status groupings for the detail breakdown
-const OPP_STATUS_GROUPS = {
-  awaiting_action: { label: 'Awaiting User Action', statuses: ['active'], color: 'text-blue-400', bg: 'bg-blue-500/20' },
-  approved: { label: 'Approved / In Progress', statuses: ['accepted', 'executing', 'awaiting_customer', 'awaiting_cancellation'], color: 'text-purple-400', bg: 'bg-purple-500/20' },
-  completed: { label: 'Completed', statuses: ['completed'], color: 'text-green-400', bg: 'bg-green-500/20' },
-  needs_attention: { label: 'Needs Attention', statuses: ['needs_intervention', 'failed'], color: 'text-orange-400', bg: 'bg-orange-500/20' },
-  terminal: { label: 'Declined / Expired / Other', statuses: ['declined', 'expired', 'withdrawn', 'cancelled'], color: 'text-zinc-400', bg: 'bg-zinc-500/20' },
-} as const;
 
 const CHART_GRID = '#1a1f2e';
 const CHART_AXIS = '#6b7280';
@@ -66,6 +55,7 @@ function formatMoney(amountCents: number, currency: string = 'USD'): string {
   return new Intl.NumberFormat('en-US', {
     style: 'currency',
     currency,
+    maximumFractionDigits: 0,
   }).format(fromMinorUnits(amountCents, currency));
 }
 
@@ -74,51 +64,43 @@ function pct(num: number, denom: number): string {
   return `${((num / denom) * 100).toFixed(1)}%`;
 }
 
-/** Get which funnel stage a user is currently at (furthest reached) */
+function pctNum(num: number, denom: number): number {
+  if (denom === 0) return 0;
+  return (num / denom) * 100;
+}
+
+function formatHours(hours: number | null): string {
+  if (hours === null) return '—';
+  if (hours < 1) return '<1h';
+  if (hours < 24) return `${Math.round(hours)}h`;
+  return `${Math.round(hours / 24)}d`;
+}
+
+/** Determine furthest funnel stage (includes hotel + flight data) */
 function getUserFunnelStage(user: OnboardingFunnelUser): FunnelStageKey {
-  if (user.flight_opps > 0) {
-    // Check if any opp has progressed beyond 'active'
+  const totalOpps = user.flight_opps + user.hotel_opps;
+  if (totalOpps > 0) {
     const progressedStatuses = ['accepted', 'executing', 'awaiting_customer', 'awaiting_cancellation', 'completed', 'needs_intervention'];
-    const hasProgressed = progressedStatuses.some(s => (user.flight_opp_statuses[s] || 0) > 0);
+    const hasProgressed = progressedStatuses.some(s =>
+      (user.flight_opp_statuses[s] || 0) > 0 || (user.hotel_opp_statuses[s] || 0) > 0
+    );
     if (hasProgressed) return 'has_opportunity_progressed';
     return 'has_opportunity';
   }
-  if (user.flight_watches > 0) return 'has_watch';
-  if (user.flight_bookings > 0) return 'has_booking';
+  if (user.flight_watches > 0 || user.hotel_watches > 0) return 'has_watch';
+  if (user.flight_bookings > 0 || user.hotel_bookings > 0) return 'has_booking';
   return 'signed_up';
 }
 
-/** Get all flight opportunity statuses for a user as a sorted array */
-function getOppStatusBreakdown(user: OnboardingFunnelUser): { status: string; count: number }[] {
-  return Object.entries(user.flight_opp_statuses || {})
-    .filter(([, count]) => count > 0)
-    .map(([status, count]) => ({ status, count }))
-    .sort((a, b) => b.count - a.count);
+/** Median of an array of numbers */
+function median(arr: number[]): number | null {
+  if (arr.length === 0) return null;
+  const sorted = [...arr].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 !== 0 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
 }
 
-// ── StatusBadge ──────────────────────────────────────────
-
-function StatusBadge({ status }: { status: string }) {
-  const colors: Record<string, string> = {
-    active: 'bg-blue-500/20 text-blue-400',
-    accepted: 'bg-indigo-500/20 text-indigo-400',
-    executing: 'bg-purple-500/20 text-purple-400',
-    awaiting_customer: 'bg-yellow-500/20 text-yellow-400',
-    awaiting_cancellation: 'bg-amber-500/20 text-amber-400',
-    completed: 'bg-green-500/20 text-green-400',
-    failed: 'bg-red-500/20 text-red-400',
-    needs_intervention: 'bg-orange-500/20 text-orange-400',
-    declined: 'bg-zinc-500/20 text-zinc-400',
-    expired: 'bg-zinc-500/20 text-zinc-400',
-    withdrawn: 'bg-zinc-500/20 text-zinc-400',
-    cancelled: 'bg-red-500/20 text-red-400',
-  };
-  return (
-    <span className={cn('px-2 py-0.5 text-xs rounded font-medium whitespace-nowrap', colors[status] || 'bg-zinc-500/20 text-zinc-400')}>
-      {status.replace(/_/g, ' ')}
-    </span>
-  );
-}
+// ── Badge Components ─────────────────────────────────────
 
 function StageBadge({ stage }: { stage: FunnelStageKey }) {
   const info = FUNNEL_STAGES.find(s => s.key === stage);
@@ -129,25 +111,6 @@ function StageBadge({ stage }: { stage: FunnelStageKey }) {
       style={{ backgroundColor: info.color + '20', color: info.color }}
     >
       {info.label}
-    </span>
-  );
-}
-
-// ── Pipeline Issue Row ───────────────────────────────────
-
-function IssueTypeBadge({ type }: { type: string }) {
-  const colors: Record<string, string> = {
-    no_watch: 'bg-yellow-500/20 text-yellow-400',
-    watch_stale: 'bg-orange-500/20 text-orange-400',
-    watch_failing: 'bg-red-500/20 text-red-400',
-    opp_stuck: 'bg-purple-500/20 text-purple-400',
-    opp_expired: 'bg-zinc-500/20 text-zinc-400',
-    booking_unverified: 'bg-blue-500/20 text-blue-400',
-    booking_pending: 'bg-amber-500/20 text-amber-400',
-  };
-  return (
-    <span className={cn('px-2 py-0.5 text-xs rounded font-medium whitespace-nowrap', colors[type] || 'bg-zinc-500/20 text-zinc-400')}>
-      {type.replace(/_/g, ' ')}
     </span>
   );
 }
@@ -163,9 +126,21 @@ function FunnelTooltip({ active, payload }: { active?: boolean; payload?: Array<
       <p className="text-xs text-zinc-400 mb-1.5">{d.description}</p>
       <p className="text-lg font-semibold text-zinc-100">{d.count.toLocaleString()} users</p>
       <div className="flex gap-3 mt-1 text-xs">
-        <span className="text-zinc-400">{d.pctOfTotal} of signups</span>
+        <span className="text-zinc-400">{d.pctOfTotal} of registrations</span>
         {d.dropOff && <span className="text-red-400">{d.dropOff} drop-off</span>}
       </div>
+    </div>
+  );
+}
+
+// ── KPI Card ─────────────────────────────────────────────
+
+function KpiCard({ label, value, sub, accent }: { label: string; value: string; sub?: string; accent?: string }) {
+  return (
+    <div className="bg-card border border-border rounded-lg p-4">
+      <p className="text-xs text-muted-foreground mb-1">{label}</p>
+      <p className={cn('text-2xl font-semibold', accent || 'text-foreground')}>{value}</p>
+      {sub && <p className="text-xs text-muted-foreground mt-0.5">{sub}</p>}
     </div>
   );
 }
@@ -173,45 +148,27 @@ function FunnelTooltip({ active, payload }: { active?: boolean; payload?: Array<
 // ── Main Page ────────────────────────────────────────────
 
 export default function FlightRepricingFunnelPage() {
-  // Data
   const [dashboard, setDashboard] = useState<BusinessDashboardResponse | null>(null);
-  const [pipelineData, setPipelineData] = useState<RepricingPipelineResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [days, setDays] = useState<number>(30);
-
-  // Drill-down state
   const [selectedStage, setSelectedStage] = useState<FunnelStageKey | null>(null);
-  const [selectedIssueType, setSelectedIssueType] = useState<string | null>(null);
   const [search, setSearch] = useState('');
-
-  // User info enrichment
   const [userInfoMap, setUserInfoMap] = useState<Map<string, UserBasicInfo>>(new Map());
   const [enriching, setEnriching] = useState(false);
-
-  // Auto-refresh
   const refreshTimer = useRef<NodeJS.Timeout | null>(null);
 
-  // Fetch all data
   const fetchData = useCallback(async () => {
     setLoading(true);
     setError(null);
-
     try {
-      const [dashboardRes, pipelineRes] = await Promise.all([
-        api.getBusinessDashboard(days),
-        api.getRepricingPipelineIssues().catch(() => null),
-      ]);
-
+      const dashboardRes = await api.getBusinessDashboard(days);
       setDashboard(dashboardRes);
-      setPipelineData(pipelineRes);
 
-      // Enrich user info for funnel users (non-blocking)
       const funnelUsers = dashboardRes.onboarding_funnel?.users || [];
       if (funnelUsers.length > 0) {
         setEnriching(true);
-        const userIds = funnelUsers.map(u => u.user_id);
-        api.batchGetUserBasicInfo(userIds)
+        api.batchGetUserBasicInfo(funnelUsers.map(u => u.user_id))
           .then(setUserInfoMap)
           .catch(() => {})
           .finally(() => setEnriching(false));
@@ -224,36 +181,26 @@ export default function FlightRepricingFunnelPage() {
   }, [days]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
-
-  // Auto-refresh every 60 seconds
   useEffect(() => {
     if (refreshTimer.current) clearInterval(refreshTimer.current);
     refreshTimer.current = setInterval(fetchData, 60_000);
-    return () => {
-      if (refreshTimer.current) clearInterval(refreshTimer.current);
-    };
+    return () => { if (refreshTimer.current) clearInterval(refreshTimer.current); };
   }, [fetchData]);
-
-  // Reset drill-down when days changes
-  useEffect(() => {
-    setSelectedStage(null);
-    setSelectedIssueType(null);
-    setSearch('');
-  }, [days]);
+  useEffect(() => { setSelectedStage(null); setSearch(''); }, [days]);
 
   // ── Derived data ───────────────────────────────────────
 
   const funnel = dashboard?.onboarding_funnel;
-  const funnelSummary = funnel?.summary;
-  const funnelUsers = funnel?.users || [];
+  const summary = funnel?.summary;
+  const users = funnel?.users || [];
 
-  // Build funnel chart data
+  // Funnel chart data
   const funnelChartData = useMemo(() => {
-    if (!funnelSummary) return [];
+    if (!summary) return [];
     return FUNNEL_STAGES.map((stage, i) => {
-      const count = funnelSummary[stage.key as keyof typeof funnelSummary] ?? 0;
-      const total = funnelSummary.signed_up || 1;
-      const prevCount = i > 0 ? (funnelSummary[FUNNEL_STAGES[i - 1].key as keyof typeof funnelSummary] ?? 0) : 0;
+      const count = summary[stage.key as keyof typeof summary] ?? 0;
+      const total = summary.signed_up || 1;
+      const prevCount = i > 0 ? (summary[FUNNEL_STAGES[i - 1].key as keyof typeof summary] ?? 0) : 0;
       return {
         key: stage.key,
         label: stage.label,
@@ -264,97 +211,70 @@ export default function FlightRepricingFunnelPage() {
         dropOff: i > 0 && prevCount > 0 ? pct((prevCount as number) - (count as number), prevCount as number) : '',
       };
     });
-  }, [funnelSummary]);
+  }, [summary]);
 
-  // Aggregate opportunity status breakdown across all funnel users
-  const oppStatusAggregates = useMemo(() => {
-    const agg: Record<string, number> = {};
-    for (const user of funnelUsers) {
-      for (const [status, count] of Object.entries(user.flight_opp_statuses || {})) {
-        agg[status] = (agg[status] || 0) + count;
-      }
+  // Conversion velocity stats
+  const velocityStats = useMemo(() => {
+    const bookingTimes = users.filter(u => u.hours_to_first_booking !== null).map(u => u.hours_to_first_booking!);
+    const oppTimes = users.filter(u => u.hours_to_first_opp !== null).map(u => u.hours_to_first_opp!);
+    return {
+      medianToBooking: median(bookingTimes),
+      medianToOpp: median(oppTimes),
+      bookingSampleSize: bookingTimes.length,
+      oppSampleSize: oppTimes.length,
+    };
+  }, [users]);
+
+  // Users by stage breakdown
+  const usersByStage = useMemo(() => {
+    const counts: Record<FunnelStageKey, number> = {
+      signed_up: 0, has_booking: 0, has_watch: 0, has_opportunity: 0, has_opportunity_progressed: 0,
+    };
+    for (const u of users) {
+      counts[getUserFunnelStage(u)]++;
     }
-    return Object.entries(agg)
-      .map(([status, count]) => ({ status, count }))
-      .sort((a, b) => b.count - a.count);
-  }, [funnelUsers]);
+    return counts;
+  }, [users]);
 
-  // Total flight opportunities across all users
-  const totalFlightOpps = useMemo(() => {
-    return funnelUsers.reduce((sum, u) => sum + u.flight_opps, 0);
-  }, [funnelUsers]);
+  // At-risk users: signed up > 3 days ago, no booking
+  const atRiskUsers = useMemo(() => {
+    const threeDaysAgo = Date.now() - 3 * 24 * 60 * 60 * 1000;
+    return users.filter(u => {
+      const stage = getUserFunnelStage(u);
+      return stage === 'signed_up' && new Date(u.signed_up).getTime() < threeDaysAgo;
+    });
+  }, [users]);
 
-  // Filter users for drill-down table
+  // Revenue & savings from live fields
+  const revenue = dashboard?.revenue_usd_cents;
+  const msr = dashboard?.msr;
+  const activeUsers = dashboard?.active_users;
+
+  // Filter + sort users for drill-down
   const filteredUsers = useMemo(() => {
-    let users = [...funnelUsers];
-
-    // Filter by selected funnel stage
-    if (selectedStage) {
-      users = users.filter(u => getUserFunnelStage(u) === selectedStage);
-    }
-
-    // Filter by search
+    let result = [...users];
+    if (selectedStage) result = result.filter(u => getUserFunnelStage(u) === selectedStage);
     if (search) {
       const q = search.toLowerCase();
-      users = users.filter(u => {
+      result = result.filter(u => {
         const info = userInfoMap.get(u.user_id);
-        return (
-          u.email.toLowerCase().includes(q) ||
-          u.user_id.toLowerCase().includes(q) ||
-          info?.name?.toLowerCase().includes(q) ||
-          info?.phone?.toLowerCase().includes(q)
-        );
+        return u.email.toLowerCase().includes(q) || u.user_id.toLowerCase().includes(q) ||
+          info?.name?.toLowerCase().includes(q) || info?.phone?.toLowerCase().includes(q);
       });
     }
+    return result;
+  }, [users, selectedStage, search, userInfoMap]);
 
-    return users;
-  }, [funnelUsers, selectedStage, search, userInfoMap]);
-
-  // Sort users: those with most progression issues first
   const sortedUsers = useMemo(() => {
+    const order: Record<FunnelStageKey, number> = {
+      signed_up: 0, has_booking: 1, has_watch: 2, has_opportunity: 3, has_opportunity_progressed: 4,
+    };
     return [...filteredUsers].sort((a, b) => {
-      // Sort by funnel stage (higher = better)
-      const stageOrder: Record<FunnelStageKey, number> = {
-        signed_up: 0,
-        has_booking: 1,
-        has_watch: 2,
-        has_opportunity: 3,
-        has_opportunity_progressed: 4,
-      };
-      const aStage = stageOrder[getUserFunnelStage(a)] ?? 0;
-      const bStage = stageOrder[getUserFunnelStage(b)] ?? 0;
-      if (aStage !== bStage) return bStage - aStage; // Higher stage first
-
-      // Then by recency
+      const diff = (order[getUserFunnelStage(b)] ?? 0) - (order[getUserFunnelStage(a)] ?? 0);
+      if (diff !== 0) return diff;
       return new Date(b.signed_up).getTime() - new Date(a.signed_up).getTime();
     });
   }, [filteredUsers]);
-
-  // Pipeline issues filtered to flight-related
-  const flightPipelineIssues = useMemo(() => {
-    if (!pipelineData) return [];
-    return pipelineData.issues.filter(i => i.booking_type === 'flight' || i.booking_type === null);
-  }, [pipelineData]);
-
-  // Pipeline issues filtered by selected type
-  const filteredIssues = useMemo(() => {
-    if (!selectedIssueType) return flightPipelineIssues;
-    return flightPipelineIssues.filter(i => i.issue_type === selectedIssueType);
-  }, [flightPipelineIssues, selectedIssueType]);
-
-  // Pipeline issue type counts
-  const issueTypeCounts = useMemo(() => {
-    const counts: Record<string, { count: number; label: string }> = {};
-    for (const issue of flightPipelineIssues) {
-      if (!counts[issue.issue_type]) {
-        counts[issue.issue_type] = { count: 0, label: issue.label };
-      }
-      counts[issue.issue_type].count++;
-    }
-    return Object.entries(counts)
-      .map(([type, { count, label }]) => ({ type, count, label }))
-      .sort((a, b) => b.count - a.count);
-  }, [flightPipelineIssues]);
 
   // ── Render ─────────────────────────────────────────────
 
@@ -363,13 +283,12 @@ export default function FlightRepricingFunnelPage() {
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-semibold">Flight Repricing Funnel</h1>
+          <h1 className="text-2xl font-semibold">Marketing Funnel</h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Visualize the full flight repricing pipeline from email forwarding to completion
+            Registration → CWI → Monitoring → Opportunity → Conversion
           </p>
         </div>
         <div className="flex items-center gap-2">
-          {/* Days selector */}
           <select
             value={days}
             onChange={(e) => setDays(Number(e.target.value))}
@@ -378,13 +297,15 @@ export default function FlightRepricingFunnelPage() {
             <option value={7}>Last 7 days</option>
             <option value={14}>Last 14 days</option>
             <option value={30}>Last 30 days</option>
+            <option value={60}>Last 60 days</option>
+            <option value={90}>Last 90 days</option>
           </select>
           <button
             onClick={fetchData}
             disabled={loading}
             className="px-3 py-2 text-sm font-medium bg-accent/50 rounded-lg hover:bg-accent disabled:opacity-30 transition-colors"
           >
-            {loading ? 'Loading...' : '↻ Refresh'}
+            {loading ? 'Loading...' : 'Refresh'}
           </button>
         </div>
       </div>
@@ -398,124 +319,106 @@ export default function FlightRepricingFunnelPage() {
         </div>
       ) : loading && !dashboard ? (
         <div className="bg-card border border-border rounded-lg p-6 text-center text-muted-foreground">
-          Loading flight repricing funnel...
+          Loading marketing funnel data...
         </div>
       ) : (
         <>
-          {/* ── Summary Stats Row ─────────────────────────── */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-3 mb-6">
-            {/* Bookings */}
-            <div className="bg-card border border-border rounded-lg p-4">
-              <p className="text-xs text-muted-foreground mb-1">Flight Bookings</p>
-              <p className="text-2xl font-semibold text-foreground">
-                {dashboard?.bookings?.flights.current.toLocaleString() ?? '—'}
-              </p>
-              {dashboard?.bookings?.flights && (
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  +{dashboard.bookings.flights.last_7} last 7d
-                </p>
-              )}
-            </div>
+          {/* ── KPI Row ────────────────────────────────────── */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-6">
+            <KpiCard
+              label="Registrations"
+              value={summary?.signed_up?.toLocaleString() ?? '—'}
+              sub={`Last ${days} days`}
+            />
+            <KpiCard
+              label="CWI Rate"
+              value={summary ? pct(summary.has_booking, summary.signed_up) : '—'}
+              sub={summary ? `${summary.has_booking} of ${summary.signed_up} registered` : undefined}
+              accent={summary && pctNum(summary.has_booking, summary.signed_up) > 20 ? 'text-green-400' : 'text-yellow-400'}
+            />
+            <KpiCard
+              label="Monitoring Rate"
+              value={summary ? pct(summary.has_watch, summary.has_booking) : '—'}
+              sub={summary ? `${summary.has_watch} of ${summary.has_booking} CWI` : undefined}
+            />
+            <KpiCard
+              label="Opportunity Rate"
+              value={summary ? pct(summary.has_opportunity, summary.has_watch) : '—'}
+              sub={summary ? `${summary.has_opportunity} opportunities found` : undefined}
+            />
+            <KpiCard
+              label="Money Saved (Total)"
+              value={msr ? formatMoney(msr.total.last_period, 'USD') : '—'}
+              sub={msr ? `prev: ${formatMoney(msr.total.prev_period, 'USD')}` : undefined}
+              accent="text-green-400"
+            />
+            <KpiCard
+              label="Revenue"
+              value={revenue ? formatMoney(revenue.last_period, 'USD') : '—'}
+              sub={revenue ? `prev: ${formatMoney(revenue.prev_period, 'USD')}` : undefined}
+              accent="text-green-400"
+            />
+          </div>
 
-            {/* Monitored */}
+          {/* ── Conversion Velocity ───────────────────────── */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
             <div className="bg-card border border-border rounded-lg p-4">
-              <p className="text-xs text-muted-foreground mb-1">Being Monitored</p>
-              <p className="text-2xl font-semibold text-foreground">
-                {dashboard?.bookings?.monitored.current.toLocaleString() ?? '—'}
+              <p className="text-xs text-muted-foreground mb-1">Median Time to CWI</p>
+              <p className="text-xl font-semibold text-foreground">
+                {formatHours(velocityStats.medianToBooking)}
               </p>
-              {dashboard?.bookings?.monitored && (
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  +{dashboard.bookings.monitored.last_7} last 7d
-                </p>
-              )}
+              <p className="text-xs text-muted-foreground mt-0.5">
+                {velocityStats.bookingSampleSize} users converted
+              </p>
             </div>
-
-            {/* Flight Opps */}
             <div className="bg-card border border-border rounded-lg p-4">
-              <p className="text-xs text-muted-foreground mb-1">Flight Opportunities</p>
-              <p className="text-2xl font-semibold text-foreground">
-                {dashboard?.opportunities?.flights.current.toLocaleString() ?? '—'}
+              <p className="text-xs text-muted-foreground mb-1">Median Time to Opportunity</p>
+              <p className="text-xl font-semibold text-foreground">
+                {formatHours(velocityStats.medianToOpp)}
               </p>
-              {dashboard?.opportunities?.flights && (
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  +{dashboard.opportunities.flights.last_7} last 7d
-                </p>
-              )}
+              <p className="text-xs text-muted-foreground mt-0.5">
+                {velocityStats.oppSampleSize} users reached
+              </p>
             </div>
-
-            {/* Completed */}
             <div className="bg-card border border-border rounded-lg p-4">
-              <p className="text-xs text-muted-foreground mb-1">Completed</p>
-              <p className="text-2xl font-semibold text-green-400">
-                {dashboard?.opportunities?.completed.last_7.toLocaleString() ?? '—'}
+              <p className="text-xs text-muted-foreground mb-1">Active Users</p>
+              <p className="text-xl font-semibold text-foreground">
+                {activeUsers?.last_period?.toLocaleString() ?? '—'}
               </p>
-              <p className="text-xs text-muted-foreground mt-0.5">last 7d</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                prev: {activeUsers?.prev_period?.toLocaleString() ?? '—'}
+              </p>
             </div>
-
-            {/* Money Rescued */}
             <div className="bg-card border border-border rounded-lg p-4">
-              <p className="text-xs text-muted-foreground mb-1">Money Rescued</p>
-              <p className="text-2xl font-semibold text-green-400">
-                {dashboard?.value?.money_rescued_usd_cents
-                  ? formatMoney(dashboard.value.money_rescued_usd_cents.last_7, 'USD')
-                  : '—'}
+              <p className="text-xs text-muted-foreground mb-1">At-Risk (No CWI &gt;3d)</p>
+              <p className={cn('text-xl font-semibold', atRiskUsers.length > 0 ? 'text-orange-400' : 'text-green-400')}>
+                {atRiskUsers.length}
               </p>
-              <p className="text-xs text-muted-foreground mt-0.5">last 7d</p>
-            </div>
-
-            {/* Pipeline Issues */}
-            <div className="bg-card border border-border rounded-lg p-4">
-              <p className="text-xs text-muted-foreground mb-1">Pipeline Issues</p>
-              <p className="text-2xl font-semibold text-orange-400">
-                {flightPipelineIssues.length}
+              <p className="text-xs text-muted-foreground mt-0.5">
+                {summary ? pct(atRiskUsers.length, summary.signed_up) : '—'} of registrations
               </p>
-              {pipelineData && (
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  {pipelineData.healthy_bookings} healthy
-                </p>
-              )}
             </div>
           </div>
 
           {/* ── Funnel Chart ──────────────────────────────── */}
           <div className="bg-card border border-border rounded-lg p-6 mb-6">
-            <h2 className="text-lg font-semibold mb-1">User Conversion Funnel</h2>
+            <h2 className="text-lg font-semibold mb-1">Conversion Funnel</h2>
             <p className="text-xs text-muted-foreground mb-4">
-              Users in the last {days} days — click a bar to drill down
+              Last {days} days — click a bar to filter the user table below
             </p>
 
             {funnelChartData.length > 0 ? (
               <div className="h-[300px]">
                 <ResponsiveContainer width="100%" height="100%">
-                  <BarChart
-                    data={funnelChartData}
-                    margin={{ top: 10, right: 30, left: 10, bottom: 0 }}
-                    barCategoryGap="20%"
-                  >
+                  <BarChart data={funnelChartData} margin={{ top: 10, right: 30, left: 10, bottom: 0 }} barCategoryGap="20%">
                     <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID} />
-                    <XAxis
-                      dataKey="label"
-                      tick={{ fontSize: 11, fill: CHART_AXIS }}
-                      tickLine={false}
-                      axisLine={{ stroke: CHART_GRID }}
-                    />
-                    <YAxis
-                      tick={{ fontSize: 11, fill: CHART_AXIS }}
-                      tickLine={false}
-                      axisLine={{ stroke: CHART_GRID }}
-                      allowDecimals={false}
-                    />
+                    <XAxis dataKey="label" tick={{ fontSize: 11, fill: CHART_AXIS }} tickLine={false} axisLine={{ stroke: CHART_GRID }} />
+                    <YAxis tick={{ fontSize: 11, fill: CHART_AXIS }} tickLine={false} axisLine={{ stroke: CHART_GRID }} allowDecimals={false} />
                     <Tooltip content={<FunnelTooltip />} cursor={{ fill: '#ffffff08' }} />
-                    <Bar
-                      dataKey="count"
-                      radius={[6, 6, 0, 0]}
-                      cursor="pointer"
+                    <Bar dataKey="count" radius={[6, 6, 0, 0]} cursor="pointer"
                       onClick={(data) => {
                         const key = data?.key as FunnelStageKey | undefined;
-                        if (key) {
-                          setSelectedStage(prev => prev === key ? null : key);
-                          setSelectedIssueType(null);
-                        }
+                        if (key) setSelectedStage(prev => prev === key ? null : key);
                       }}
                     >
                       {funnelChartData.map((entry) => (
@@ -532,37 +435,26 @@ export default function FlightRepricingFunnelPage() {
                 </ResponsiveContainer>
               </div>
             ) : (
-              <div className="text-center py-12 text-muted-foreground">
-                No funnel data available for this time period
-              </div>
+              <div className="text-center py-12 text-muted-foreground">No funnel data available</div>
             )}
 
-            {/* Funnel stage cards below chart */}
+            {/* Stage cards */}
             {funnelChartData.length > 0 && (
               <div className="grid grid-cols-5 gap-2 mt-4">
                 {funnelChartData.map((stage, i) => (
                   <button
                     key={stage.key}
-                    onClick={() => {
-                      setSelectedStage(prev => prev === stage.key ? null : (stage.key as FunnelStageKey));
-                      setSelectedIssueType(null);
-                    }}
+                    onClick={() => setSelectedStage(prev => prev === stage.key ? null : (stage.key as FunnelStageKey))}
                     className={cn(
                       'rounded-lg p-3 text-left transition-all border',
-                      selectedStage === stage.key
-                        ? 'border-white/30 bg-accent/50'
-                        : 'border-border hover:border-border/80 hover:bg-accent/20',
+                      selectedStage === stage.key ? 'border-white/30 bg-accent/50' : 'border-border hover:border-border/80 hover:bg-accent/20',
                     )}
                   >
-                    <div className="text-2xl font-bold" style={{ color: stage.color }}>
-                      {stage.count.toLocaleString()}
-                    </div>
+                    <div className="text-2xl font-bold" style={{ color: stage.color }}>{stage.count.toLocaleString()}</div>
                     <div className="text-xs font-medium text-foreground mt-0.5">{stage.label}</div>
                     <div className="text-[10px] text-muted-foreground mt-0.5">
                       {stage.pctOfTotal}
-                      {i > 0 && stage.dropOff && (
-                        <span className="text-red-400 ml-1">({stage.dropOff} drop)</span>
-                      )}
+                      {i > 0 && stage.dropOff && <span className="text-red-400 ml-1">({stage.dropOff} drop)</span>}
                     </div>
                   </button>
                 ))}
@@ -570,187 +462,28 @@ export default function FlightRepricingFunnelPage() {
             )}
           </div>
 
-          {/* ── Opportunity Status Breakdown ──────────────── */}
-          {totalFlightOpps > 0 && (
-            <div className="bg-card border border-border rounded-lg p-6 mb-6">
-              <h2 className="text-lg font-semibold mb-1">Opportunity Status Breakdown</h2>
-              <p className="text-xs text-muted-foreground mb-4">
-                {totalFlightOpps} total flight opportunities across {funnelUsers.filter(u => u.flight_opps > 0).length} users
-              </p>
-
-              {/* Status group cards */}
-              <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-4">
-                {Object.entries(OPP_STATUS_GROUPS).map(([groupKey, group]) => {
-                  const count = group.statuses.reduce((sum, s) => {
-                    return sum + (oppStatusAggregates.find(a => a.status === s)?.count || 0);
-                  }, 0);
-                  return (
-                    <div key={groupKey} className="bg-accent/20 rounded-lg p-3">
-                      <div className={cn('text-xl font-bold', group.color)}>{count}</div>
-                      <div className="text-xs font-medium text-foreground mt-0.5">{group.label}</div>
-                      <div className="flex flex-wrap gap-1 mt-2">
-                        {group.statuses.map(s => {
-                          const c = oppStatusAggregates.find(a => a.status === s)?.count || 0;
-                          if (c === 0) return null;
-                          return (
-                            <span key={s} className={cn('text-[10px] px-1.5 py-0.5 rounded', group.bg, group.color)}>
-                              {s.replace(/_/g, ' ')} ({c})
-                            </span>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-
-              {/* All statuses bar */}
-              {oppStatusAggregates.length > 0 && (
-                <div className="flex gap-1 h-3 rounded-full overflow-hidden">
-                  {oppStatusAggregates.map(({ status, count }) => {
-                    const statusColors: Record<string, string> = {
-                      active: '#3b82f6', accepted: '#6366f1', executing: '#a855f7',
-                      awaiting_customer: '#eab308', awaiting_cancellation: '#f59e0b',
-                      completed: '#22c55e', failed: '#ef4444', needs_intervention: '#f97316',
-                      declined: '#71717a', expired: '#71717a', withdrawn: '#71717a', cancelled: '#ef4444',
-                    };
-                    return (
-                      <div
-                        key={status}
-                        className="h-full rounded-full transition-all"
-                        style={{
-                          width: `${(count / totalFlightOpps) * 100}%`,
-                          backgroundColor: statusColors[status] || '#71717a',
-                          minWidth: count > 0 ? '4px' : '0px',
-                        }}
-                        title={`${status.replace(/_/g, ' ')}: ${count} (${pct(count, totalFlightOpps)})`}
-                      />
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* ── Pipeline Issues ────────────────────────────── */}
-          {flightPipelineIssues.length > 0 && (
-            <div className="bg-card border border-border rounded-lg p-6 mb-6">
-              <h2 className="text-lg font-semibold mb-1">Pipeline Issues</h2>
-              <p className="text-xs text-muted-foreground mb-4">
-                Bookings and opportunities that need attention — {flightPipelineIssues.length} issue{flightPipelineIssues.length !== 1 ? 's' : ''}
-              </p>
-
-              {/* Issue type filter chips */}
-              <div className="flex flex-wrap gap-2 mb-4">
-                <button
-                  onClick={() => setSelectedIssueType(null)}
-                  className={cn(
-                    'px-3 py-1.5 text-xs font-medium rounded-lg transition-colors',
-                    selectedIssueType === null
-                      ? 'bg-primary text-primary-foreground'
-                      : 'bg-accent/50 text-muted-foreground hover:bg-accent',
-                  )}
-                >
-                  All ({flightPipelineIssues.length})
-                </button>
-                {issueTypeCounts.map(({ type, count, label }) => (
-                  <button
-                    key={type}
-                    onClick={() => setSelectedIssueType(prev => prev === type ? null : type)}
-                    className={cn(
-                      'px-3 py-1.5 text-xs font-medium rounded-lg transition-colors',
-                      selectedIssueType === type
-                        ? 'bg-primary text-primary-foreground'
-                        : 'bg-accent/50 text-muted-foreground hover:bg-accent',
-                    )}
-                  >
-                    {label} ({count})
-                  </button>
-                ))}
-              </div>
-
-              {/* Issues table */}
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead className="border-b border-border bg-accent/30">
-                    <tr>
-                      <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Issue</th>
-                      <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">User</th>
-                      <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Booking</th>
-                      <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Reason</th>
-                      <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Status</th>
-                      <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Created</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredIssues.slice(0, 50).map((issue, i) => (
-                      <tr key={`${issue.issue_type}-${issue.booking_id}-${i}`} className="border-b border-border last:border-0 hover:bg-accent/30 transition-colors">
-                        <td className="px-3 py-2.5">
-                          <IssueTypeBadge type={issue.issue_type} />
-                        </td>
-                        <td className="px-3 py-2.5">
-                          <Link
-                            href={`/users-list/${issue.user_id}`}
-                            className="text-xs text-primary hover:underline"
-                          >
-                            {userInfoMap.get(issue.user_id)?.email || issue.user_id.slice(0, 8) + '...'}
-                          </Link>
-                        </td>
-                        <td className="px-3 py-2.5 text-xs font-mono text-muted-foreground">
-                          {issue.booking_id ? issue.booking_id.slice(0, 12) + '...' : '—'}
-                        </td>
-                        <td className="px-3 py-2.5 text-xs text-muted-foreground max-w-[300px] truncate">
-                          {issue.reason || '—'}
-                        </td>
-                        <td className="px-3 py-2.5">
-                          {issue.status ? <StatusBadge status={issue.status} /> : '—'}
-                        </td>
-                        <td className="px-3 py-2.5 text-xs text-muted-foreground whitespace-nowrap">
-                          {issue.created_at ? timeAgo(issue.created_at) : '—'}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              {filteredIssues.length > 50 && (
-                <p className="text-xs text-muted-foreground mt-2">
-                  Showing 50 of {filteredIssues.length} issues
-                </p>
-              )}
-            </div>
-          )}
-
           {/* ── User Drill-Down Table ─────────────────────── */}
           <div className="bg-card border border-border rounded-lg p-6">
             <div className="flex items-center justify-between mb-4">
               <div>
                 <h2 className="text-lg font-semibold">
-                  {selectedStage
-                    ? `Users at: ${FUNNEL_STAGES.find(s => s.key === selectedStage)?.label}`
-                    : 'All Users in Funnel'}
+                  {selectedStage ? `Users: ${FUNNEL_STAGES.find(s => s.key === selectedStage)?.label}` : 'All Funnel Users'}
                 </h2>
                 <p className="text-xs text-muted-foreground mt-0.5">
                   {sortedUsers.length} user{sortedUsers.length !== 1 ? 's' : ''}
+                  {enriching && ' · loading names...'}
                   {selectedStage && (
-                    <button
-                      onClick={() => setSelectedStage(null)}
-                      className="ml-2 text-primary hover:underline"
-                    >
-                      Clear filter
-                    </button>
+                    <button onClick={() => setSelectedStage(null)} className="ml-2 text-primary hover:underline">Clear filter</button>
                   )}
                 </p>
               </div>
-              <div className="max-w-xs">
-                <input
-                  type="text"
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Search email, name, phone..."
-                  className="w-full px-3 py-1.5 text-sm bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
-                />
-              </div>
+              <input
+                type="text"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search email, name, phone..."
+                className="max-w-xs px-3 py-1.5 text-sm bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
+              />
             </div>
 
             <div className="overflow-x-auto">
@@ -760,11 +493,11 @@ export default function FlightRepricingFunnelPage() {
                     <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">User</th>
                     <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Stage</th>
                     <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Signed Up</th>
-                    <th className="px-3 py-2 text-center text-xs font-medium text-muted-foreground">Bookings</th>
+                    <th className="px-3 py-2 text-center text-xs font-medium text-muted-foreground">Flights</th>
+                    <th className="px-3 py-2 text-center text-xs font-medium text-muted-foreground">Hotels</th>
                     <th className="px-3 py-2 text-center text-xs font-medium text-muted-foreground">Watches</th>
-                    <th className="px-3 py-2 text-center text-xs font-medium text-muted-foreground">Opportunities</th>
-                    <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Opp Statuses</th>
-                    <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Time to Booking</th>
+                    <th className="px-3 py-2 text-center text-xs font-medium text-muted-foreground">Opps</th>
+                    <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Time to CWI</th>
                     <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Time to Opp</th>
                   </tr>
                 </thead>
@@ -772,101 +505,38 @@ export default function FlightRepricingFunnelPage() {
                   {sortedUsers.slice(0, 100).map(user => {
                     const info = userInfoMap.get(user.user_id);
                     const stage = getUserFunnelStage(user);
-                    const statuses = getOppStatusBreakdown(user);
-
                     return (
-                      <tr
-                        key={user.user_id}
-                        className="border-b border-border last:border-0 hover:bg-accent/30 transition-colors"
-                      >
-                        {/* User */}
+                      <tr key={user.user_id} className="border-b border-border last:border-0 hover:bg-accent/30 transition-colors">
                         <td className="px-3 py-2.5">
-                          <Link
-                            href={`/users-list/${user.user_id}`}
-                            className="text-sm text-primary hover:underline block truncate max-w-[200px]"
-                          >
+                          <Link href={`/users-list/${user.user_id}`} className="text-sm text-primary hover:underline block truncate max-w-[200px]">
                             {info?.name || user.email}
                           </Link>
-                          <div className="text-[10px] text-muted-foreground truncate max-w-[200px]">
-                            {info?.name ? user.email : ''}
-                          </div>
+                          {info?.name && <div className="text-[10px] text-muted-foreground truncate max-w-[200px]">{user.email}</div>}
                         </td>
-
-                        {/* Stage */}
-                        <td className="px-3 py-2.5">
-                          <StageBadge stage={stage} />
-                        </td>
-
-                        {/* Signed Up */}
-                        <td className="px-3 py-2.5 text-xs text-muted-foreground whitespace-nowrap">
-                          {timeAgo(user.signed_up)}
-                        </td>
-
-                        {/* Bookings */}
+                        <td className="px-3 py-2.5"><StageBadge stage={stage} /></td>
+                        <td className="px-3 py-2.5 text-xs text-muted-foreground whitespace-nowrap">{timeAgo(user.signed_up)}</td>
                         <td className="px-3 py-2.5 text-center">
-                          <span className={cn(
-                            'text-sm font-mono',
-                            user.flight_bookings > 0 ? 'text-foreground' : 'text-muted-foreground/50',
-                          )}>
+                          <span className={cn('text-sm font-mono', user.flight_bookings > 0 ? 'text-foreground' : 'text-muted-foreground/50')}>
                             {user.flight_bookings}
                           </span>
                         </td>
-
-                        {/* Watches */}
                         <td className="px-3 py-2.5 text-center">
-                          <span className={cn(
-                            'text-sm font-mono',
-                            user.flight_watches > 0 ? 'text-foreground' : 'text-muted-foreground/50',
-                          )}>
-                            {user.flight_watches}
+                          <span className={cn('text-sm font-mono', user.hotel_bookings > 0 ? 'text-foreground' : 'text-muted-foreground/50')}>
+                            {user.hotel_bookings}
                           </span>
                         </td>
-
-                        {/* Opportunities */}
                         <td className="px-3 py-2.5 text-center">
-                          <span className={cn(
-                            'text-sm font-mono',
-                            user.flight_opps > 0 ? 'text-foreground font-medium' : 'text-muted-foreground/50',
-                          )}>
-                            {user.flight_opps}
+                          <span className={cn('text-sm font-mono', (user.flight_watches + user.hotel_watches) > 0 ? 'text-foreground' : 'text-muted-foreground/50')}>
+                            {user.flight_watches + user.hotel_watches}
                           </span>
                         </td>
-
-                        {/* Opp Statuses */}
-                        <td className="px-3 py-2.5">
-                          <div className="flex flex-wrap gap-1">
-                            {statuses.length > 0 ? statuses.map(({ status, count }) => (
-                              <span key={status} className="inline-flex items-center">
-                                <StatusBadge status={status} />
-                                {count > 1 && <span className="text-[10px] text-muted-foreground ml-0.5">x{count}</span>}
-                              </span>
-                            )) : (
-                              <span className="text-xs text-muted-foreground/50">—</span>
-                            )}
-                          </div>
+                        <td className="px-3 py-2.5 text-center">
+                          <span className={cn('text-sm font-mono', (user.flight_opps + user.hotel_opps) > 0 ? 'text-foreground font-medium' : 'text-muted-foreground/50')}>
+                            {user.flight_opps + user.hotel_opps}
+                          </span>
                         </td>
-
-                        {/* Time to Booking */}
-                        <td className="px-3 py-2.5 text-xs text-muted-foreground whitespace-nowrap">
-                          {user.hours_to_first_booking !== null
-                            ? user.hours_to_first_booking < 1
-                              ? '<1h'
-                              : user.hours_to_first_booking < 24
-                                ? `${Math.round(user.hours_to_first_booking)}h`
-                                : `${Math.round(user.hours_to_first_booking / 24)}d`
-                            : '—'}
-                        </td>
-
-                        {/* Time to Opp */}
-                        <td className="px-3 py-2.5 text-xs text-muted-foreground whitespace-nowrap">
-                          {user.hours_to_first_opp !== null
-                            ? user.hours_to_first_opp < 1
-                              ? '<1h'
-                              : user.hours_to_first_opp < 24
-                                ? `${Math.round(user.hours_to_first_opp)}h`
-                                : `${Math.round(user.hours_to_first_opp / 24)}d`
-                            : '—'}
-                        </td>
+                        <td className="px-3 py-2.5 text-xs text-muted-foreground whitespace-nowrap">{formatHours(user.hours_to_first_booking)}</td>
+                        <td className="px-3 py-2.5 text-xs text-muted-foreground whitespace-nowrap">{formatHours(user.hours_to_first_opp)}</td>
                       </tr>
                     );
                   })}
@@ -879,9 +549,7 @@ export default function FlightRepricingFunnelPage() {
               </div>
             )}
             {sortedUsers.length > 100 && (
-              <p className="text-xs text-muted-foreground mt-2">
-                Showing first 100 of {sortedUsers.length} users
-              </p>
+              <p className="text-xs text-muted-foreground mt-2">Showing first 100 of {sortedUsers.length} users</p>
             )}
           </div>
         </>
